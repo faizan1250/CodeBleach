@@ -1,5 +1,13 @@
 export type Language = "typescript" | "tsx" | "javascript";
 
+export type DiffSkipReason =
+  | "binary"
+  | "generated"
+  | "too-large"
+  | "ignored"
+  | "deleted"
+  | "lockfile";
+
 export interface DiffLine {
   kind: "add" | "del" | "ctx";
   oldLine: number | null;
@@ -30,7 +38,7 @@ export interface ChangedFile {
   oldPath: string | null;
   status: "added" | "modified" | "deleted" | "renamed";
   language: Language | null;
-  skipReason?: string | undefined;
+  skipReason?: DiffSkipReason | undefined;
   hunks: DiffHunk[];
   commentableLines: number[];
   symbols: ChangedSymbol[];

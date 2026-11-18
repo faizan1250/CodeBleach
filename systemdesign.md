@@ -63,14 +63,15 @@ event → resolve SHAs → load config → git diff (local) → filter files
 ## 4. Module designs
 
 ### 4.1 Diff Engine (`src/diff`)
-- **Source of truth:** local `git diff --find-renames --unified=3 <merge-base>..<head>` (needs `fetch-depth: 0` or explicit SHA fetch). Don't rely on the REST `patch` field (truncated for large files).
+- **Source of truth:** local Git object database at `<mergeBase>` and `<head>` (needs `fetch-depth: 0` or explicit SHA fetch). Don't rely on the REST `patch` field (truncated for large files). The working tree may be dirty and must not affect output; sizes/headers come from head blobs.
+- Both diff invocations pin `--diff-algorithm=myers --inter-hunk-context=0 --find-renames=50%` (metadata and patch alike) so user Git config cannot change output; copy detection stays off (ADR 0008).
 - Parse unified diff into `ChangedFile[]` → `DiffHunk[]` → `DiffLine[]` with `oldLine`, `newLine`, and GitHub `position`.
 - **Valid comment targets** = lines on the RIGHT side present in a hunk (added or context). Compute `Set<number>` per file (`commentableLines`).
 - Use the review-comment API's `line` + `side: "RIGHT"` + `commit_id`; keep `position` as computed fallback.
-- Filters (each yields `skipReason`): binary, deleted-only, lockfiles, `dist/`, `*.min.*`, generated (header markers `@generated`, `DO NOT EDIT`), files > N KB / N changed lines (config-driven), unsupported language (still listed, but no symbols).
+- Filters (each yields a `DiffSkipReason`, precedence `deleted > binary > lockfile > ignored > too-large > generated`): binary, deleted-only, lockfiles, `dist/`, `*.min.*`, generated (header markers `@generated`, `DO NOT EDIT`), files > N KB / N changed lines (config-driven), unsupported language (still listed, but no symbols).
 - Renames: carry `oldPath`; review only if content changed.
-- **Symbol mapping:** parse head file with tree-sitter, collect function/method/class nodes with line ranges, intersect with `changedLines` (added lines) → `ChangedSymbol[]`. Multiple hunks in one symbol merge into one symbol with all `changedLines`. Changed lines outside any symbol → synthetic `module-level` symbol.
-- **Initial languages:** TypeScript/TSX/JavaScript only. Add languages via a `LanguageAdapter` (see 4.2).
+- **Symbols (Phase 2):** one synthetic module-level symbol per eligible supported file with content hunks (`{ name: "<module>", kind: "module" }`, head-line range, added head lines); no AST parsing. Phase 3 refines it into real function/method/class symbols with Tree-sitter (ADR 0005).
+- **Initial languages:** TypeScript/TSX/JavaScript via case-insensitive extension mapping; anything else gets `language: null`. Add languages via a `LanguageAdapter` (see 4.2, Phase 3).
 
 ### 4.2 Context Engine (`src/context`)
 On-demand, per PR, **no persistent index** in MVP.
@@ -158,11 +159,14 @@ export interface ChangedFile {
   path: string; oldPath: string | null;
   status: "added" | "modified" | "deleted" | "renamed";
   language: Language | null;
-  skipReason?: "binary" | "generated" | "too-large" | "ignored" | "deleted" | "lockfile";
+  skipReason?: DiffSkipReason;
   hunks: DiffHunk[];
   commentableLines: number[];
   symbols: ChangedSymbol[];
 }
+// Closed union (ADR 0006); new reasons are a contract change, not an engine edit.
+export type DiffSkipReason =
+  | "binary" | "generated" | "too-large" | "ignored" | "deleted" | "lockfile";
 export interface DiffResult { baseSha: string; headSha: string; mergeBase: string; files: ChangedFile[] }
 
 // ---- Context ----
@@ -250,6 +254,8 @@ path_overrides:
 ```
 
 Behavior: missing file → defaults. Invalid file → `ConfigError` (CLI exit 2); in Action, publish a single comment describing the config error rather than silently reviewing with defaults. User `ignore.paths` extend (never replace) the built-in defaults. A `.reviewer.yml` symlink is followed only when its resolved target stays inside the resolved repository root and is a regular file; outside targets, dangling links, loops, and directories are config errors, never silent defaults. Unknown keys → error (catches typos). Evolution: `version` field + `migrate(raw)` registry chain; new fields are always optional with defaults.
+
+Phase 2 addition (P2-06, ADR 0007): optional `review.max_file_size_kb` (default 500 KB) measured from the head-commit blob; over-limit files skip with `"too-large"`. Configured glob fields are validated against the documented `*`/`**`/`**/`/`?` subset at load time.
 
 ---
 
@@ -360,7 +366,7 @@ evals/                 cases/, run.ts   (Phase 8)
 | Phase | Goal | Done when |
 |---|---|---|
 | 1 Foundation | Bun/TS repo, types, config loader, CLI, logger, errors, provider interface, walking-skeleton pipeline with fakes, CI | `bun test` + typecheck green; `review --dry-run` produces `run.json` via fakes |
-| 2 Diff Engine | git diff → `DiffResult` with positions, filters, symbols | Fixture diffs map to correct lines/symbols |
+| 2 Diff Engine | deterministic git diff → `DiffResult` with positions, filters, skip reasons, one synthetic module symbol per eligible file | Fixture diffs map to correct lines/positions/symbols; identical output under hostile Git config |
 | 3 Context Engine | TS adapter, definitions, callers, callees, tests, ranking, budget | `ReviewUnit`s for a fixture repo contain expected items within budget |
 | 4 Review Engine | OpenCode spike → provider, prompts, Zod parse, repair retry | Seeded-bug fixtures yield findings; garbage output handled |
 | 5 Validation | Deterministic checks, dedupe, optional LLM check | Hallucinated file/line/evidence rejected in tests |
