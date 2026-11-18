@@ -112,6 +112,7 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
     config = loaded.config;
     configSource = loaded.source;
     const resolved = config;
+    await persist("running");
 
     const diffResult = await runStage(
       "diff",
