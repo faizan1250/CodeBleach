@@ -13,7 +13,9 @@ usage:
   codebleach review --demo --dry-run
   codebleach config validate [--repo .]
   codebleach config print [--repo .]
-  codebleach version`;
+  codebleach version
+
+env fallbacks: REVIEWER_BASE_SHA, REVIEWER_HEAD_SHA, REVIEWER_LOG_LEVEL`;
 
 const LOG_LEVELS: readonly LogLevel[] = ["debug", "info", "warn", "error"];
 
