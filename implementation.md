@@ -390,8 +390,9 @@ function loadConfig(repoDir: string): Promise<Result<ConfigLoadResult, ReviewerE
 - YAML syntax error → `CONFIG_INVALID` with the config path and line/column when the parser provides them.
 - Schema error → `CONFIG_INVALID` with readable dotted paths (for example, `review.confidence_threshold: expected a number between 0 and 1`).
 - Read only `.reviewer.yml` at the repository root.
-- Resolve and verify the config file path remains inside the supplied repository directory; reject a symlink that points outside the repo.
-- A dangling `.reviewer.yml` symlink is `CONFIG_INVALID`, not defaults.
+- A `.reviewer.yml` symlink is allowed iff its fully resolved target stays inside the fully resolved repository root (checked with `relative()`, not a string prefix): relative, nested-relative, and absolute inner targets are accepted.
+- A symlink pointing outside the repo, a dangling symlink, a symlink loop, or a symlink to a directory is `CONFIG_INVALID`, not defaults. Only a genuinely missing file returns defaults.
+- The config target must be a regular file in the canonical root; verify containment before reading and read from the canonical target.
 - Do not silently fall back to defaults when a present config file is invalid.
 - Verify `Bun.YAML.parse` exists in the pinned Bun version with a test. Add a YAML dependency only if that test proves it is unavailable.
 
@@ -409,7 +410,8 @@ Create `.reviewer.yml.example` with a valid v1 configuration and comments explai
 - Duplicate rule IDs fail.
 - `version: 2` returns `CONFIG_UNSUPPORTED_VERSION`.
 - Malformed YAML returns `CONFIG_INVALID` with a useful message.
-- A config symlink escaping `repoDir` is rejected.
+- A config symlink escaping `repoDir` is rejected; inner-repo symlinks (relative, nested, absolute) are accepted.
+- Dangling symlinks, symlink loops, and directory targets are rejected; only a missing file returns defaults.
 - `config print` can serialize the resolved config as JSON.
 
 ---
@@ -708,7 +710,7 @@ At minimum, include the following coverage before declaring Phase 1 complete.
 | Result | `ok` and `err` constructors preserve discriminated-union behavior |
 | Redaction | Exact values; GitHub token; API key; AWS key; bearer header; PEM block; nested object/array; sensitive key |
 | Logger | Valid JSONL, stderr output, run ID, reserved-key precedence, redacted message and fields |
-| Config | Missing file; valid minimal/full file; example file; typo key; wrong type; bad threshold; duplicate IDs; unsupported version; malformed YAML; escaping symlink; dangling symlink |
+| Config | Missing file; valid minimal/full file; example file; typo key; wrong type; bad threshold; duplicate IDs; unsupported version; malformed YAML; escaping/outside symlink; dangling symlink; symlink loop; directory target; inner-repo symlink accepted |
 | FakeProvider | Ordered match; call recording; string response; object response serialization; thrown error; unmatched script |
 | JSON helper | Valid JSON; fenced JSON; invalid JSON repair; schema repair; second failure; provider error propagation |
 | Pipeline | Config stage timing; config-immediate persist; stage order; output counts; dry-run skips publisher; config failure; stage failure incl. diff failure keeping config-completed; artifact update; recursive redaction incl. caller-supplied secrets |
