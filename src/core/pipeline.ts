@@ -99,14 +99,18 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
   };
 
   try {
-    const load = deps.loadConfig ?? defaultLoadConfig;
-    const loaded = await load(input.repoDir);
-    if (!loaded.ok) {
-      await persist("failed", loaded.error);
-      throw loaded.error;
-    }
-    config = loaded.value.config;
-    configSource = loaded.value.source;
+    const loaded = await runStage(
+      "config",
+      async () => {
+        const load = deps.loadConfig ?? defaultLoadConfig;
+        const result = await load(input.repoDir);
+        if (!result.ok) throw result.error;
+        return result.value;
+      },
+      () => undefined,
+    );
+    config = loaded.config;
+    configSource = loaded.source;
     const resolved = config;
 
     const diffResult = await runStage(
