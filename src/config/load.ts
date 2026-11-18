@@ -29,27 +29,6 @@ function formatIssues(
   return invalid(path, details);
 }
 
-// Bun.YAML.parse throws a SyntaxError carrying non-enumerable numeric
-// `line`/`column` (plus `originalLine`/`originalColumn`); the shape is
-// unpinned, so narrow defensively and never throw while formatting.
-function yamlLocation(error: unknown): string | null {
-  if (typeof error !== "object" || error === null) return null;
-  const record = error as Record<string, unknown>;
-  const line = record["line"] ?? record["originalLine"];
-  const column = record["column"] ?? record["originalColumn"];
-  if (
-    typeof line !== "number" ||
-    !Number.isInteger(line) ||
-    line <= 0 ||
-    typeof column !== "number" ||
-    !Number.isInteger(column) ||
-    column <= 0
-  ) {
-    return null;
-  }
-  return `${line}:${column}`;
-}
-
 /** Load `.reviewer.yml` from the repo root; missing file resolves to defaults. */
 export async function loadConfig(repoDir: string): Promise<Result<ConfigLoadResult, ReviewerError>> {
   const repoRoot = resolve(repoDir);
@@ -123,12 +102,7 @@ export async function loadConfig(repoDir: string): Promise<Result<ConfigLoadResu
     raw = Bun.YAML.parse(text) as unknown;
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    const location = yamlLocation(error);
-    const message =
-      location === null
-        ? `${configPath}: invalid YAML: ${detail}`
-        : `${configPath}:${location}: invalid YAML: ${detail}`;
-    return err(new ReviewerError({ code: "CONFIG_INVALID", message, cause: error }));
+    return err(invalid(configPath, `invalid YAML: ${detail}`, error));
   }
 
   let versioned: unknown;
