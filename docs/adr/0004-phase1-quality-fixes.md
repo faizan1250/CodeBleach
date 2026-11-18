@@ -33,13 +33,15 @@ suffixes for prefixed variants such as `OPENCODE_API_KEY`. Telemetry keys
 `totalTokens`) are no longer redacted. Exact-secret and token-pattern
 redaction are unchanged; logger and artifact share the one sanitizer.
 
-### 3. YAML errors carry `path:line:col`
+### 3. YAML errors report `path: msg` only (no source coords)
 
-`Bun.YAML.parse` throws a `SyntaxError` with non-enumerable numeric
-`line`/`column` (falling back to `originalLine`/`originalColumn`). `loadConfig`
-formats `path:line:col: invalid YAML: <msg>` when present and the previous
-`path: invalid YAML: <msg>` otherwise. The shape is unpinned, so the helper
-narrows `unknown` defensively and never throws. Exit code stays `2`.
+`Bun.YAML.parse` throws a `SyntaxError` whose numeric `line`/`column`
+(`originalLine`/`originalColumn`) track the JS call site, not the YAML
+source location — the same malformed input parsed from different call sites
+yields different coords, so they must not be displayed as source coords.
+`loadConfig` formats `path: invalid YAML: <msg>`, preserving the parser's
+original message with `cause` chaining. Exit code stays `2`. A future source
+location may be added if a reliable one becomes available.
 
 ### 4. Migrations are a version registry, still v1-only
 

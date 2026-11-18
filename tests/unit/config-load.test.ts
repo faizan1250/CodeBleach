@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../../src/config/load.ts";
 import { DEFAULT_IGNORE_PATHS } from "../../src/config/defaults.ts";
+import { exitCodeForError } from "../../src/cli/exit-codes.ts";
 import type { ReviewerError } from "../../src/core/errors.ts";
 
 const tempDirs: string[] = [];
@@ -134,15 +135,42 @@ describe("loadConfig", () => {
     expect(result.error.code).toBe("CONFIG_UNSUPPORTED_VERSION");
   });
 
-  test("malformed yaml fails invalid with path", async () => {
+  test("malformed yaml reports path and parser message without coords", async () => {
     const repoDir = await makeRepo();
     await writeConfig(repoDir, "malformed.yml");
     const result = await loadConfig(repoDir);
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("unreachable");
     expect(codeOf(result)).toBe("CONFIG_INVALID");
-    expect(result.error.message).toContain(".reviewer.yml");
-    expect(result.error.message).toMatch(/:\d+:\d+:/);
+    expect(result.error.message).toContain(".reviewer.yml: invalid YAML: ");
+    expect(result.error.message).not.toMatch(/\.reviewer\.yml:\d+:\d+:/);
+    const detail = result.error.message.split("invalid YAML: ")[1];
+    expect(detail !== undefined && detail.length > 0).toBe(true);
+    expect(result.error.cause).toBeInstanceOf(Error);
+    expect(exitCodeForError(result.error)).toBe(2);
+  });
+
+  test("malformed yaml at different lines reports no call-site coords", async () => {
+    const repoDir = await makeRepo();
+    const bodies = [
+      "bad: [oops\n",
+      "# pad\n# pad\n# pad\nbad: [oops\n",
+      "# pad\n# pad\n# pad\n# pad\n# pad\n# pad\nbad: [oops\n",
+    ];
+    const prefixes = new Set<string>();
+    for (const body of bodies) {
+      await writeFile(join(repoDir, ".reviewer.yml"), body);
+      const result = await loadConfig(repoDir);
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("unreachable");
+      expect(codeOf(result)).toBe("CONFIG_INVALID");
+      expect(result.error.message).toContain(".reviewer.yml: invalid YAML: ");
+      expect(result.error.message).not.toMatch(/\.reviewer\.yml:\d+:\d+:/);
+      const prefix = result.error.message.split("invalid YAML:")[0];
+      expect(prefix !== undefined).toBe(true);
+      if (prefix !== undefined) prefixes.add(prefix);
+    }
+    expect(prefixes.size).toBe(1);
   });
 
   // Windows requires elevated privilege for file symlinks; Linux CI covers this case.
