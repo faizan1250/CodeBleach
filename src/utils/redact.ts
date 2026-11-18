@@ -9,15 +9,32 @@ const TOKEN_PATTERNS: RegExp[] = [
   /sk-[A-Za-z0-9_-]{8,}/g,
 ];
 
-const SENSITIVE_KEY_PARTS = ["token", "password", "secret", "api_key", "apikey", "authorization"];
+const SENSITIVE_KEYS: ReadonlySet<string> = new Set([
+  "token",
+  "password",
+  "secret",
+  "authorization",
+  "privatekey",
+  "clientsecret",
+  "apikey",
+  "apitoken",
+  "authtoken",
+  "accesstoken",
+  "refreshtoken",
+  "opencodeapikey",
+]);
 
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// Normalized suffixes covering prefixed variants such as OPENCODE_API_KEY.
+const SENSITIVE_SUFFIXES: readonly string[] = ["apikey", "apisecret", "apitoken"];
+
+function normalizeKey(key: string): string {
+  return key.toLowerCase().replace(/[\s_-]/g, "");
 }
 
 function isSensitiveKey(key: string): boolean {
-  const lower = key.toLowerCase().replace(/[_-]/g, "");
-  return SENSITIVE_KEY_PARTS.some((part) => lower.includes(part.replace(/[_-]/g, "")));
+  const normalized = normalizeKey(key);
+  if (SENSITIVE_KEYS.has(normalized)) return true;
+  return SENSITIVE_SUFFIXES.some((suffix) => normalized.endsWith(suffix));
 }
 
 /** Replace exact secrets (longest first) and known token patterns with [REDACTED]. */
