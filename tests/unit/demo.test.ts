@@ -26,12 +26,15 @@ describe("demo engines", () => {
     const units = await demoContextEngine.build(diff, config, ".");
     expect(units).toHaveLength(1);
     expect(units[0]?.file.path).toBe(diff.files[0]?.path);
+    expect(units[0]?.file).toBe(diff.files[0]);
+    expect(units[0]?.symbol).toBe(diff.files[0]?.symbols[0]);
 
     const findings = await demoReviewEngine.review(units, config);
     expect(findings).toHaveLength(2);
 
     const validated = await demoValidationEngine.validate(findings, diff, units, config);
     expect(validated.filter((v) => v.status === "accepted")).toHaveLength(1);
+    expect(validated[0]?.finding).toBe(findings[0]);
 
     const result = await demoPublisher.publish(
       validated,

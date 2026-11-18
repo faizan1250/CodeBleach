@@ -49,6 +49,12 @@ describe("runPipeline", () => {
       expect(artifact.findings).toHaveLength(1);
       expect(artifact.validated).toHaveLength(1);
       expect(artifact.publishResult).toBeNull();
+      expect(artifact.units[0]).toMatchObject({ id: "unit-1", file: { path: "src/a.ts" } });
+      expect(artifact.findings[0]).toMatchObject({ id: "finding-1", file: "src/a.ts" });
+      expect(artifact.validated[0]).toMatchObject({
+        status: "accepted",
+        finding: { id: "finding-1", file: "src/a.ts" },
+      });
     } finally {
       await cleanup();
     }

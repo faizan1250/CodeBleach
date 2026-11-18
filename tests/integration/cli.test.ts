@@ -116,7 +116,8 @@ describe("cli", () => {
         schemaVersion: number;
         stages: Array<{ name: string; status: string; count?: number }>;
         findings: unknown[];
-        validated: unknown[];
+        validated: Array<{ status: string; finding: { id: string; file: string } }>;
+        units: Array<{ id: string; file: { path: string }; symbol: { name: string } }>;
         publishResult: null;
       };
       expect(artifact.status).toBe("completed");
@@ -131,6 +132,9 @@ describe("cli", () => {
       expect(artifact.findings).toHaveLength(2);
       expect(artifact.validated).toHaveLength(2);
       expect(artifact.publishResult).toBeNull();
+      expect(artifact.validated[0]?.finding).toMatchObject({ id: "demo-finding-1" });
+      expect(artifact.units[0]?.file).toMatchObject({ path: "src/demo.ts" });
+      expect(artifact.units[0]?.symbol).toMatchObject({ name: "greet" });
     } finally {
       await cleanup();
     }
