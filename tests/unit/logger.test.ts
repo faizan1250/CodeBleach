@@ -56,4 +56,15 @@ describe("logger", () => {
     expect(line.err.name).toBe("Error");
     expect(line.err.message).not.toContain("ghp_abcDEF123");
   });
+
+  test("reserved keys win over user fields", () => {
+    captureStderr();
+    const logger = createLogger({ level: "debug", runId: "run-1" });
+    logger.info("real", { runId: "spoofed", ts: "spoofed-ts", level: "spoofed", msg: "spoofed" });
+    const line = JSON.parse(captured.trim()) as Record<string, unknown>;
+    expect(line["runId"]).toBe("run-1");
+    expect(line["level"]).toBe("info");
+    expect(line["msg"]).toBe("real");
+    expect(line["ts"]).not.toBe("spoofed-ts");
+  });
 });
