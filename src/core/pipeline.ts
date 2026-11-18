@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { loadConfig as defaultLoadConfig } from "../config/load.ts";
 import type { ResolvedConfig } from "../config/schema.ts";
 import { ReviewerError } from "./errors.ts";
@@ -31,7 +30,7 @@ function toReviewerError(error: unknown, stage: string): ReviewerError {
 
 /** Run config → diff → context → review → validation → publish, persisting an artifact. */
 export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Promise<RunSummary> {
-  const runId = randomUUID();
+  const runId = input.runId;
   const startedAt = new Date().toISOString();
   const stages: StageResult[] = [];
 

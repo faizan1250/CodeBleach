@@ -27,3 +27,16 @@ export const DEFAULT_IGNORE_PATHS: readonly string[] = [
 ];
 
 export const DEFAULT_LANGUAGE = "typescript" as const;
+
+/**
+ * Merge user-supplied ignore paths after the built-in defaults.
+ * Defaults come first, then user extras in file order; duplicates drop.
+ * An absent or empty user list still yields the full defaults.
+ */
+export function mergeIgnorePaths(userPaths: readonly string[] | undefined): string[] {
+  const merged = [...DEFAULT_IGNORE_PATHS];
+  for (const entry of userPaths ?? []) {
+    if (!merged.includes(entry)) merged.push(entry);
+  }
+  return merged;
+}

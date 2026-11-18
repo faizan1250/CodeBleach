@@ -151,4 +151,49 @@ describe("cli", () => {
       await cleanup();
     }
   });
+
+  test("demo dry run uses one runId across logs and artifact", async () => {
+    const { dir, cleanup } = await makeRepo();
+    try {
+      const result = await runCli(["review", "--demo", "--dry-run"], dir);
+      expect(result.code).toBe(0);
+      const artifact = JSON.parse(await readFile(join(dir, ".reviewer-out", "run.json"), "utf8")) as {
+        runId: string;
+      };
+      const logRunIds = result.stderr
+        .split("\n")
+        .filter((line) => line.trim().length > 0)
+        .map((line) => {
+          try {
+            return JSON.parse(line) as { runId?: unknown };
+          } catch {
+            return {};
+          }
+        })
+        .filter((line) => typeof line.runId === "string")
+        .map((line) => line.runId as string);
+      expect(logRunIds.length).toBeGreaterThan(0);
+      expect(new Set(logRunIds).size).toBe(1);
+      expect(logRunIds[0]).toBe(artifact.runId);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("independent demo runs use distinct runIds", async () => {
+    const { dir, cleanup } = await makeRepo();
+    try {
+      const readRunId = async (): Promise<string> => {
+        const result = await runCli(["review", "--demo", "--dry-run"], dir);
+        expect(result.code).toBe(0);
+        const artifact = JSON.parse(
+          await readFile(join(dir, ".reviewer-out", "run.json"), "utf8"),
+        ) as { runId: string };
+        return artifact.runId;
+      };
+      expect(await readRunId()).not.toBe(await readRunId());
+    } finally {
+      await cleanup();
+    }
+  });
 });

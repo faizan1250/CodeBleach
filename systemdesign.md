@@ -235,7 +235,7 @@ review:
   max_findings: 10
   max_changed_lines_per_file: 1500
 ignore:
-  paths: ["**/*.lock", "dist/**", "**/*.generated.*"]
+  paths: ["**/*.lock", "dist/**", "**/*.generated.*"]   # additive: merged over built-in defaults, see ADR 0004
 repository:
   language: typescript
 rules:                                # explicit knowledge
@@ -249,7 +249,7 @@ path_overrides:
     review: { categories: { performance: false } }
 ```
 
-Behavior: missing file → defaults. Invalid file → `ConfigError` (CLI exit 2); in Action, publish a single comment describing the config error rather than silently reviewing with defaults. A `.reviewer.yml` symlink is followed only when its resolved target stays inside the resolved repository root and is a regular file; outside targets, dangling links, loops, and directories are config errors, never silent defaults. Unknown keys → error (catches typos). Evolution: `version` field + `migrate(raw)` chain; new fields are always optional with defaults.
+Behavior: missing file → defaults. Invalid file → `ConfigError` (CLI exit 2); in Action, publish a single comment describing the config error rather than silently reviewing with defaults. User `ignore.paths` extend (never replace) the built-in defaults. A `.reviewer.yml` symlink is followed only when its resolved target stays inside the resolved repository root and is a regular file; outside targets, dangling links, loops, and directories are config errors, never silent defaults. Unknown keys → error (catches typos). Evolution: `version` field + `migrate(raw)` registry chain; new fields are always optional with defaults.
 
 ---
 
@@ -298,7 +298,7 @@ Spike deliverable (`docs/opencode-spike.md`): chosen surface, auth, model ids, w
 ## 9. Non-functional
 
 - **Errors:** `ReviewerError{ code, retryable, cause }`. `Result<T,E>` for expected failures at module boundaries (config load, parse); throw for bugs. Exit codes: `0` ok, `1` runtime failure, `2` config/usage error.
-- **Logging:** JSON lines to stderr, levels `debug|info|warn|error`, `runId` on every line, redaction built in. Human-readable results go to stdout.
+- **Logging:** JSON lines to stderr, levels `debug|info|warn|error`, one CLI-minted `runId` shared by every line and the run artifact, redaction built in. Human-readable results go to stdout.
 - **Reliability:** per-call timeout + abort, bounded retries (exp backoff + jitter) only on retryable errors, partial-failure tolerant (a failed unit ≠ failed run), head-SHA recheck before publish.
 - **Cost:** skip irrelevant files, token budgets, batch small units, cache LLM responses by `hash(prompt+model)` in `.reviewer-cache/` (dev/eval only at first), incremental re-review on `synchronize` = only changed files since last reviewed SHA (Phase 8).
 

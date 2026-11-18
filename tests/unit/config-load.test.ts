@@ -72,6 +72,7 @@ describe("loadConfig", () => {
     expect(result.value.config.review.severity_threshold).toBe("high");
     expect(result.value.config.repository.language).toBe("tsx");
     expect(result.value.config.rules).toHaveLength(1);
+    expect(result.value.config.ignore.paths).toEqual([...DEFAULT_IGNORE_PATHS, "gen/**"]);
   });
 
   test("example config parses", async () => {
@@ -82,6 +83,7 @@ describe("loadConfig", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("unreachable");
     expect(result.value.config.rules.map((rule) => rule.id)).toEqual(["arch-001"]);
+    expect(result.value.config.ignore.paths).toEqual([...DEFAULT_IGNORE_PATHS]);
   });
 
   test("typo key fails with dotted path", async () => {
@@ -119,6 +121,8 @@ describe("loadConfig", () => {
     if (result.ok) throw new Error("unreachable");
     expect(codeOf(result)).toBe("CONFIG_INVALID");
     expect(result.error.message).toContain("dup");
+    expect(result.error.message).toContain("rules: duplicate");
+    expect(result.error.message).not.toContain("rules.rules");
   });
 
   test("version 2 fails unsupported", async () => {
@@ -138,6 +142,7 @@ describe("loadConfig", () => {
     if (result.ok) throw new Error("unreachable");
     expect(codeOf(result)).toBe("CONFIG_INVALID");
     expect(result.error.message).toContain(".reviewer.yml");
+    expect(result.error.message).toMatch(/:\d+:\d+:/);
   });
 
   // Windows requires elevated privilege for file symlinks; Linux CI covers this case.
