@@ -29,4 +29,4 @@ Writes a synthetic run artifact to `.reviewer-out/run.json`.
 ## Docs
 
 - Architecture: `systemdesign.md`
-- Phase 1 plan: `implementation (3).md`
+- Phase 1 plan: `implementation.md`

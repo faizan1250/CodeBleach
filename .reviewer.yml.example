@@ -1,0 +1,48 @@
+# CodeBleach configuration (v1). Unknown keys are rejected, so keep to this schema.
+version: 1
+
+review:
+  enabled: true
+  # Which finding categories the reviewer may report.
+  categories:
+    bugs: true
+    security: true
+    performance: false
+    concurrency: true
+  # Findings below these thresholds are discarded (but logged to the artifact).
+  severity_threshold: medium
+  confidence_threshold: 0.85
+  # Per-category threshold overrides.
+  category_overrides:
+    security:
+      confidence_threshold: 0.7
+  # Cap on published comments per review; overflow goes in the summary.
+  max_findings: 10
+  # Files with more changed lines than this are skipped with a reason.
+  max_changed_lines_per_file: 1500
+
+ignore:
+  paths:
+    - "dist/**"
+    - "build/**"
+
+# Primary language of the repository.
+repository:
+  language: typescript
+
+# Explicit repo rules. Cited by id in findings; violations may use the rule severity.
+rules:
+  - id: arch-001
+    kind: architecture
+    text: "Controllers must not contain business logic."
+    paths:
+      - "src/controllers/**"
+    severity: medium
+
+# Selective overrides applied to matching paths.
+path_overrides:
+  - paths:
+      - "tests/**"
+    review:
+      categories:
+        performance: false

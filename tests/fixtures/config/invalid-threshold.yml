@@ -1,0 +1,3 @@
+version: 1
+review:
+  confidence_threshold: 2

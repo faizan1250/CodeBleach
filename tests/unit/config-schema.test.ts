@@ -1,0 +1,80 @@
+import { describe, expect, test } from "bun:test";
+import { ConfigFileSchema } from "../../src/config/schema.ts";
+import {
+  DEFAULT_CONFIDENCE_THRESHOLD,
+  DEFAULT_IGNORE_PATHS,
+  DEFAULT_MAX_FINDINGS,
+} from "../../src/config/defaults.ts";
+
+describe("config schema", () => {
+  test("empty object resolves to full defaults", () => {
+    const config = ConfigFileSchema.parse({});
+    expect(config.version).toBe(1);
+    expect(config.review.enabled).toBe(true);
+    expect(config.review.severity_threshold).toBe("medium");
+    expect(config.review.confidence_threshold).toBe(DEFAULT_CONFIDENCE_THRESHOLD);
+    expect(config.review.max_findings).toBe(DEFAULT_MAX_FINDINGS);
+    expect(config.review.categories).toEqual({
+      bugs: true,
+      security: true,
+      performance: false,
+      concurrency: true,
+    });
+    expect(config.ignore.paths).toEqual([...DEFAULT_IGNORE_PATHS]);
+    expect(config.repository.language).toBe("typescript");
+    expect(config.rules).toEqual([]);
+    expect(config.path_overrides).toEqual([]);
+  });
+
+  test("accepts full config", () => {
+    const config = ConfigFileSchema.parse({
+      version: 1,
+      review: {
+        enabled: true,
+        categories: { bugs: true, security: true, performance: true, concurrency: false },
+        severity_threshold: "high",
+        confidence_threshold: 0.7,
+        category_overrides: { security: { confidence_threshold: 0.6 } },
+        max_findings: 5,
+        max_changed_lines_per_file: 500,
+      },
+      ignore: { paths: ["gen/**"] },
+      repository: { language: "tsx" },
+      rules: [{ id: "arch-001", kind: "architecture", text: "No logic in controllers." }],
+      path_overrides: [{ paths: ["tests/**"], review: { categories: { performance: false } } }],
+    });
+    expect(config.rules).toHaveLength(1);
+    expect(config.path_overrides).toHaveLength(1);
+  });
+
+  test("rejects unknown keys at every level", () => {
+    expect(() => ConfigFileSchema.parse({ bogus: true })).toThrow();
+    expect(() => ConfigFileSchema.parse({ review: { bogus: true } })).toThrow();
+    expect(() =>
+      ConfigFileSchema.parse({ review: { category_overrides: { bogus: {} } } }),
+    ).toThrow();
+  });
+
+  test("rejects bad thresholds and limits", () => {
+    expect(() => ConfigFileSchema.parse({ review: { confidence_threshold: 2 } })).toThrow();
+    expect(() => ConfigFileSchema.parse({ review: { max_findings: 0 } })).toThrow();
+    expect(() =>
+      ConfigFileSchema.parse({ review: { category_overrides: { bugs: { confidence_threshold: -1 } } } }),
+    ).toThrow();
+  });
+
+  test("rejects duplicate rule ids and empty rule text", () => {
+    const rule = { id: "dup", kind: "convention", text: "Be tidy." };
+    expect(() => ConfigFileSchema.parse({ rules: [rule, rule] })).toThrow();
+    expect(() =>
+      ConfigFileSchema.parse({ rules: [{ id: "x", kind: "convention", text: "" }] }),
+    ).toThrow();
+  });
+
+  test("rejects unsupported language and rule kind", () => {
+    expect(() => ConfigFileSchema.parse({ repository: { language: "python" } })).toThrow();
+    expect(() =>
+      ConfigFileSchema.parse({ rules: [{ id: "x", kind: "nonsense", text: "t" }] }),
+    ).toThrow();
+  });
+});
