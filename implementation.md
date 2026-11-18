@@ -706,12 +706,13 @@ At minimum, include the following coverage before declaring Phase 1 complete.
 | Error primitives | Error code, retryability, message, and cause are preserved |
 | Result | `ok` and `err` constructors preserve discriminated-union behavior |
 | Redaction | Exact values; GitHub token; API key; AWS key; bearer header; PEM block; nested object/array; sensitive key |
-| Logger | Valid JSONL, stderr output, run ID, redacted message and fields |
-| Config | Missing file; valid minimal/full file; example file; typo key; wrong type; bad threshold; duplicate IDs; unsupported version; malformed YAML; escaping symlink |
+| Logger | Valid JSONL, stderr output, run ID, reserved-key precedence, redacted message and fields |
+| Config | Missing file; valid minimal/full file; example file; typo key; wrong type; bad threshold; duplicate IDs; unsupported version; malformed YAML; escaping symlink; dangling symlink |
 | FakeProvider | Ordered match; call recording; string response; object response serialization; thrown error; unmatched script |
 | JSON helper | Valid JSON; fenced JSON; invalid JSON repair; schema repair; second failure; provider error propagation |
-| Pipeline | Stage order; output counts; dry-run skips publisher; config failure; stage failure; artifact update; recursive redaction |
-| CLI | Success/error exit codes; missing args; unknown flags; config commands; version; demo artifact |
+| Pipeline | Config stage timing; stage order; output counts; dry-run skips publisher; config failure; stage failure; artifact update; recursive redaction incl. caller-supplied secrets |
+| CLI | Centralized exit mapper; success/error exit codes; missing args; unknown flags; config commands; version; demo artifact |
+| Demo | Stable dataset; accepted evidence present in diff; rejected evidence absent from diff |
 
 Use temporary directories for filesystem tests and `Bun.spawn` for CLI integration tests. Clean up temporary directories even when assertions fail.
 
