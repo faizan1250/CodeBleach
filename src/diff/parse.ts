@@ -1,5 +1,6 @@
 import { ReviewerError } from "../core/errors.ts";
-import type { DiffHunk, DiffLine } from "../types/diff.ts";
+import type { DiffHunk } from "../types/diff.ts";
+import { numberHunkLines } from "./positions.ts";
 
 export type FileChangeStatus = "added" | "modified" | "deleted" | "renamed";
 
@@ -101,10 +102,10 @@ interface OpenHunk {
   newLines: number;
   usedOld: number;
   usedNew: number;
-  lines: DiffLine[];
+  bodies: { kind: "add" | "del" | "ctx"; text: string }[];
 }
 
-function parseHunkHeader(line: string, where: string): Omit<OpenHunk, "usedOld" | "usedNew" | "lines"> {
+function parseHunkHeader(line: string, where: string): Omit<OpenHunk, "usedOld" | "usedNew" | "bodies"> {
   const match = HUNK_HEADER_PATTERN.exec(line);
   if (match === null) {
     throw parseFailed(`${where}: malformed hunk header ${excerptLine(line)}`);
@@ -136,8 +137,6 @@ function parseFileSection(section: readonly string[], meta: FileChangeMetadata, 
   let binary = false;
   let open: OpenHunk | null = null;
   let position = 0;
-  let oldLine = 0;
-  let newLine = 0;
 
   const closeHunk = (): void => {
     if (open === null) return;
@@ -146,12 +145,17 @@ function parseFileSection(section: readonly string[], meta: FileChangeMetadata, 
         `${where}: hunk ${formatHunk(open)} declares ${open.oldLines} old / ${open.newLines} new lines but consumed ${open.usedOld} / ${open.usedNew}`,
       );
     }
+    const numbered = numberHunkLines(
+      { oldStart: open.oldStart, newStart: open.newStart, bodies: open.bodies },
+      position,
+    );
+    position = numbered.nextPosition;
     hunks.push({
       oldStart: open.oldStart,
       oldLines: open.oldLines,
       newStart: open.newStart,
       newLines: open.newLines,
-      lines: open.lines,
+      lines: numbered.lines,
     });
     open = null;
   };
@@ -162,21 +166,14 @@ function parseFileSection(section: readonly string[], meta: FileChangeMetadata, 
       if (line === NO_NEWLINE_MARKER) continue;
       const prefix = line[0];
       if (prefix === " " || prefix === "+" || prefix === "-") {
-        const text = line.slice(1);
-        position += 1;
-        if (prefix === " ") {
-          open.lines.push({ kind: "ctx", oldLine, newLine, position, text });
-          oldLine += 1;
-          newLine += 1;
+        const kind = prefix === " " ? "ctx" : prefix === "+" ? "add" : "del";
+        open.bodies.push({ kind, text: line.slice(1) });
+        if (kind === "ctx") {
           open.usedOld += 1;
           open.usedNew += 1;
-        } else if (prefix === "+") {
-          open.lines.push({ kind: "add", oldLine: null, newLine, position, text });
-          newLine += 1;
+        } else if (kind === "add") {
           open.usedNew += 1;
         } else {
-          open.lines.push({ kind: "del", oldLine, newLine: null, position, text });
-          oldLine += 1;
           open.usedOld += 1;
         }
         continue;
@@ -185,9 +182,7 @@ function parseFileSection(section: readonly string[], meta: FileChangeMetadata, 
     }
     if (line.startsWith("@@ ")) {
       const header = parseHunkHeader(line, where);
-      oldLine = header.oldStart;
-      newLine = header.newStart;
-      open = { ...header, usedOld: 0, usedNew: 0, lines: [] };
+      open = { ...header, usedOld: 0, usedNew: 0, bodies: [] };
     } else if (line.startsWith("@@@ ")) {
       throw parseFailed(`${where}: combined merge diffs are not supported`);
     } else if (line === GIT_BINARY_PATCH_MARKER || line.startsWith(BINARY_FILES_PREFIX)) {
