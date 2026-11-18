@@ -8,6 +8,7 @@ import {
   demoValidationEngine,
 } from "../../core/demo.ts";
 import { ReviewerError } from "../../core/errors.ts";
+import { exitCodeForError } from "../exit-codes.ts";
 import type { Logger } from "../../core/logger.ts";
 import { runPipeline } from "../../core/pipeline.ts";
 import {
@@ -78,9 +79,9 @@ export async function runReview(options: ReviewOptions, logger: Logger): Promise
   } catch (error) {
     if (error instanceof ReviewerError) {
       console.error(`review failed [${error.code}]: ${error.message}`);
-      return error.code === "CONFIG_INVALID" || error.code === "CONFIG_UNSUPPORTED_VERSION" ? 2 : 1;
+    } else {
+      console.error(`review failed: ${error instanceof Error ? error.message : String(error)}`);
     }
-    console.error(`review failed: ${error instanceof Error ? error.message : String(error)}`);
-    return 1;
+    return exitCodeForError(error);
   }
 }
