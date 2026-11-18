@@ -3,7 +3,7 @@ import { ReviewerError } from "../../src/core/errors.ts";
 import { isFullCommitSha, normalizeCommitSha } from "../../src/diff/git.ts";
 
 const SHA40 = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
-const SHA64 = `${SHA40}9abcdef0123456789abcdef01`;
+const SHA64 = `${SHA40}${"9abcdef0".repeat(3)}`;
 
 describe("isFullCommitSha", () => {
   test("accepts lowercase 40- and 64-hex", () => {
@@ -29,7 +29,7 @@ describe("isFullCommitSha", () => {
     expect(isFullCommitSha(` ${SHA40}`)).toBe(false);
     expect(isFullCommitSha(`${SHA40}\n`)).toBe(false);
     expect(isFullCommitSha(`z${SHA40.slice(1)}`)).toBe(false);
-    expect(isFullCommitSha(SHA40.slice(0, 41))).toBe(false);
+    expect(isFullCommitSha(`${SHA40}a`)).toBe(false);
     expect(isFullCommitSha(SHA64.slice(0, 63))).toBe(false);
   });
 });
