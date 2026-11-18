@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "exactOptionalPropertyTypes": true,
+    "allowImportingTsExtensions": true,    "exactOptionalPropertyTypes": true,
     "isolatedModules": true,
     "lib": ["ESNext"],
     "module": "Preserve",
