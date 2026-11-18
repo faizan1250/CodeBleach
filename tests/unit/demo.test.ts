@@ -88,4 +88,38 @@ describe("demo engines", () => {
       }
     }
   });
+
+  test("accepted findings are introduced by the PR on added lines", async () => {
+    const diff = await demoDiffEngine.run({
+      repoDir: ".",
+      baseSha: DEMO_BASE_SHA,
+      headSha: DEMO_HEAD_SHA,
+      config,
+    });
+    const units = await demoContextEngine.build(diff, config, ".");
+    const findings = await demoReviewEngine.review(units, config);
+    const validated = await demoValidationEngine.validate(findings, diff, units, config);
+    const addedByFile = new Map(
+      diff.files.map((file) => [
+        file.path,
+        new Set(
+          file.hunks.flatMap((hunk) =>
+            hunk.lines.filter((l) => l.kind === "add").map((l) => l.newLine)
+          ),
+        ),
+      ]),
+    );
+    const addTexts = diff.files.flatMap((file) =>
+      file.hunks.flatMap((hunk) =>
+        hunk.lines.filter((l) => l.kind === "add").map((l) => l.text)
+      )
+    );
+    for (const v of validated.filter((item) => item.status === "accepted")) {
+      expect(v.finding.introducedByPr).toBe(true);
+      expect(addedByFile.get(v.finding.file)?.has(v.finding.line)).toBe(true);
+      for (const evidence of v.finding.evidence) {
+        expect(addTexts.some((text) => text.includes(evidence.quote))).toBe(true);
+      }
+    }
+  });
 });

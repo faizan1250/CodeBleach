@@ -191,4 +191,57 @@ describe("runPipeline", () => {
       await cleanup();
     }
   });
+
+  test("persists running artifact immediately after config before diff", async () => {
+    const { dir, cleanup } = await makeOutDir();
+    try {
+      const fixture = createFixtureEngines();
+      let configPersistedBeforeDiff = false;
+      const origDiffRun = fixture.diff.run;
+      fixture.diff.run = (async (input) => {
+        try {
+          const artifact = await readArtifact(dir);
+          configPersistedBeforeDiff =
+            artifact.status === "running" &&
+            artifact.configSource !== "unavailable" &&
+            Array.isArray(artifact.stages) &&
+            artifact.stages.length === 1 &&
+            artifact.stages[0].name === "config" &&
+            artifact.stages[0].status === "completed";
+        } catch {
+          configPersistedBeforeDiff = false;
+        }
+        return origDiffRun(input);
+      });
+      await runPipeline(
+        { ...fixture, logger: testLogger() },
+        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir },
+      );
+      expect(configPersistedBeforeDiff).toBe(true);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("diff failure still persists config completed before the failure", async () => {
+    const { dir, cleanup } = await makeOutDir();
+    try {
+      const failure = new ReviewerError({ code: "GIT_FAILED", message: "diff exploded" });
+      const fixture = createFixtureEngines({ failAt: "diff", failure });
+      const promise = runPipeline(
+        { ...fixture, logger: testLogger() },
+        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir },
+      );
+      await expect(promise).rejects.toBe(failure);
+      const artifact = await readArtifact(dir);
+      expect(artifact.status).toBe("failed");
+      expect(artifact.stages).toMatchObject([
+        { name: "config", status: "completed" },
+        { name: "diff", status: "failed" },
+      ]);
+      expect(artifact.configSource).not.toBe("unavailable");
+    } finally {
+      await cleanup();
+    }
+  });
 });
