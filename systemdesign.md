@@ -249,7 +249,7 @@ path_overrides:
     review: { categories: { performance: false } }
 ```
 
-Behavior: missing file → defaults. Invalid file → `ConfigError` (CLI exit 2); in Action, publish a single comment describing the config error rather than silently reviewing with defaults. Unknown keys → error (catches typos). Evolution: `version` field + `migrate(raw)` chain; new fields are always optional with defaults.
+Behavior: missing file → defaults. Invalid file → `ConfigError` (CLI exit 2); in Action, publish a single comment describing the config error rather than silently reviewing with defaults. A `.reviewer.yml` symlink is followed only when its resolved target stays inside the resolved repository root and is a regular file; outside targets, dangling links, loops, and directories are config errors, never silent defaults. Unknown keys → error (catches typos). Evolution: `version` field + `migrate(raw)` chain; new fields are always optional with defaults.
 
 ---
 
