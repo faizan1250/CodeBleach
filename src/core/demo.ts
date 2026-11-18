@@ -7,7 +7,6 @@ import type {
 } from "./contracts.ts";
 import type {
   ChangedFile,
-  DiffResult,
   Finding,
   ReviewUnit,
   ValidatedFinding,
@@ -159,7 +158,3 @@ export const demoPublisher: Publisher = {
       failures: [],
     }),
 };
-
-export function emptyDiffResult(): DiffResult {
-  return { baseSha: DEMO_BASE_SHA, headSha: DEMO_HEAD_SHA, mergeBase: DEMO_BASE_SHA, files: [] };
-}

@@ -8,7 +8,7 @@ import {
   demoValidationEngine,
 } from "../../core/demo.ts";
 import { ReviewerError } from "../../core/errors.ts";
-import type { Logger, LogLevel } from "../../core/logger.ts";
+import type { Logger } from "../../core/logger.ts";
 import { runPipeline } from "../../core/pipeline.ts";
 import {
   stubContextEngine,
@@ -84,5 +84,3 @@ export async function runReview(options: ReviewOptions, logger: Logger): Promise
     return 1;
   }
 }
-
-export type { LogLevel };
