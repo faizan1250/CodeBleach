@@ -27,6 +27,7 @@ export interface ReviewOptions {
   dryRun: boolean;
   demo: boolean;
   logLevel: string;
+  runId: string;
 }
 
 const LOG_LEVELS: readonly string[] = ["debug", "info", "warn", "error"];
@@ -70,6 +71,7 @@ export async function runReview(options: ReviewOptions, logger: Logger): Promise
         headSha: head,
         dryRun: options.dryRun,
         outDir: options.out,
+        runId: options.runId,
       },
     );
     console.log(

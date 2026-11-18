@@ -28,7 +28,7 @@ describe("runPipeline", () => {
       const fixture = createFixtureEngines();
       const summary = await runPipeline(
         { ...fixture, logger: testLogger() },
-        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir },
+        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir, runId: "run-test" },
       );
       expect(fixture.order).toEqual(["diff", "context", "review", "validation"]);
       expect(summary.status).toBe("completed");
@@ -67,7 +67,7 @@ describe("runPipeline", () => {
       const fixture = createFixtureEngines();
       const summary = await runPipeline(
         { ...fixture, logger: testLogger() },
-        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: false, outDir: dir },
+        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: false, outDir: dir, runId: "run-test" },
       );
       expect(fixture.order).toEqual(["diff", "context", "review", "validation", "publish"]);
       const artifact = await readArtifact(dir);
@@ -85,7 +85,7 @@ describe("runPipeline", () => {
       const fixture = createFixtureEngines({ failAt: "review", failure });
       const promise = runPipeline(
         { ...fixture, logger: testLogger() },
-        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir },
+        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir, runId: "run-test" },
       );
       await expect(promise).rejects.toBe(failure);
       const artifact = await readArtifact(dir);
@@ -108,7 +108,7 @@ describe("runPipeline", () => {
       const fixture = createFixtureEngines();
       const promise = runPipeline(
         { ...fixture, logger: testLogger(), loadConfig: failingLoadConfig("CONFIG_INVALID") },
-        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir },
+        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir, runId: "run-test" },
       );
       await expect(promise).rejects.toBeInstanceOf(ReviewerError);
       expect(fixture.order).toEqual([]);
@@ -129,7 +129,7 @@ describe("runPipeline", () => {
       fixture.diff.run = () => Promise.reject(boom);
       const promise = runPipeline(
         { ...fixture, logger: testLogger() },
-        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir },
+        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir, runId: "run-test" },
       );
       try {
         await promise;
@@ -150,7 +150,7 @@ describe("runPipeline", () => {
       const fixture = createFixtureEngines({ secret: "ghp_supersecret999" });
       await runPipeline(
         { ...fixture, logger: testLogger() },
-        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir },
+        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir, runId: "run-test" },
       );
       const text = await readFile(join(dir, "run.json"), "utf8");
       expect(text).not.toContain("ghp_supersecret999");
@@ -167,7 +167,7 @@ describe("runPipeline", () => {
       const fixture = createFixtureEngines({ secret });
       await runPipeline(
         { ...fixture, logger: testLogger() },
-        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir, secrets: [secret] },
+        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir, runId: "run-test", secrets: [secret] },
       );
       const text = await readFile(join(dir, "run.json"), "utf8");
       expect(text).not.toContain(secret);
@@ -183,7 +183,7 @@ describe("runPipeline", () => {
       const fixture = createFixtureEngines();
       const summary = await runPipeline(
         { ...fixture, logger: testLogger() },
-        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir },
+        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir, runId: "run-test" },
       );
       expect(summary.stages[0]).toMatchObject({ name: "config", status: "completed" });
       expect(typeof summary.stages[0]?.ms).toBe("number");
@@ -215,7 +215,7 @@ describe("runPipeline", () => {
       });
       await runPipeline(
         { ...fixture, logger: testLogger() },
-        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir },
+        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir, runId: "run-test" },
       );
       expect(configPersistedBeforeDiff).toBe(true);
     } finally {
@@ -230,7 +230,7 @@ describe("runPipeline", () => {
       const fixture = createFixtureEngines({ failAt: "diff", failure });
       const promise = runPipeline(
         { ...fixture, logger: testLogger() },
-        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir },
+        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir, runId: "run-test" },
       );
       await expect(promise).rejects.toBe(failure);
       const artifact = await readArtifact(dir);

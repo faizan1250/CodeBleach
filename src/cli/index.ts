@@ -53,7 +53,8 @@ async function runReviewCommand(args: string[]): Promise<number> {
     });
   }
   const level = isLogLevel(parsed.values["log-level"], process.env["REVIEWER_LOG_LEVEL"]);
-  const logger = createLogger({ level, runId: randomUUID() });
+  const runId = randomUUID();
+  const logger = createLogger({ level, runId });
   return runReview(
     {
       base: parsed.values["base"],
@@ -63,6 +64,7 @@ async function runReviewCommand(args: string[]): Promise<number> {
       dryRun: parsed.values["dry-run"] ?? false,
       demo: parsed.values["demo"] ?? false,
       logLevel: level,
+      runId,
     },
     logger,
   );

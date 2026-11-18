@@ -73,6 +73,8 @@ export interface PipelineInput {
   pr?: PrMeta | undefined;
   dryRun: boolean;
   outDir: string;
+  /** Single execution id, minted once by the CLI and shared by logger + artifact. */
+  runId: string;
   secrets?: string[] | undefined;
 }
 
