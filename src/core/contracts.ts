@@ -73,6 +73,7 @@ export interface PipelineInput {
   pr?: PrMeta | undefined;
   dryRun: boolean;
   outDir: string;
+  secrets?: string[] | undefined;
 }
 
 export type LoadConfigFn = typeof loadConfig;

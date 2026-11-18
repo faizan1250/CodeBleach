@@ -22,11 +22,11 @@ export function createLogger(input: {
     const fieldsOut =
       fields === undefined ? {} : (sanitizePayload(fields, secrets) as Record<string, unknown>);
     const line = JSON.stringify({
+      ...fieldsOut,
       ts: new Date().toISOString(),
       level,
       runId: input.runId,
       msg: redact(msg, secrets),
-      ...fieldsOut,
     });
     process.stderr.write(`${line}\n`);
   };

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { parseArgs } from "node:util";
 import { runConfigPrint, runConfigValidate } from "./commands/config.ts";
+import { exitCodeForError } from "./exit-codes.ts";
 import { runReview } from "./commands/review.ts";
 import { runVersion } from "./commands/version.ts";
 import { ReviewerError } from "../core/errors.ts";
@@ -118,7 +119,7 @@ async function main(): Promise<number> {
       console.error(error instanceof Error ? error.message : String(error));
     }
     console.error(USAGE);
-    return 2;
+    return exitCodeForError(error);
   }
 }
 

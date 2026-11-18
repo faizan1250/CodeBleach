@@ -34,13 +34,14 @@ describe("runPipeline", () => {
       expect(summary.status).toBe("completed");
       expect(summary.configSource).toBe("defaults");
       expect(summary.stages.map((stage) => [stage.name, stage.status])).toEqual([
+        ["config", "completed"],
         ["diff", "completed"],
         ["context", "completed"],
         ["review", "completed"],
         ["validation", "completed"],
         ["publish", "skipped"],
       ]);
-      expect(summary.stages.map((stage) => stage.count)).toEqual([0, 1, 1, 1, undefined]);
+      expect(summary.stages.map((stage) => stage.count)).toEqual([undefined, 0, 1, 1, 1, undefined]);
 
       const artifact = await readArtifact(dir);
       expect(artifact.status).toBe("completed");
@@ -91,6 +92,7 @@ describe("runPipeline", () => {
       expect(artifact.status).toBe("failed");
       expect(artifact.error).toMatchObject({ code: "PROVIDER_FAILED" });
       expect(artifact.stages).toMatchObject([
+        { name: "config", status: "completed" },
         { name: "diff", status: "completed" },
         { name: "context", status: "completed" },
         { name: "review", status: "failed" },
@@ -113,7 +115,7 @@ describe("runPipeline", () => {
       const artifact = await readArtifact(dir);
       expect(artifact.status).toBe("failed");
       expect(artifact.configSource).toBe("unavailable");
-      expect(artifact.stages).toEqual([]);
+      expect(artifact.stages).toMatchObject([{ name: "config", status: "failed" }]);
     } finally {
       await cleanup();
     }
@@ -153,6 +155,38 @@ describe("runPipeline", () => {
       const text = await readFile(join(dir, "run.json"), "utf8");
       expect(text).not.toContain("ghp_supersecret999");
       expect(text).toContain("[REDACTED]");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("artifact redacts custom non-pattern secrets passed via input", async () => {
+    const { dir, cleanup } = await makeOutDir();
+    const secret = "zxqv-custom-9f8e7d6c5b4a";
+    try {
+      const fixture = createFixtureEngines({ secret });
+      await runPipeline(
+        { ...fixture, logger: testLogger() },
+        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir, secrets: [secret] },
+      );
+      const text = await readFile(join(dir, "run.json"), "utf8");
+      expect(text).not.toContain(secret);
+      expect(text).toContain("[REDACTED]");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("records config as the first completed stage", async () => {
+    const { dir, cleanup } = await makeOutDir();
+    try {
+      const fixture = createFixtureEngines();
+      const summary = await runPipeline(
+        { ...fixture, logger: testLogger() },
+        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir },
+      );
+      expect(summary.stages[0]).toMatchObject({ name: "config", status: "completed" });
+      expect(typeof summary.stages[0]?.ms).toBe("number");
     } finally {
       await cleanup();
     }

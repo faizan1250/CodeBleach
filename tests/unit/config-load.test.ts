@@ -153,6 +153,26 @@ describe("loadConfig", () => {
     expect(codeOf(result)).toBe("CONFIG_INVALID");
   });
 
+  symlinkTest("dangling symlink fails invalid instead of defaults", async () => {
+    const repoDir = await makeRepo();
+    await symlink(join(repoDir, "no-such-target.yml"), join(repoDir, ".reviewer.yml"));
+    const result = await loadConfig(repoDir);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(codeOf(result)).toBe("CONFIG_INVALID");
+  });
+
+  symlinkTest("external symlink to a directory is rejected as escaping", async () => {
+    const outside = await makeRepo();
+    const repoDir = await makeRepo();
+    await symlink(outside, join(repoDir, ".reviewer.yml"));
+    const result = await loadConfig(repoDir);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(codeOf(result)).toBe("CONFIG_INVALID");
+    expect(result.error.message).toContain("repository root");
+  });
+
   test("resolved config serializes to JSON", async () => {
     const repoDir = await makeRepo();
     const result = await loadConfig(repoDir);

@@ -567,7 +567,7 @@ runPipeline(
 **Execution order**
 
 1. Create `runId` and start timestamp.
-2. Load config.
+2. Run config stage (load config, timed like every other stage).
 3. Run diff stage.
 4. Run context stage.
 5. Run review stage.
@@ -583,7 +583,7 @@ runPipeline(
 - Artifact must be JSON-serializable, pretty-printed, and recursively redacted before writing.
 - Include `schemaVersion`, `runId`, `startedAt`, `completedAt`, `baseSha`, `headSha`, `configSource`, resolved config snapshot, stage results, available intermediate outputs, final status, and serialized error when present.
 - Suggested statuses: `running`, `completed`, `failed`.
-- Config errors must stop execution before any engine stage. Still attempt to write a failed artifact with no engine stages completed and `configSource: "unavailable"` when config cannot be loaded.
+- Config errors must stop execution before any engine stage. Still attempt to write a failed artifact with a failed `config` stage and `configSource: "unavailable"` when config cannot be loaded.
 - A `ReviewerError` from a stage ends the run, records the failed stage and error, writes the artifact, and is re-thrown. Convert unexpected thrown values into a non-retryable `INTERNAL` error while preserving the original cause.
 - If artifact writing itself fails, surface that failure without silently claiming the run was saved. Preserve the original pipeline error as cause/context where possible.
 
@@ -600,7 +600,7 @@ runPipeline(
 - Stage call order is asserted.
 - `dryRun` never calls the publisher.
 - A stage failure writes a failed artifact and is re-thrown.
-- Config failure invokes no stage and still attempts a failed artifact.
+- Config failure records a failed `config` stage, invokes no engine stage, and still attempts a failed artifact.
 - Artifact updates are valid JSON and nested secrets are redacted.
 - Artifact path uses the requested output directory.
 
@@ -706,12 +706,13 @@ At minimum, include the following coverage before declaring Phase 1 complete.
 | Error primitives | Error code, retryability, message, and cause are preserved |
 | Result | `ok` and `err` constructors preserve discriminated-union behavior |
 | Redaction | Exact values; GitHub token; API key; AWS key; bearer header; PEM block; nested object/array; sensitive key |
-| Logger | Valid JSONL, stderr output, run ID, redacted message and fields |
-| Config | Missing file; valid minimal/full file; example file; typo key; wrong type; bad threshold; duplicate IDs; unsupported version; malformed YAML; escaping symlink |
+| Logger | Valid JSONL, stderr output, run ID, reserved-key precedence, redacted message and fields |
+| Config | Missing file; valid minimal/full file; example file; typo key; wrong type; bad threshold; duplicate IDs; unsupported version; malformed YAML; escaping symlink; dangling symlink |
 | FakeProvider | Ordered match; call recording; string response; object response serialization; thrown error; unmatched script |
 | JSON helper | Valid JSON; fenced JSON; invalid JSON repair; schema repair; second failure; provider error propagation |
-| Pipeline | Stage order; output counts; dry-run skips publisher; config failure; stage failure; artifact update; recursive redaction |
-| CLI | Success/error exit codes; missing args; unknown flags; config commands; version; demo artifact |
+| Pipeline | Config stage timing; stage order; output counts; dry-run skips publisher; config failure; stage failure; artifact update; recursive redaction incl. caller-supplied secrets |
+| CLI | Centralized exit mapper; success/error exit codes; missing args; unknown flags; config commands; version; demo artifact |
+| Demo | Stable dataset; accepted evidence present in diff; rejected evidence absent from diff |
 
 Use temporary directories for filesystem tests and `Bun.spawn` for CLI integration tests. Clean up temporary directories even when assertions fail.
 
@@ -730,6 +731,7 @@ The exact JSON structure may include additional metadata, but it must be version
   "configSource": "defaults",
   "status": "completed",
   "stages": [
+    { "name": "config", "status": "completed", "ms": 1 },
     { "name": "diff", "status": "completed", "ms": 1, "count": 1 },
     { "name": "context", "status": "completed", "ms": 1, "count": 1 },
     { "name": "review", "status": "completed", "ms": 1, "count": 2 },

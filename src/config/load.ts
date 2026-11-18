@@ -1,4 +1,4 @@
-import { readFile, realpath, stat } from "node:fs/promises";
+import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import { ReviewerError } from "../core/errors.ts";
 import { err, ok, type Result } from "../core/result.ts";
@@ -45,12 +45,42 @@ export async function loadConfig(repoDir: string): Promise<Result<ConfigLoadResu
   }
   const configPath = join(repoRoot, ".reviewer.yml");
 
+  try {
+    const linkStat = await lstat(configPath);
+    if (linkStat.isSymbolicLink()) {
+      let linkReal: string;
+      try {
+        linkReal = await realpath(configPath);
+      } catch {
+        return err(invalid(configPath, "config file is a dangling symlink"));
+      }
+      let repoRealPre: string;
+      try {
+        repoRealPre = await realpath(repoRoot);
+      } catch (error) {
+        return err(invalid(configPath, "cannot resolve config path", error));
+      }
+      if (linkReal !== `${repoRealPre}${sep}.reviewer.yml`) {
+        return err(invalid(configPath, "config file must be .reviewer.yml at the repository root"));
+      }
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException | undefined)?.code !== "ENOENT") {
+      return err(invalid(configPath, "cannot read config file", error));
+    }
+  }
+
   let text: string;
   try {
     text = await readFile(configPath, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
-      return ok({ config: ConfigFileSchema.parse({}), source: "defaults" });
+      try {
+        await lstat(configPath);
+        return err(invalid(configPath, "config file is present but cannot be read"));
+      } catch {
+        return ok({ config: ConfigFileSchema.parse({}), source: "defaults" });
+      }
     }
     return err(invalid(configPath, "cannot read config file", error));
   }

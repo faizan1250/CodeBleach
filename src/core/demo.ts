@@ -83,7 +83,7 @@ function demoFindings(unit: ReviewUnit): Finding[] {
       description: "Exported function lacks an explicit return type.",
       confidence: 0.75,
       evidence: [
-        { file: unit.file.path, startLine: 8, endLine: 8, quote: "export function greet(name: string) {" },
+        { file: unit.file.path, startLine: 8, endLine: 8, quote: "export function greet(name: string): string {" },
       ],
       introducedByPr: true,
     },
