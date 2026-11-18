@@ -257,7 +257,7 @@ describe("parseUnifiedDiff hunks", () => {
       "+++ b/a.ts",
       "@@ -1,2 +1,3 @@",
       " ",
-      "x",
+      " x",
       "+",
       "",
     ].join("\n");
@@ -337,7 +337,7 @@ describe("parseUnifiedDiff hunks", () => {
       "diff --git a/a.ts b/a.ts",
       "--- a/a.ts",
       "+++ b/a.ts",
-      "@@ -1,2 +1,2 @@",
+      "@@ -1,1 +1,2 @@",
       " ---老款 a/file",
       "++++ b/file",
       "",
