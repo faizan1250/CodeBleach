@@ -1,12 +1,15 @@
 import type { Severity } from "./finding.ts";
 
-export type RuleKind =
-  | "architecture"
-  | "convention"
-  | "testing"
-  | "performance"
-  | "error_handling"
-  | "security";
+export const RULE_KINDS = [
+  "architecture",
+  "convention",
+  "testing",
+  "performance",
+  "error_handling",
+  "security",
+] as const;
+
+export type RuleKind = (typeof RULE_KINDS)[number];
 
 export interface Rule {
   id: string;
