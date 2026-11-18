@@ -65,4 +65,30 @@ describe("sanitizePayload", () => {
     const out = sanitizePayload({ err: new Error("failed with ghp_abc123") });
     expect(out).toMatchObject({ err: { name: "Error", message: "failed with [REDACTED]" } });
   });
+
+  test("preserves shared references instead of flagging circular", () => {
+    const shared = { path: "src/a.ts", secret: "ghp_abc123" };
+    const out = sanitizePayload({ first: shared, second: shared, list: [shared] }) as Record<
+      string,
+      unknown
+    >;
+    expect(out["first"]).toEqual({ path: "src/a.ts", secret: "[REDACTED]" });
+    expect(out["second"]).toEqual({ path: "src/a.ts", secret: "[REDACTED]" });
+    expect(out["list"]).toEqual([{ path: "src/a.ts", secret: "[REDACTED]" }]);
+    expect(JSON.stringify(out)).not.toContain("[Circular]");
+  });
+
+  test("flags true cycles as circular", () => {
+    const node: Record<string, unknown> = { name: "root" };
+    node["self"] = node;
+    const out = sanitizePayload({ node }) as { node: { self: unknown } };
+    expect(out.node.self).toBe("[Circular]");
+  });
+
+  test("flags indirect cycles through arrays", () => {
+    const holder: Record<string, unknown> = { items: [] };
+    (holder["items"] as unknown[]).push(holder);
+    const out = sanitizePayload(holder) as { items: unknown[] };
+    expect(out.items[0]).toBe("[Circular]");
+  });
 });

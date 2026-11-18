@@ -54,12 +54,16 @@ function sanitizeValue(value: unknown, extraSecrets: string[], seen: WeakSet<obj
   }
   if (seen.has(value)) return "[Circular]";
   seen.add(value);
+  let result: unknown;
   if (Array.isArray(value)) {
-    return value.map((item) => sanitizeValue(item, extraSecrets, seen));
+    result = value.map((item) => sanitizeValue(item, extraSecrets, seen));
+  } else {
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      out[key] = isSensitiveKey(key) ? REDACTED : sanitizeValue(entry, extraSecrets, seen);
+    }
+    result = out;
   }
-  const out: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    out[key] = isSensitiveKey(key) ? REDACTED : sanitizeValue(entry, extraSecrets, seen);
-  }
-  return out;
+  seen.delete(value);
+  return result;
 }
