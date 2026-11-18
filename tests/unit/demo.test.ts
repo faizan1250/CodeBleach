@@ -60,4 +60,32 @@ describe("demo engines", () => {
     });
     expect(second).toEqual(first);
   });
+
+  test("accepted evidence quote is present, rejected evidence quote is absent", async () => {
+    const diff = await demoDiffEngine.run({
+      repoDir: ".",
+      baseSha: DEMO_BASE_SHA,
+      headSha: DEMO_HEAD_SHA,
+      config,
+    });
+    const lines = diff.files.flatMap((file) => file.hunks.flatMap((hunk) => hunk.lines.map((l) => l.text)));
+    const units = await demoContextEngine.build(diff, config, ".");
+    const findings = await demoReviewEngine.review(units, config);
+    const validated = await demoValidationEngine.validate(findings, diff, units, config);
+    const accepted = validated.filter((v) => v.status === "accepted");
+    const rejected = validated.filter((v) => v.status === "rejected");
+    expect(accepted).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    for (const v of accepted) {
+      for (const evidence of v.finding.evidence) {
+        expect(lines.some((line) => line.includes(evidence.quote))).toBe(true);
+      }
+    }
+    for (const v of rejected) {
+      expect(v.checks).toContainEqual({ name: "evidence", passed: false, detail: "quote not found in context" });
+      for (const evidence of v.finding.evidence) {
+        expect(lines.some((line) => line.includes(evidence.quote))).toBe(false);
+      }
+    }
+  });
 });
