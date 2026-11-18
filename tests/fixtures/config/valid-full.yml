@@ -1,0 +1,22 @@
+version: 1
+review:
+  enabled: true
+  categories: { bugs: true, security: true, performance: true, concurrency: false }
+  severity_threshold: high
+  confidence_threshold: 0.7
+  category_overrides:
+    security: { confidence_threshold: 0.6 }
+  max_findings: 5
+  max_changed_lines_per_file: 500
+ignore:
+  paths: ["gen/**"]
+repository:
+  language: tsx
+rules:
+  - id: arch-001
+    kind: architecture
+    text: "No logic in controllers."
+    severity: medium
+path_overrides:
+  - paths: ["tests/**"]
+    review: { categories: { performance: false } }
