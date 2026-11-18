@@ -32,4 +32,42 @@ describe("migrate", () => {
     expect(codeOf(() => migrate({ version: "1" }))).toBe("CONFIG_INVALID");
     expect(codeOf(() => migrate({ version: 0 }))).toBe("CONFIG_INVALID");
   });
+
+  test("v1 passes through the registered migration", () => {
+    const seen: unknown[] = [];
+    const registry = {
+      1: (config: Record<string, unknown>) => {
+        seen.push(config);
+        return { ...config, migrated: true };
+      },
+    };
+    expect(migrate({ version: 1 }, registry)).toEqual({ version: 1, migrated: true });
+    expect(seen).toEqual([{ version: 1 }]);
+  });
+
+  test("missing registry entry is a clear invalid error", () => {
+    expect(codeOf(() => migrate({ version: 1 }, {}))).toBe("CONFIG_INVALID");
+    try {
+      migrate({ version: 1 }, {});
+      throw new Error("unreachable");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ReviewerError);
+      expect((error as ReviewerError).message).toContain("no migration registered");
+    }
+  });
+
+  test("migration failure propagates without partial return", () => {
+    const boom = new ReviewerError({ code: "CONFIG_INVALID", message: "boom" });
+    const registry = {
+      1: (): Record<string, unknown> => {
+        throw boom;
+      },
+    };
+    try {
+      migrate({ version: 1 }, registry);
+      throw new Error("expected ReviewerError");
+    } catch (error) {
+      expect(error).toBe(boom);
+    }
+  });
 });
