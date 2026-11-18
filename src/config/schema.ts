@@ -97,7 +97,6 @@ export const ConfigFileSchema = z.strictObject({
           code: "custom",
           message: `duplicate rule ids: ${[...new Set(duplicates)].join(", ")}`,
           input: ctx.value,
-          path: ["rules"],
         });
       }
     }),
