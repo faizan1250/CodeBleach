@@ -324,7 +324,7 @@ export const err = <E>(error: E): Result<never, E> => ...;
 - `redact(text: string, extraSecrets?: string[]): string` replaces exact supplied secret values and recognizable token patterns with `[REDACTED]`.
 - Include patterns for GitHub tokens, common `sk-`-style API keys, AWS access key IDs, bearer authorization values, and PEM private-key blocks.
 - Sort exact secret values longest-first and ignore empty values.
-- Add a recursive sanitizer for artifact/logger payloads. It must redact nested string values and values under obviously sensitive keys such as `token`, `password`, `secret`, `api_key`, `apiKey`, and `authorization`.
+- Add a recursive sanitizer for artifact/logger payloads. It must redact nested string values and values under precisely matched sensitive keys (normalized exact set plus `apikey`/`apisecret`/`apitoken` suffixes, e.g. `apiKey`, `api_key`, `OPENCODE_API_KEY`, `accessToken`, `refreshToken`, `password`, `secret`, `clientSecret`, `authorization`, `privateKey`); telemetry keys such as `inputTokens`/`outputTokens`/`maxTokens`/`tokenCount`/`totalTokens` are preserved. See ADR 0004.
 - Do not log full environment variables, request headers, or provider payloads by default.
 
 **Accept**
@@ -346,7 +346,7 @@ export const err = <E>(error: E): Result<never, E> => ...;
 - Implement schema version 1 based on `systemdesign.md` §6.
 - Use `z.strictObject` at every object level so misspelled and unknown keys fail.
 - All optional user-facing settings receive explicit defaults. `version` defaults to `1` when absent.
-- The loaded `ResolvedConfig` must be fully defaulted for fields used by later phases. Path overrides may remain intentionally partial because they represent selective overrides.
+- The loaded `ResolvedConfig` must be fully defaulted for fields used by later phases. Path overrides may remain intentionally partial because they represent selective overrides. `ignore.paths` is additive: user entries extend the built-in defaults (merged, deduped) rather than replacing them.
 - Include the following schema areas:
   - `version`
   - `review.enabled`
@@ -362,7 +362,7 @@ export const err = <E>(error: E): Result<never, E> => ...;
   - `path_overrides[]` with `paths` and a partial `review` override.
 - Validate confidence thresholds in the inclusive range 0–1, positive integer limits, non-empty rule text, supported rule kinds, and unique rule IDs.
 - Support `typescript`, `tsx`, and `javascript` as initial language values.
-- Use defaults from `systemdesign.md`, plus ignore patterns for `build/**`, `node_modules/**`, and `**/*.snap`.
+- Use defaults from `systemdesign.md`, plus ignore patterns for `build/**`, `node_modules/**`, and `**/*.snap`. User-supplied `ignore.paths` extend these defaults via `mergeIgnorePaths` (defaults first, user extras in file order, duplicates dropped); keep the merge in the schema layer only.
 - Keep defaults in one module; do not duplicate them in CLI code or tests.
 
 **Migration behavior**
@@ -372,7 +372,7 @@ export const err = <E>(error: E): Result<never, E> => ...;
 - Version 1 passes through the v1 migration path.
 - A version greater than 1 returns `CONFIG_UNSUPPORTED_VERSION`.
 - A malformed or unsupported lower version returns `CONFIG_INVALID`.
-- Structure migrations as a version-to-version chain so a future v2 migration can be added without rewriting the loader.
+- Structure migrations as a version-to-version registry (`Record<number, Migration>` in `migrate.ts`) so a future v2 migration can be added without rewriting the loader. Missing version means v1; newer-than-supported is rejected; unknown versions and missing registry entries are clear `CONFIG_INVALID` errors.
 
 **Loader contract**
 
@@ -387,7 +387,7 @@ function loadConfig(repoDir: string): Promise<Result<ConfigLoadResult, ReviewerE
 ```
 
 - Missing `.reviewer.yml` → return defaults.
-- YAML syntax error → `CONFIG_INVALID` with the config path and line/column when the parser provides them.
+- YAML syntax error → `CONFIG_INVALID` with `path:line:col: msg` when the parser provides a location, else `path: msg`.
 - Schema error → `CONFIG_INVALID` with readable dotted paths (for example, `review.confidence_threshold: expected a number between 0 and 1`).
 - Read only `.reviewer.yml` at the repository root.
 - A `.reviewer.yml` symlink is allowed iff its fully resolved target stays inside the fully resolved repository root (checked with `relative()`, not a string prefix): relative, nested-relative, and absolute inner targets are accepted.
@@ -561,6 +561,7 @@ runPipeline(
     pr?: PrMeta;
     dryRun: boolean;
     outDir: string;
+    runId: string; // minted once by the CLI; shared by logger + artifact
   }
 ): Promise<RunSummary>;
 ```
@@ -569,7 +570,7 @@ runPipeline(
 
 **Execution order**
 
-1. Create `runId` and start timestamp.
+1. The CLI creates one `runId` and passes it to both the logger and `runPipeline` input (`PipelineInput.runId`); the pipeline never regenerates it. Record the start timestamp.
 2. Run config stage (load config, timed like every other stage); persist the `running` artifact before diff.
 3. Run diff stage.
 4. Run context stage.
