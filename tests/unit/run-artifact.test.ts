@@ -69,4 +69,40 @@ describe("writeArtifact", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  test("redacts caller-supplied custom secrets under plain keys", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "codebleach-artifact-"));
+    const secret = "zxqv-custom-9f8e7d6c5b4a";
+    try {
+      await writeArtifact(
+        dir,
+        {
+          ...artifact(),
+          findings: [
+            {
+              id: "f1",
+              fingerprint: "fp",
+              headSha: "head",
+              origin: { pass: "p", unitId: "u" },
+              title: "t",
+              severity: "high",
+              category: "security",
+              file: "a.ts",
+              line: 1,
+              description: `value is ${secret}`,
+              confidence: 0.9,
+              evidence: [{ file: "a.ts", startLine: 1, endLine: 1, quote: "q" }],
+              introducedByPr: true,
+            },
+          ],
+        },
+        [secret],
+      );
+      const text = await readFile(join(dir, "run.json"), "utf8");
+      expect(text).not.toContain(secret);
+      expect(text).toContain("[REDACTED]");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

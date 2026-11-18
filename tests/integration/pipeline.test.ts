@@ -157,4 +157,36 @@ describe("runPipeline", () => {
       await cleanup();
     }
   });
+
+  test("artifact redacts custom non-pattern secrets passed via input", async () => {
+    const { dir, cleanup } = await makeOutDir();
+    const secret = "zxqv-custom-9f8e7d6c5b4a";
+    try {
+      const fixture = createFixtureEngines({ secret });
+      await runPipeline(
+        { ...fixture, logger: testLogger() },
+        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir, secrets: [secret] },
+      );
+      const text = await readFile(join(dir, "run.json"), "utf8");
+      expect(text).not.toContain(secret);
+      expect(text).toContain("[REDACTED]");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("records config as the first completed stage", async () => {
+    const { dir, cleanup } = await makeOutDir();
+    try {
+      const fixture = createFixtureEngines();
+      const summary = await runPipeline(
+        { ...fixture, logger: testLogger() },
+        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir },
+      );
+      expect(summary.stages[0]).toMatchObject({ name: "config", status: "completed" });
+      expect(typeof summary.stages[0]?.ms).toBe("number");
+    } finally {
+      await cleanup();
+    }
+  });
 });

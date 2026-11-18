@@ -65,7 +65,7 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
         : { error: { code: failure.code, message: failure.message, retryable: failure.retryable } }),
     };
     try {
-      await writeArtifact(input.outDir, artifact);
+      await writeArtifact(input.outDir, artifact, input.secrets ?? []);
     } catch (writeError) {
       throw new ReviewerError({
         code: "INTERNAL",

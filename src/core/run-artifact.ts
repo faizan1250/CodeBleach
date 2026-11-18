@@ -39,9 +39,13 @@ export interface RunArtifact {
 }
 
 /** Atomically write pretty-printed, recursively redacted JSON to `<outDir>/run.json`. */
-export async function writeArtifact(outDir: string, artifact: RunArtifact): Promise<void> {
+export async function writeArtifact(
+  outDir: string,
+  artifact: RunArtifact,
+  secrets: string[] = [],
+): Promise<void> {
   await mkdir(outDir, { recursive: true });
-  const redacted = sanitizePayload(artifact) as RunArtifact;
+  const redacted = sanitizePayload(artifact, secrets) as RunArtifact;
   const path = join(outDir, "run.json");
   const temp = join(outDir, `run.json.tmp.${process.pid}`);
   await writeFile(temp, `${JSON.stringify(redacted, null, 2)}\n`, "utf8");
