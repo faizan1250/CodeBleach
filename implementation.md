@@ -391,6 +391,7 @@ function loadConfig(repoDir: string): Promise<Result<ConfigLoadResult, ReviewerE
 - Schema error → `CONFIG_INVALID` with readable dotted paths (for example, `review.confidence_threshold: expected a number between 0 and 1`).
 - Read only `.reviewer.yml` at the repository root.
 - Resolve and verify the config file path remains inside the supplied repository directory; reject a symlink that points outside the repo.
+- A dangling `.reviewer.yml` symlink is `CONFIG_INVALID`, not defaults.
 - Do not silently fall back to defaults when a present config file is invalid.
 - Verify `Bun.YAML.parse` exists in the pinned Bun version with a test. Add a YAML dependency only if that test proves it is unavailable.
 
@@ -567,7 +568,7 @@ runPipeline(
 **Execution order**
 
 1. Create `runId` and start timestamp.
-2. Run config stage (load config, timed like every other stage).
+2. Run config stage (load config, timed like every other stage); persist the `running` artifact before diff.
 3. Run diff stage.
 4. Run context stage.
 5. Run review stage.
@@ -710,9 +711,9 @@ At minimum, include the following coverage before declaring Phase 1 complete.
 | Config | Missing file; valid minimal/full file; example file; typo key; wrong type; bad threshold; duplicate IDs; unsupported version; malformed YAML; escaping symlink; dangling symlink |
 | FakeProvider | Ordered match; call recording; string response; object response serialization; thrown error; unmatched script |
 | JSON helper | Valid JSON; fenced JSON; invalid JSON repair; schema repair; second failure; provider error propagation |
-| Pipeline | Config stage timing; stage order; output counts; dry-run skips publisher; config failure; stage failure; artifact update; recursive redaction incl. caller-supplied secrets |
+| Pipeline | Config stage timing; config-immediate persist; stage order; output counts; dry-run skips publisher; config failure; stage failure incl. diff failure keeping config-completed; artifact update; recursive redaction incl. caller-supplied secrets |
 | CLI | Centralized exit mapper; success/error exit codes; missing args; unknown flags; config commands; version; demo artifact |
-| Demo | Stable dataset; accepted evidence present in diff; rejected evidence absent from diff |
+| Demo | Stable dataset; accepted evidence present in diff on the added line (introduced-by-PR guard); rejected evidence absent from diff |
 
 Use temporary directories for filesystem tests and `Bun.spawn` for CLI integration tests. Clean up temporary directories even when assertions fail.
 

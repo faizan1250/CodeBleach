@@ -208,11 +208,9 @@ export interface ValidatedFinding {
 }
 
 // ---- Stage interfaces (each independently testable) ----
-export interface DiffEngine     { run(i: { repoDir: string; baseSha: string; headSha: string; config: ResolvedConfig }): Promise<DiffResult> }
-export interface ContextEngine  { build(d: DiffResult, c: ResolvedConfig, repoDir: string): Promise<ReviewUnit[]> }
-export interface ReviewEngine   { review(units: ReviewUnit[], c: ResolvedConfig): Promise<Finding[]> }
-export interface ValidationEngine { validate(f: Finding[], d: DiffResult, units: ReviewUnit[], c: ResolvedConfig): Promise<ValidatedFinding[]> }
-export interface Publisher      { publish(v: ValidatedFinding[], d: DiffResult, meta: PrMeta): Promise<PublishResult> }
+// Live in `src/core/contracts.ts:16-44` (ADR 0001): `src/types` holds pure
+// shared data only and imports nothing from `src/`. `ResolvedConfig` lives in
+// `src/config/schema.ts:107`. Only `src/core/pipeline.ts` and `src/cli/` wire engines.
 ```
 
 ---
