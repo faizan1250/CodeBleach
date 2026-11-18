@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../../src/config/load.ts";
@@ -171,6 +171,70 @@ describe("loadConfig", () => {
     if (result.ok) throw new Error("unreachable");
     expect(codeOf(result)).toBe("CONFIG_INVALID");
     expect(result.error.message).toContain("repository root");
+  });
+
+  symlinkTest("symlink to a root file is accepted", async () => {
+    const repoDir = await makeRepo();
+    await writeFile(join(repoDir, "real.yml"), "version: 1\n");
+    await symlink("real.yml", join(repoDir, ".reviewer.yml"));
+    const result = await loadConfig(repoDir);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    expect(result.value.source).toBe("file");
+  });
+
+  symlinkTest("relative symlink to a nested config is accepted", async () => {
+    const repoDir = await makeRepo();
+    await mkdir(join(repoDir, "config"));
+    await writeFile(join(repoDir, "config", "reviewer.yml"), "version: 1\n");
+    await symlink(join("config", "reviewer.yml"), join(repoDir, ".reviewer.yml"));
+    const result = await loadConfig(repoDir);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    expect(result.value.source).toBe("file");
+  });
+
+  symlinkTest("nested relative symlink with dotdot is accepted", async () => {
+    const repoDir = await makeRepo();
+    await mkdir(join(repoDir, "sub"));
+    await writeFile(join(repoDir, "real.yml"), "version: 1\n");
+    await symlink(join("sub", "..", "real.yml"), join(repoDir, ".reviewer.yml"));
+    const result = await loadConfig(repoDir);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    expect(result.value.source).toBe("file");
+  });
+
+  symlinkTest("absolute symlink inside repo is accepted", async () => {
+    const repoDir = await makeRepo();
+    await writeFile(join(repoDir, "real.yml"), "version: 1\n");
+    await symlink(join(repoDir, "real.yml"), join(repoDir, ".reviewer.yml"));
+    const result = await loadConfig(repoDir);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    expect(result.value.source).toBe("file");
+  });
+
+  symlinkTest("symlink loop is rejected", async () => {
+    const repoDir = await makeRepo();
+    await symlink(join(repoDir, "b.yml"), join(repoDir, "a.yml"));
+    await symlink(join(repoDir, "a.yml"), join(repoDir, "b.yml"));
+    await symlink(join(repoDir, "a.yml"), join(repoDir, ".reviewer.yml"));
+    const result = await loadConfig(repoDir);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(codeOf(result)).toBe("CONFIG_INVALID");
+  });
+
+  symlinkTest("symlink to a directory inside repo is rejected", async () => {
+    const repoDir = await makeRepo();
+    await mkdir(join(repoDir, "configdir"));
+    await symlink("configdir", join(repoDir, ".reviewer.yml"));
+    const result = await loadConfig(repoDir);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(codeOf(result)).toBe("CONFIG_INVALID");
+    expect(result.error.message).toContain("regular file");
   });
 
   test("resolved config serializes to JSON", async () => {
