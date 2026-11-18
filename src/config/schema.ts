@@ -6,11 +6,11 @@ import {
   DEFAULT_CATEGORIES,
   DEFAULT_CONFIDENCE_THRESHOLD,
   DEFAULT_ENABLED,
-  DEFAULT_IGNORE_PATHS,
   DEFAULT_LANGUAGE,
   DEFAULT_MAX_CHANGED_LINES_PER_FILE,
   DEFAULT_MAX_FINDINGS,
   DEFAULT_SEVERITY_THRESHOLD,
+  mergeIgnorePaths,
 } from "./defaults.ts";
 
 export const LANGUAGES = ["typescript", "tsx", "javascript"] as const;
@@ -78,7 +78,8 @@ export const ConfigFileSchema = z.strictObject({
   review: ReviewSchema.prefault({}),
   ignore: z
     .strictObject({
-      paths: z.array(z.string().min(1)).default([...DEFAULT_IGNORE_PATHS]),
+      // Additive: user entries extend the built-in defaults (merged, deduped).
+      paths: z.array(z.string().min(1)).optional().transform(mergeIgnorePaths),
     })
     .prefault({}),
   repository: z
