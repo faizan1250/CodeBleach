@@ -111,4 +111,58 @@ describe("sanitizePayload", () => {
     const out = sanitizePayload({ err }) as { err: { cause: unknown } };
     expect(out.err.cause).toBe("[Circular]");
   });
+
+  test("preserves usage and token-count telemetry keys", () => {
+    const payload = {
+      usage: { inputTokens: 10, outputTokens: 5 },
+      maxTokens: 100,
+      max_tokens: 50,
+      tokenCount: 3,
+      totalTokens: 15,
+    };
+    expect(sanitizePayload(payload)).toEqual(payload);
+  });
+
+  test("redacts sensitive key variants across separators and casing", () => {
+    const out = sanitizePayload({
+      apiKey: "k1",
+      api_key: "k2",
+      OPENCODE_API_KEY: "k3",
+      "API-KEY": "k4",
+      accessToken: "t1",
+      access_token: "t2",
+      refreshToken: "t3",
+      password: "p1",
+      Password: "p2",
+      SECRET: "s1",
+      clientSecret: "c1",
+      "client-secret": "c2",
+      authorization: "a1",
+      Authorization: "a2",
+      privateKey: "pem1",
+      private_key: "pem2",
+      nested: { Access_Token: "x", keep: "yes" },
+      list: [{ REFRESH_TOKEN: "y" }],
+    });
+    expect(out).toEqual({
+      apiKey: "[REDACTED]",
+      api_key: "[REDACTED]",
+      OPENCODE_API_KEY: "[REDACTED]",
+      "API-KEY": "[REDACTED]",
+      accessToken: "[REDACTED]",
+      access_token: "[REDACTED]",
+      refreshToken: "[REDACTED]",
+      password: "[REDACTED]",
+      Password: "[REDACTED]",
+      SECRET: "[REDACTED]",
+      clientSecret: "[REDACTED]",
+      "client-secret": "[REDACTED]",
+      authorization: "[REDACTED]",
+      Authorization: "[REDACTED]",
+      privateKey: "[REDACTED]",
+      private_key: "[REDACTED]",
+      nested: { Access_Token: "[REDACTED]", keep: "yes" },
+      list: [{ REFRESH_TOKEN: "[REDACTED]" }],
+    });
+  });
 });

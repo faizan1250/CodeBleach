@@ -244,4 +244,62 @@ describe("runPipeline", () => {
       await cleanup();
     }
   });
+
+  test("uses the caller-supplied runId in summary and artifact", async () => {
+    const { dir, cleanup } = await makeOutDir();
+    try {
+      const fixture = createFixtureEngines();
+      const input = {
+        repoDir: ".",
+        baseSha: "base",
+        headSha: "head",
+        dryRun: true,
+        outDir: dir,
+        runId: "run-abc-123",
+      };
+      const summary = await runPipeline({ ...fixture, logger: testLogger() }, input);
+      expect(summary.runId).toBe("run-abc-123");
+      const artifact = await readArtifact(dir);
+      expect(artifact.runId).toBe("run-abc-123");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("every log line carries the same runId as the artifact", async () => {
+    const { dir, cleanup } = await makeOutDir();
+    const originalWrite = process.stderr.write.bind(process.stderr);
+    let captured = "";
+    process.stderr.write = ((chunk: unknown) => {
+      captured += String(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      const fixture = createFixtureEngines();
+      const logger = createLogger({ level: "info", runId: "run-log-1" });
+      const input = {
+        repoDir: ".",
+        baseSha: "base",
+        headSha: "head",
+        dryRun: true,
+        outDir: dir,
+        runId: "run-log-1",
+      };
+      const summary = await runPipeline({ ...fixture, logger }, input);
+      const artifact = await readArtifact(dir);
+      const logRunIds = captured
+        .split("\n")
+        .filter((line) => line.trim().length > 0)
+        .map((line) => JSON.parse(line) as { runId?: unknown })
+        .map((line) => line.runId);
+      expect(logRunIds.length).toBeGreaterThan(0);
+      expect(new Set(logRunIds).size).toBe(1);
+      expect(logRunIds[0]).toBe("run-log-1");
+      expect(summary.runId).toBe("run-log-1");
+      expect(artifact.runId).toBe("run-log-1");
+    } finally {
+      process.stderr.write = originalWrite;
+      await cleanup();
+    }
+  });
 });

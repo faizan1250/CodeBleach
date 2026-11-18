@@ -45,6 +45,17 @@ describe("config schema", () => {
     });
     expect(config.rules).toHaveLength(1);
     expect(config.path_overrides).toHaveLength(1);
+    expect(config.ignore.paths).toEqual([...DEFAULT_IGNORE_PATHS, "gen/**"]);
+  });
+
+  test("merges user ignore paths after defaults without duplicates", () => {
+    const config = ConfigFileSchema.parse({ ignore: { paths: ["dist/**", "custom/**"] } });
+    expect(config.ignore.paths).toEqual([...DEFAULT_IGNORE_PATHS, "custom/**"]);
+  });
+
+  test("empty user ignore paths still yield defaults", () => {
+    const config = ConfigFileSchema.parse({ ignore: { paths: [] } });
+    expect(config.ignore.paths).toEqual([...DEFAULT_IGNORE_PATHS]);
   });
 
   test("rejects unknown keys at every level", () => {
