@@ -1,0 +1,8 @@
+node_modules/
+.reviewer-out/
+.reviewer-cache/
+.env
+.env.*
+*.tmp
+*.log
+dist/
