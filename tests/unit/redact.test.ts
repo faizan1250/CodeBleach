@@ -91,4 +91,24 @@ describe("sanitizePayload", () => {
     const out = sanitizePayload(holder) as { items: unknown[] };
     expect(out.items[0]).toBe("[Circular]");
   });
+
+  test("preserves error code, retryable, and redacted cause", () => {
+    const cause = new Error("inner ghp_abc123");
+    const err = new Error("outer failed");
+    Object.assign(err, { code: "PROVIDER_FAILED", retryable: true });
+    err.cause = cause;
+    const out = sanitizePayload({ err }) as {
+      err: { code: unknown; retryable: unknown; cause: { message: unknown } };
+    };
+    expect(out.err.code).toBe("PROVIDER_FAILED");
+    expect(out.err.retryable).toBe(true);
+    expect(out.err.cause.message).toBe("inner [REDACTED]");
+  });
+
+  test("flags self-caused errors as circular cause", () => {
+    const err = new Error("loop");
+    err.cause = err;
+    const out = sanitizePayload({ err }) as { err: { cause: unknown } };
+    expect(out.err.cause).toBe("[Circular]");
+  });
 });

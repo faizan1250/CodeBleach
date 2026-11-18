@@ -46,11 +46,24 @@ function sanitizeValue(value: unknown, extraSecrets: string[], seen: WeakSet<obj
   if (typeof value !== "object" || value === null) return value;
   if (value instanceof Date) return value.toISOString();
   if (value instanceof Error) {
-    return {
+    if (seen.has(value)) return "[Circular]";
+    seen.add(value);
+    const errorOut: Record<string, unknown> = {
       name: value.name,
       message: redact(value.message, extraSecrets),
-      ...(value.stack !== undefined ? { stack: redact(value.stack, extraSecrets) } : {}),
     };
+    if (value.stack !== undefined) errorOut["stack"] = redact(value.stack, extraSecrets);
+    if ("code" in value && (typeof value.code === "string" || typeof value.code === "number")) {
+      errorOut["code"] = value.code;
+    }
+    if ("retryable" in value && typeof value.retryable === "boolean") {
+      errorOut["retryable"] = value.retryable;
+    }
+    if (value.cause !== undefined) {
+      errorOut["cause"] = sanitizeValue(value.cause, extraSecrets, seen);
+    }
+    seen.delete(value);
+    return errorOut;
   }
   if (seen.has(value)) return "[Circular]";
   seen.add(value);
