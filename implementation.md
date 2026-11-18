@@ -387,7 +387,7 @@ function loadConfig(repoDir: string): Promise<Result<ConfigLoadResult, ReviewerE
 ```
 
 - Missing `.reviewer.yml` → return defaults.
-- YAML syntax error → `CONFIG_INVALID` with `path:line:col: msg` when the parser provides a location, else `path: msg`.
+- YAML syntax error → `CONFIG_INVALID` with `path: msg` (loader preserves the parser message only; the `Bun.YAML` error coords are the JS call site, not the YAML source, so no `line:col` is emitted).
 - Schema error → `CONFIG_INVALID` with readable dotted paths (for example, `review.confidence_threshold: expected a number between 0 and 1`).
 - Read only `.reviewer.yml` at the repository root.
 - A `.reviewer.yml` symlink is allowed iff its fully resolved target stays inside the fully resolved repository root (checked with `relative()`, not a string prefix): relative, nested-relative, and absolute inner targets are accepted.
