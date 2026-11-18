@@ -42,6 +42,16 @@ describe("loadConfig", () => {
     expect(result.value.config.rules).toEqual([]);
   });
 
+  test("missing repo directory fails invalid", async () => {
+    const repoDir = await makeRepo();
+    const missing = join(repoDir, "does-not-exist");
+    const result = await loadConfig(missing);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(codeOf(result)).toBe("CONFIG_INVALID");
+    expect(result.error.message).toContain("does not exist");
+  });
+
   test("minimal file resolves defaults with file source", async () => {
     const repoDir = await makeRepo();
     await writeFile(join(repoDir, ".reviewer.yml"), "version: 1\n");

@@ -1,4 +1,4 @@
-import { readFile, realpath } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import { ReviewerError } from "../core/errors.ts";
 import { err, ok, type Result } from "../core/result.ts";
@@ -32,6 +32,17 @@ function formatIssues(
 /** Load `.reviewer.yml` from the repo root; missing file resolves to defaults. */
 export async function loadConfig(repoDir: string): Promise<Result<ConfigLoadResult, ReviewerError>> {
   const repoRoot = resolve(repoDir);
+  try {
+    const repoStat = await stat(repoRoot);
+    if (!repoStat.isDirectory()) {
+      return err(invalid(repoRoot, "repo directory is not a directory"));
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+      return err(invalid(repoRoot, "repo directory does not exist"));
+    }
+    return err(invalid(repoRoot, "cannot access repo directory", error));
+  }
   const configPath = join(repoRoot, ".reviewer.yml");
 
   let text: string;
