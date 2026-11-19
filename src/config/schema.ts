@@ -12,6 +12,7 @@ import {
   DEFAULT_MAX_FILE_SIZE_KB,
   DEFAULT_MAX_FINDINGS,
   DEFAULT_SEVERITY_THRESHOLD,
+  MAX_MAX_FILE_SIZE_KB,
   mergeIgnorePaths,
 } from "./defaults.ts";
 
@@ -57,7 +58,15 @@ const ReviewSchema = z.strictObject({
     .default({}),
   max_findings: z.number().int().positive().default(DEFAULT_MAX_FINDINGS),
   max_changed_lines_per_file: z.number().int().positive().default(DEFAULT_MAX_CHANGED_LINES_PER_FILE),
-  max_file_size_kb: z.number().int().positive().default(DEFAULT_MAX_FILE_SIZE_KB),
+  max_file_size_kb: z
+    .number()
+    .int()
+    .positive()
+    .max(
+      MAX_MAX_FILE_SIZE_KB,
+      `max_file_size_kb must be <= ${MAX_MAX_FILE_SIZE_KB} KB so an accepted blob always fits the 26 MiB blob-read cap`,
+    )
+    .default(DEFAULT_MAX_FILE_SIZE_KB),
 });
 
 const PartialCategoriesSchema = z.strictObject({
@@ -74,7 +83,15 @@ const PartialReviewSchema = z.strictObject({
   confidence_threshold: z.number().min(0).max(1).optional(),
   max_findings: z.number().int().positive().optional(),
   max_changed_lines_per_file: z.number().int().positive().optional(),
-  max_file_size_kb: z.number().int().positive().optional(),
+  max_file_size_kb: z
+    .number()
+    .int()
+    .positive()
+    .max(
+      MAX_MAX_FILE_SIZE_KB,
+      `max_file_size_kb must be <= ${MAX_MAX_FILE_SIZE_KB} KB so an accepted blob always fits the 26 MiB blob-read cap`,
+    )
+    .optional(),
 });
 
 const RuleSchema = z.strictObject({

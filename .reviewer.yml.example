@@ -21,6 +21,8 @@ review:
   # Files with more changed lines than this are skipped with a reason.
   max_changed_lines_per_file: 1500
   # Files with a larger head-commit blob than this are skipped with a reason.
+  # Range 1..26623 (KB): an accepted blob plus its 1-byte sentinel must fit
+  # the 26 MiB blob-read cap, so larger values are rejected at config load.
   max_file_size_kb: 500
 
 ignore:

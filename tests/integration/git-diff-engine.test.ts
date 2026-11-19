@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { ConfigFileSchema } from "../../src/config/schema.ts";
 import type { ResolvedConfig } from "../../src/config/schema.ts";
 import { ReviewerError } from "../../src/core/errors.ts";
-import { GitDiffEngine } from "../../src/diff/git.ts";
+import { GitDiffEngine, PINNED_DIFF_FLAGS } from "../../src/diff/git.ts";
 import type { DiffLogger } from "../../src/diff/git.ts";
 import { runProcess } from "../../src/utils/spawn.ts";
 
@@ -562,6 +562,59 @@ describe("worktree and config determinism", () => {
     } finally {
       await cleanup();
     }
+  });
+
+  test("indent heuristic config leaves hunks, positions, and commentable lines unchanged", async () => {
+    const { dir, cleanup } = await makeRepo();
+    try {
+      // Deleting one of three identical unindented lines next to an indented
+      // block: the indent heuristic slides the deletion hunk (oldLine 3 vs 4).
+      const baseLines = ["end;", "def f():", "def f():", "def f():", "    x = 1;", "{", "    foo();"];
+      const headLines = ["end;", "def f():", "def f():", "    x = 1;", "{", "    foo();"];
+      const base = await writeAndCommit(dir, { "src/app.ts": `${baseLines.join("\n")}\n` }, "base");
+      const head = await writeAndCommit(dir, { "src/app.ts": `${headLines.join("\n")}\n` }, "head");
+      const plain = await runEngine(dir, base, head);
+      await git(dir, ["config", "diff.indentHeuristic", "true"]);
+      try {
+        const heuristic = await runEngine(dir, base, head);
+        await git(dir, ["config", "diff.indentHeuristic", "false"]);
+        const noHeuristic = await runEngine(dir, base, head);
+        expect(noHeuristic.result).toEqual(heuristic.result);
+        expect(heuristic.result).toEqual(plain.result);
+        const file = heuristic.result.files[0];
+        expect(file?.hunks).toHaveLength(1);
+        expect(file?.hunks[0]).toMatchObject({ oldStart: 1, oldLines: 7, newStart: 1, newLines: 6 });
+        const lines = file?.hunks[0]?.lines ?? [];
+        expect(lines.map((line) => line.kind)).toEqual(["ctx", "ctx", "ctx", "del", "ctx", "ctx", "ctx"]);
+        expect(lines.map((line) => [line.oldLine, line.newLine])).toEqual([
+          [1, 1],
+          [2, 2],
+          [3, 3],
+          [4, null],
+          [5, 4],
+          [6, 5],
+          [7, 6],
+        ]);
+        expect(lines.map((line) => line.position)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+        expect(file?.commentableLines).toEqual([1, 2, 3, 4, 5, 6]);
+        expect(file?.symbols).toEqual([
+          { name: "<module>", kind: "module", startLine: 1, endLine: 6, changedLines: [] },
+        ]);
+      } finally {
+        await git(dir, ["config", "--unset", "diff.indentHeuristic"]).catch(() => {});
+      }
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("pinned diff flags cover both invocations including indent heuristic", () => {
+    expect(PINNED_DIFF_FLAGS).toEqual([
+      "--diff-algorithm=myers",
+      "--inter-hunk-context=0",
+      "--find-renames=50%",
+      "--no-indent-heuristic",
+    ]);
   });
 
   test("logger receives one summary and the engine mints no run id", async () => {
