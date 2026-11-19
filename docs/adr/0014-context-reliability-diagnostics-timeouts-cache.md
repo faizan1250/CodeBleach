@@ -51,3 +51,17 @@ just prose.
   only otherwise — no `src/diff` touch, no pipeline rewiring, no Phase 4.
 - If evidence tiers, timeout counting, cache keys/caps, or status rules change,
   update this ADR, `systemdesign.md` §4.2/§5, and the context tests together.
+
+## Addendum — transport `transport-output-limit` (clarification, no new ADR)
+
+- `runProcess` reason `"output-limit"` (Git stdout/stderr byte-cap overflow,
+  `isGitOutputLimit` in `src/context/snapshot.ts`) maps to the distinct engine
+  code `transport-output-limit` (not `cap-reached`, which stays reserved for
+  caller/callee/test/file candidate caps; not `budget-exceeded`/`timeout`).
+- Resolvers rethrow output-limit-cause errors like timeouts instead of
+  recording them as content misses; the engine counts them zero times in
+  `queryTimeouts` and emits `transport-output-limit` at its existing catch
+  sites. Status follows the existing `NON_FATAL` gate: units present →
+  `partial` with preserved context; zero usable units → `failed`, never
+  `complete`. `ContextDiagnostic.code` stays an open string, so this is a
+  clarification of an existing contract, not a new ADR.

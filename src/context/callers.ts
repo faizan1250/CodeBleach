@@ -16,7 +16,7 @@ import type { RunBudget } from "./limits.ts";
 import { ParseCache } from "./parse-cache.ts";
 import type { ParsedFileSnapshot } from "./parse-cache.ts";
 import type { SnapshotReader, TreeEntry } from "./snapshot.ts";
-import { isGitTimeout } from "./snapshot.ts";
+import { isGitOutputLimit, isGitTimeout } from "./snapshot.ts";
 
 // Static best-effort caller discovery for one changed symbol. Reads head-side
 // blobs only; grep over the head tree finds name candidates while a bounded
@@ -242,7 +242,7 @@ async function loadCallerModule(path: string, context: CallerContext): Promise<C
   try {
     source = await context.reader.readHeadText(path);
   } catch (error) {
-    if (isGitTimeout(error)) throw error;
+    if (isGitTimeout(error) || isGitOutputLimit(error)) throw error;
     context.modules.set(path, null);
     return null;
   }
@@ -452,7 +452,7 @@ async function verifyCandidate(
   try {
     source = await context.reader.readHeadText(candidate);
   } catch (error) {
-    if (isGitTimeout(error)) throw error;
+    if (isGitTimeout(error) || isGitOutputLimit(error)) throw error;
     return { sites: [], diagnostics: [] };
   }
   const cached = await context.parseCache.getOrParse({
