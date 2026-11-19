@@ -92,7 +92,7 @@ describe("isGeneratedContent", () => {
   });
 
   test("ignores clean content and empty input", () => {
-    expect(isGeneratedContent("const x = 1;\n// mentions generated files as an example\n")).toBe(false);
+    expect(isGeneratedContent("const x = 1;\n// nothing special here\n")).toBe(false);
     expect(isGeneratedContent("")).toBe(false);
   });
 
