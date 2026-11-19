@@ -270,6 +270,21 @@ describe("loadConfig", () => {
     expect(result.error.message).toContain("regular file");
   });
 
+  test("malformed glob fails invalid with a path-specific message", async () => {
+    const repoDir = await makeRepo();
+    await writeFile(
+      join(repoDir, ".reviewer.yml"),
+      'version: 1\nignore:\n  paths:\n    - "src/{a,b}.ts"\n',
+    );
+    const result = await loadConfig(repoDir);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(codeOf(result)).toBe("CONFIG_INVALID");
+    expect(result.error.message).toContain("ignore.paths");
+    expect(result.error.message).toContain("src/{a,b}.ts");
+    expect(exitCodeForError(result.error)).toBe(2);
+  });
+
   test("resolved config serializes to JSON", async () => {
     const repoDir = await makeRepo();
     const result = await loadConfig(repoDir);

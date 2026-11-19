@@ -3,6 +3,7 @@ import { ConfigFileSchema } from "../../src/config/schema.ts";
 import {
   DEFAULT_CONFIDENCE_THRESHOLD,
   DEFAULT_IGNORE_PATHS,
+  DEFAULT_MAX_FILE_SIZE_KB,
   DEFAULT_MAX_FINDINGS,
 } from "../../src/config/defaults.ts";
 
@@ -87,5 +88,46 @@ describe("config schema", () => {
     expect(() =>
       ConfigFileSchema.parse({ rules: [{ id: "x", kind: "nonsense", text: "t" }] }),
     ).toThrow();
+  });
+
+  test("max_file_size_kb defaults to 500 KB", () => {
+    expect(DEFAULT_MAX_FILE_SIZE_KB).toBe(500);
+    expect(ConfigFileSchema.parse({}).review.max_file_size_kb).toBe(500);
+    expect(ConfigFileSchema.parse({ review: {} }).review.max_file_size_kb).toBe(500);
+  });
+
+  test("accepts custom max_file_size_kb", () => {
+    const config = ConfigFileSchema.parse({ review: { max_file_size_kb: 1 } });
+    expect(config.review.max_file_size_kb).toBe(1);
+  });
+
+  test("rejects non-positive max_file_size_kb", () => {
+    expect(() => ConfigFileSchema.parse({ review: { max_file_size_kb: 0 } })).toThrow();
+    expect(() => ConfigFileSchema.parse({ review: { max_file_size_kb: -5 } })).toThrow();
+  });
+
+  test("rejects malformed globs in every glob field", () => {
+    expect(() => ConfigFileSchema.parse({ ignore: { paths: ["src/{a,b}.ts"] } })).toThrow(
+      /invalid glob pattern "src\/\{a,b\}\.ts"/,
+    );
+    expect(() =>
+      ConfigFileSchema.parse({
+        rules: [{ id: "x", kind: "convention", text: "t", paths: ["src/[abc].ts"] }],
+      }),
+    ).toThrow(/invalid glob pattern "src\/\[abc\]\.ts"/);
+    expect(() =>
+      ConfigFileSchema.parse({
+        path_overrides: [{ paths: ["../escape.ts"], review: {} }],
+      }),
+    ).toThrow(/invalid glob pattern "\.\.\/escape\.ts"/);
+  });
+
+  test("accepts supported globs in every glob field", () => {
+    const config = ConfigFileSchema.parse({
+      ignore: { paths: ["gen/**"] },
+      rules: [{ id: "x", kind: "convention", text: "t", paths: ["src/**/*.ts"] }],
+      path_overrides: [{ paths: ["tests/**"], review: {} }],
+    });
+    expect(config.ignore.paths).toContain("gen/**");
   });
 });
