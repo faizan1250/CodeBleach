@@ -20,6 +20,8 @@ review:
   max_findings: 10
   # Files with more changed lines than this are skipped with a reason.
   max_changed_lines_per_file: 1500
+  # Files with a larger head-commit blob than this are skipped with a reason.
+  max_file_size_kb: 500
 
 ignore:
   # Additive: these entries EXTEND the built-in defaults
