@@ -321,7 +321,7 @@ src/
   cli/                 index.ts, commands/{review,config,version}.ts
   core/                pipeline.ts, errors.ts, result.ts, logger.ts, run-artifact.ts
   config/              schema.ts, defaults.ts, load.ts, migrate.ts
-  diff/                git.ts, parse.ts, positions.ts, filters.ts, symbols.ts
+  diff/                git.ts, parse.ts, positions.ts, filters.ts, paths.ts
   context/             adapters/typescript.ts, parser.ts, search.ts, retrieve.ts, rank.ts, budget.ts
   review/              engine.ts, prompt.ts, normalize.ts
   validate/            engine.ts, deterministic.ts, llm.ts, dedupe.ts
