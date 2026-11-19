@@ -88,17 +88,17 @@ describe("cli", () => {
     }
   });
 
-  test("normal review hits stubs and exits 1 with failed artifact", async () => {
+  test("normal review with invalid SHAs fails at diff with failed artifact", async () => {
     const { dir, cleanup } = await makeRepo();
     try {
       const result = await runCli(["review", "--base", "b", "--head", "h"], dir);
       expect(result.code).toBe(1);
-      expect(result.stderr).toContain("NOT_IMPLEMENTED");
+      expect(result.stderr).toContain("GIT_FAILED");
       const artifact = JSON.parse(
         await readFile(join(dir, ".reviewer-out", "run.json"), "utf8"),
       ) as { status: string; error: { code: string } };
       expect(artifact.status).toBe("failed");
-      expect(artifact.error.code).toBe("NOT_IMPLEMENTED");
+      expect(artifact.error.code).toBe("GIT_FAILED");
     } finally {
       await cleanup();
     }

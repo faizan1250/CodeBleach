@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { parseArgs } from "node:util";
 import { runConfigPrint, runConfigValidate } from "./commands/config.ts";
+import { runDiff } from "./commands/diff.ts";
 import { exitCodeForError } from "./exit-codes.ts";
 import { runReview } from "./commands/review.ts";
 import { runVersion } from "./commands/version.ts";
@@ -12,6 +13,7 @@ const USAGE = `codebleach - personal AI PR reviewer
 usage:
   codebleach review --base <sha> --head <sha> [--repo .] [--out .reviewer-out] [--dry-run] [--log-level info]
   codebleach review --demo --dry-run
+  codebleach diff --base <sha> --head <sha> [--repo .] [--log-level info]
   codebleach config validate [--repo .]
   codebleach config print [--repo .]
   codebleach version
@@ -70,6 +72,44 @@ async function runReviewCommand(args: string[]): Promise<number> {
   );
 }
 
+async function runDiffCommand(args: string[]): Promise<number> {
+  const parsed = parseArgs({
+    args,
+    strict: true,
+    allowPositionals: true,
+    options: {
+      base: { type: "string" },
+      head: { type: "string" },
+      repo: { type: "string", default: "." },
+      "log-level": { type: "string" },
+      help: { type: "boolean", default: false },
+    },
+  });
+  if (parsed.values["help"] === true) {
+    console.log(USAGE);
+    return 0;
+  }
+  if (parsed.positionals.length > 0) {
+    throw new ReviewerError({
+      code: "CONFIG_INVALID",
+      message: `unexpected argument: ${parsed.positionals.join(" ")}`,
+    });
+  }
+  const level = isLogLevel(parsed.values["log-level"], process.env["REVIEWER_LOG_LEVEL"]);
+  const runId = randomUUID();
+  const logger = createLogger({ level, runId });
+  return runDiff(
+    {
+      base: parsed.values["base"],
+      head: parsed.values["head"],
+      repo: parsed.values["repo"] ?? ".",
+      logLevel: level,
+      runId,
+    },
+    logger,
+  );
+}
+
 async function runConfigCommand(args: string[]): Promise<number> {
   const parsed = parseArgs({
     args,
@@ -113,6 +153,7 @@ async function main(): Promise<number> {
     }
     if (command === "config") return await runConfigCommand(rest);
     if (command === "review") return await runReviewCommand(rest);
+    if (command === "diff") return await runDiffCommand(rest);
     throw new ReviewerError({ code: "CONFIG_INVALID", message: `unknown command: ${command}` });
   } catch (error) {
     if (error instanceof ReviewerError) {
