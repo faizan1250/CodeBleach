@@ -18,6 +18,7 @@ import { parseSource } from "./parser.ts";
 import { scoreItem } from "./rank.ts";
 import type { RankProximity } from "./rank.ts";
 import type { SnapshotReader, TreeEntry } from "./snapshot.ts";
+import { isGitTimeout } from "./snapshot.ts";
 
 // Static best-effort related-test discovery for one changed symbol. Reads
 // head-side blobs only; a candidate counts as a test file only through the
@@ -170,7 +171,8 @@ async function loadTestModule(path: string, context: TestContext): Promise<TestM
   let source: string;
   try {
     source = await context.reader.readHeadText(path);
-  } catch {
+  } catch (error) {
+    if (isGitTimeout(error)) throw error;
     context.modules.set(path, null);
     return null;
   }

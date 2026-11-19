@@ -18,6 +18,7 @@ import type {
 import type { RunBudget } from "./limits.ts";
 import { parseSource } from "./parser.ts";
 import type { SnapshotReader, TreeEntry } from "./snapshot.ts";
+import { isGitTimeout } from "./snapshot.ts";
 
 // Static best-effort caller discovery for one changed symbol. Reads head-side
 // blobs only; grep over the head tree finds name candidates while a bounded
@@ -240,7 +241,8 @@ async function loadCallerModule(path: string, context: CallerContext): Promise<C
   let source: string;
   try {
     source = await context.reader.readHeadText(path);
-  } catch {
+  } catch (error) {
+    if (isGitTimeout(error)) throw error;
     context.modules.set(path, null);
     return null;
   }
@@ -452,7 +454,8 @@ async function verifyCandidate(
   let source: string;
   try {
     source = await context.reader.readHeadText(candidate);
-  } catch {
+  } catch (error) {
+    if (isGitTimeout(error)) throw error;
     return { sites: [], diagnostics: [] };
   }
   const parsed = await parseSource({

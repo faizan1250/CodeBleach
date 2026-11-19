@@ -5,6 +5,7 @@ import type { Definition, ExportReference, ImportKind, ImportReference, TypeDefi
 import type { RunBudget } from "./limits.ts";
 import { parseSource } from "./parser.ts";
 import { isRegularBlob } from "./snapshot.ts";
+import { isGitTimeout } from "./snapshot.ts";
 import type { SnapshotReader, TreeEntry } from "./snapshot.ts";
 
 // Relative-only import/type resolution against the head commit snapshot.
@@ -183,7 +184,8 @@ async function loadTarget(path: string, context: ResolveContext): Promise<Target
         parsed.tree?.delete();
       }
     }
-  } catch {
+  } catch (error) {
+    if (isGitTimeout(error)) throw error;
     loaded = { status: "read-failed" };
   }
   context.cache.set(path, loaded);

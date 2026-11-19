@@ -17,6 +17,7 @@ import type { CallReference, Definition, ExportReference, SymbolRange, TypeDefin
 import type { RunBudget } from "./limits.ts";
 import { parseSource } from "./parser.ts";
 import type { SnapshotReader, TreeEntry } from "./snapshot.ts";
+import { isGitTimeout } from "./snapshot.ts";
 
 // Static best-effort callee discovery for one changed symbol. Reads head-side
 // blobs only; never executes code or guesses across unrelated modules. Local
@@ -558,7 +559,8 @@ async function loadModule(path: string, context: DeferredContext): Promise<Loade
   let source: string;
   try {
     source = await context.reader.readHeadText(path);
-  } catch {
+  } catch (error) {
+    if (isGitTimeout(error)) throw error;
     return null;
   }
   const parsed = await parseSource({

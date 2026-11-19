@@ -36,6 +36,7 @@ import { selectRulesForFile } from "./rules.ts";
 import { rankContextItems, scoreItem } from "./rank.ts";
 import type { RankInput, RankProximity } from "./rank.ts";
 import { SnapshotReader } from "./snapshot.ts";
+import { isGitTimeout } from "./snapshot.ts";
 import { MODULE_SYMBOL_NAME, mapChangedSymbolsForFile } from "./symbols.ts";
 import { resolveTestsForSymbol } from "./tests.ts";
 import { estimateTokens } from "../utils/tokens.ts";
@@ -315,6 +316,12 @@ export class ContextEngineImpl implements ContextEngine {
     let candidateFilesSkippedByCap = 0;
     let parseBudgetExceeded = false;
     let deadlineExceeded = false;
+    // Actual timed-out Git subprocess queries only: +1 per engine-observed
+    // timeout throw. Git runs single-attempt with no retry, and each throw is
+    // caught exactly once below, so the count is the number of timed-out Git
+    // calls. Parse cancellations (filesParseTimedOut) and non-timeout Git
+    // failures never increment it.
+    let queryTimeouts = 0;
 
     const filesConsidered = diff.files.length;
     const importCache = new Map<string, Awaited<ReturnType<typeof resolveImportsForFile>>>();
@@ -342,6 +349,7 @@ export class ContextEngineImpl implements ContextEngine {
       try {
         symbols = await mapChangedSymbolsForFile({ file, reader, perFileMs, runBudget });
       } catch (error) {
+        if (isGitTimeout(error)) queryTimeouts += 1;
         const code = errorCodeOf(error);
         pushDiagnostic(
           "snapshot",
@@ -371,6 +379,7 @@ export class ContextEngineImpl implements ContextEngine {
         try {
           headText = await reader.readHeadText(file.path);
         } catch (error) {
+          if (isGitTimeout(error)) queryTimeouts += 1;
           const code = errorCodeOf(error);
           pushDiagnostic(
             "snapshot",
@@ -421,6 +430,7 @@ export class ContextEngineImpl implements ContextEngine {
         try {
           headText = await reader.readHeadText(file.path);
         } catch (error) {
+          if (isGitTimeout(error)) queryTimeouts += 1;
           const code = errorCodeOf(error);
           pushDiagnostic(
             "snapshot",
@@ -438,6 +448,7 @@ export class ContextEngineImpl implements ContextEngine {
         try {
           imports = await this.importsResolver({ importerPath: file.path, reader, perFileMs, runBudget });
         } catch (error) {
+          if (isGitTimeout(error)) queryTimeouts += 1;
           const code = errorCodeOf(error);
           pushDiagnostic(
             "import",
@@ -478,6 +489,9 @@ export class ContextEngineImpl implements ContextEngine {
             reader,
             perFileMs,
             runBudget,
+            noteGitTimeout: () => {
+              queryTimeouts += 1;
+            },
           });
           if (built.status === "emit") {
             units.push(built.unit);
@@ -498,6 +512,7 @@ export class ContextEngineImpl implements ContextEngine {
             }
           }
         } catch (error) {
+          if (isGitTimeout(error)) queryTimeouts += 1;
           const code = errorCodeOf(error);
           pushDiagnostic(
             "snapshot",
@@ -521,7 +536,6 @@ export class ContextEngineImpl implements ContextEngine {
 
     const elapsedMs = performance.now() - started;
     if (runBudget.remainingRunMs() <= 0) deadlineExceeded = true;
-    const queryTimeouts = 0;
     const hasIssue =
       deadlineExceeded ||
       parseBudgetExceeded ||
@@ -582,6 +596,7 @@ export class ContextEngineImpl implements ContextEngine {
     reader: SnapshotReader;
     perFileMs: number;
     runBudget: RunBudget;
+    noteGitTimeout: () => void;
   }): Promise<
     | { status: "emit"; unit: ReviewUnit; definitionTruncated: boolean; capSkipped: number; diagnostics: ContextDiagnostic[] }
     | { status: "skip"; reason: UnitSkip["reason"]; requiredTokens: number }
@@ -680,6 +695,7 @@ export class ContextEngineImpl implements ContextEngine {
         }
       }
     } catch (error) {
+      if (isGitTimeout(error)) input.noteGitTimeout();
       const code = errorCodeOf(error);
       unitDiagnostics.push({
         stage: "callee",
@@ -725,6 +741,7 @@ export class ContextEngineImpl implements ContextEngine {
         }
       }
     } catch (error) {
+      if (isGitTimeout(error)) input.noteGitTimeout();
       const code = errorCodeOf(error);
       unitDiagnostics.push({
         stage: "caller",
@@ -770,6 +787,7 @@ export class ContextEngineImpl implements ContextEngine {
         }
       }
     } catch (error) {
+      if (isGitTimeout(error)) input.noteGitTimeout();
       const code = errorCodeOf(error);
       unitDiagnostics.push({
         stage: "test",
