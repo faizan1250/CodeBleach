@@ -14,6 +14,8 @@ import type {
 import type {
   ContextBuildDiagnostics,
   ContextBuildResult,
+  ContextDiagnostic,
+  ContextDiagnosticStage,
   ContextItem,
   ReviewUnit,
   ReviewUnitDiff,
@@ -29,6 +31,7 @@ import type { Definition, TypeDefinition } from "./language.ts";
 import { getAdapter } from "./language.ts";
 import { RunBudget } from "./limits.ts";
 import { parseSource } from "./parser.ts";
+import type { ParseSkipReason } from "./parser.ts";
 import { selectRulesForFile } from "./rules.ts";
 import { rankContextItems, scoreItem } from "./rank.ts";
 import type { RankInput, RankProximity } from "./rank.ts";
@@ -42,8 +45,57 @@ import { detectLanguage } from "../diff/paths.ts";
 // budgeted by fitUnitToBudget, persisted as ContextBuildResult. Reads exact
 // commit snapshots only; never the working tree; never mutates DiffResult.
 
+export interface ContextEngineResolvers {
+  resolveCalleesForSymbol?: typeof resolveCalleesForSymbol | undefined;
+  resolveCallersForSymbol?: typeof resolveCallersForSymbol | undefined;
+  resolveTestsForSymbol?: typeof resolveTestsForSymbol | undefined;
+  resolveImportsForFile?: typeof resolveImportsForFile | undefined;
+}
+
 export interface ContextEngineDeps {
   logger: Logger;
+  resolvers?: ContextEngineResolvers | undefined;
+}
+
+// Bounded engine diagnostics: one entry per failed retrieval site, never
+// source text, messages, or secrets. Static reasons + error codes only.
+const MAX_CONTEXT_DIAGNOSTICS = 100;
+const NON_FATAL_DIAGNOSTIC_CODES = new Set(["cap-reached", "budget-exceeded", "parse-cancelled"]);
+
+function truncateDiagnosticText(value: string): string {
+  return value.length <= 200 ? value : value.slice(0, 200);
+}
+
+function errorCodeOf(error: unknown): string {
+  return error instanceof ReviewerError ? error.code : "INTERNAL";
+}
+
+function timeoutReasonOf(error: unknown): "timeout" | "output-limit" | "abort" | null {
+  if (error instanceof ReviewerError) {
+    const cause = error.cause as { reason?: unknown } | null | undefined;
+    if (typeof cause === "object" && cause !== null && "reason" in cause) {
+      const reason = (cause as { reason: unknown }).reason;
+      if (reason === "timeout") return "timeout";
+      if (reason === "output-limit") return "output-limit";
+      if (reason === "abort") return "abort";
+    }
+  }
+  return null;
+}
+
+function throwDiagnosticCode(error: unknown, runBudget: RunBudget | undefined, fallback: string): string {
+  if (runBudget !== undefined && runBudget.remainingRunMs() <= 0) return "deadline";
+  const timeoutReason = timeoutReasonOf(error);
+  if (timeoutReason === "timeout") return "timeout";
+  if (timeoutReason === "output-limit") return "cap-reached";
+  return fallback;
+}
+
+function parseSkipDiagnosticCode(skipReason: ParseSkipReason | undefined, runBudget: RunBudget | undefined): string {
+  if (skipReason === "run-deadline" || (runBudget !== undefined && runBudget.remainingRunMs() <= 0)) return "deadline";
+  if (skipReason === "cumulative-budget") return "budget-exceeded";
+  if (skipReason === "per-file-timeout") return "timeout";
+  return "parse-cancelled";
 }
 
 function hash12(input: string): string {
@@ -183,6 +235,10 @@ function findDefinitionText(
 
 export class ContextEngineImpl implements ContextEngine {
   private readonly logger: Logger;
+  private readonly calleesResolver: typeof resolveCalleesForSymbol;
+  private readonly callersResolver: typeof resolveCallersForSymbol;
+  private readonly testsResolver: typeof resolveTestsForSymbol;
+  private readonly importsResolver: typeof resolveImportsForFile;
 
   constructor(deps: ContextEngineDeps) {
     const logger = (deps as ContextEngineDeps | null | undefined)?.logger;
@@ -200,6 +256,11 @@ export class ContextEngineImpl implements ContextEngine {
       });
     }
     this.logger = logger;
+    const resolvers = (deps as ContextEngineDeps | null | undefined)?.resolvers ?? {};
+    this.calleesResolver = resolvers.resolveCalleesForSymbol ?? resolveCalleesForSymbol;
+    this.callersResolver = resolvers.resolveCallersForSymbol ?? resolveCallersForSymbol;
+    this.testsResolver = resolvers.resolveTestsForSymbol ?? resolveTestsForSymbol;
+    this.importsResolver = resolvers.resolveImportsForFile ?? resolveImportsForFile;
   }
 
   async build(
@@ -223,6 +284,30 @@ export class ContextEngineImpl implements ContextEngine {
 
     const units: ReviewUnit[] = [];
     const unitsSkipped: UnitSkip[] = [];
+    const engineDiagnostics: ContextDiagnostic[] = [];
+    const seenDiagnosticKeys = new Set<string>();
+    const pushDiagnostic = (
+      stage: ContextDiagnosticStage,
+      path: string,
+      symbol: string | undefined,
+      code: string,
+      reason: string,
+    ): void => {
+      const safePath = truncateDiagnosticText(path);
+      const safeSymbol = symbol === undefined ? undefined : truncateDiagnosticText(symbol);
+      const key = `${stage}${"\0"}${safePath}${"\0"}${safeSymbol ?? ""}${"\0"}${code}`;
+      if (seenDiagnosticKeys.has(key)) return;
+      seenDiagnosticKeys.add(key);
+      if (engineDiagnostics.length >= MAX_CONTEXT_DIAGNOSTICS) return;
+      if (safeSymbol === undefined) {
+        engineDiagnostics.push({ stage, path: safePath, code, reason });
+      } else {
+        engineDiagnostics.push({ stage, path: safePath, symbol: safeSymbol, code, reason });
+      }
+    };
+    const mergeUnitDiagnostics = (items: readonly ContextDiagnostic[]): void => {
+      for (const item of items) pushDiagnostic(item.stage, item.path, item.symbol, item.code, item.reason);
+    };
     let filesParsed = 0;
     let filesParseTimedOut = 0;
     let unitsWithTruncatedDiff = 0;
@@ -257,6 +342,14 @@ export class ContextEngineImpl implements ContextEngine {
       try {
         symbols = await mapChangedSymbolsForFile({ file, reader, perFileMs, runBudget });
       } catch (error) {
+        const code = errorCodeOf(error);
+        pushDiagnostic(
+          "snapshot",
+          file.path,
+          undefined,
+          throwDiagnosticCode(error, runBudget, "symbol-mapping-failed"),
+          `symbol mapping failed (${code})`,
+        );
         this.logger.warn("context file skipped", {
           path: file.path,
           code: error instanceof ReviewerError ? error.code : "UNKNOWN",
@@ -277,7 +370,15 @@ export class ContextEngineImpl implements ContextEngine {
       if (file.language !== null) {
         try {
           headText = await reader.readHeadText(file.path);
-        } catch {
+        } catch (error) {
+          const code = errorCodeOf(error);
+          pushDiagnostic(
+            "snapshot",
+            file.path,
+            undefined,
+            throwDiagnosticCode(error, runBudget, "snapshot-read-failed"),
+            `head snapshot read failed (${code})`,
+          );
           headText = null;
         }
         if (headText !== null) {
@@ -293,6 +394,13 @@ export class ContextEngineImpl implements ContextEngine {
             if (parsed.tree === null) {
               definitionParseCancelled = true;
               filesParseTimedOut += 1;
+              pushDiagnostic(
+                "parse",
+                file.path,
+                undefined,
+                parseSkipDiagnosticCode(parsed.skipReason, runBudget),
+                `definition parse cancelled (${parsed.skipReason ?? "cancelled"})`,
+              );
               if (parsed.skipReason === "cumulative-budget" || parsed.skipReason === "run-deadline") {
                 parseBudgetExceeded = parsed.skipReason === "cumulative-budget" || runBudget.remainingRunMs() <= 0;
                 if (runBudget.remainingRunMs() <= 0) deadlineExceeded = true;
@@ -312,7 +420,15 @@ export class ContextEngineImpl implements ContextEngine {
       } else {
         try {
           headText = await reader.readHeadText(file.path);
-        } catch {
+        } catch (error) {
+          const code = errorCodeOf(error);
+          pushDiagnostic(
+            "snapshot",
+            file.path,
+            undefined,
+            throwDiagnosticCode(error, runBudget, "snapshot-read-failed"),
+            `head snapshot read failed (${code})`,
+          );
           headText = null;
         }
       }
@@ -320,8 +436,16 @@ export class ContextEngineImpl implements ContextEngine {
       let imports = importCache.get(file.path);
       if (imports === undefined && file.language !== null) {
         try {
-          imports = await resolveImportsForFile({ importerPath: file.path, reader, perFileMs, runBudget });
-        } catch {
+          imports = await this.importsResolver({ importerPath: file.path, reader, perFileMs, runBudget });
+        } catch (error) {
+          const code = errorCodeOf(error);
+          pushDiagnostic(
+            "import",
+            file.path,
+            undefined,
+            throwDiagnosticCode(error, runBudget, "import-failed"),
+            `import resolution failed (${code})`,
+          );
           imports = { resolved: [], diagnostics: [] };
         }
         importCache.set(file.path, imports);
@@ -360,6 +484,7 @@ export class ContextEngineImpl implements ContextEngine {
             if (built.unit.diff.truncated) unitsWithTruncatedDiff += 1;
             if (built.definitionTruncated) unitsWithTruncatedDefinition += 1;
             candidateFilesSkippedByCap += built.capSkipped;
+            mergeUnitDiagnostics(built.diagnostics);
           } else {
             unitsSkipped.push({
               path: file.path,
@@ -373,6 +498,14 @@ export class ContextEngineImpl implements ContextEngine {
             }
           }
         } catch (error) {
+          const code = errorCodeOf(error);
+          pushDiagnostic(
+            "snapshot",
+            file.path,
+            symbol.name,
+            throwDiagnosticCode(error, runBudget, "unit-failed"),
+            `unit build failed (${code})`,
+          );
           this.logger.warn("context symbol skipped", {
             path: file.path,
             symbol: symbol.name,
@@ -388,7 +521,27 @@ export class ContextEngineImpl implements ContextEngine {
 
     const elapsedMs = performance.now() - started;
     if (runBudget.remainingRunMs() <= 0) deadlineExceeded = true;
-    const status = deadlineExceeded || parseBudgetExceeded ? "partial" : "complete";
+    const queryTimeouts = 0;
+    const hasIssue =
+      deadlineExceeded ||
+      parseBudgetExceeded ||
+      engineDiagnostics.length > 0 ||
+      unitsSkipped.length > 0 ||
+      candidateFilesSkippedByCap > 0 ||
+      filesParseTimedOut > 0 ||
+      queryTimeouts > 0;
+    let status: ContextBuildResult["status"];
+    if (!hasIssue) {
+      status = "complete";
+    } else if (units.length > 0) {
+      status = "partial";
+    } else if (deadlineExceeded || parseBudgetExceeded) {
+      status = "partial";
+    } else if (engineDiagnostics.some((entry) => !NON_FATAL_DIAGNOSTIC_CODES.has(entry.code))) {
+      status = "failed";
+    } else {
+      status = "partial";
+    }
     const diagnostics: ContextBuildDiagnostics = {
       elapsedMs,
       deadlineExceeded,
@@ -401,8 +554,8 @@ export class ContextEngineImpl implements ContextEngine {
       unitsWithTruncatedDiff,
       unitsWithTruncatedDefinition,
       candidateFilesSkippedByCap,
-      queryTimeouts: 0,
-      diagnostics: [],
+      queryTimeouts,
+      diagnostics: engineDiagnostics,
     };
     this.logger.info("context complete", {
       headSha: diff.headSha,
@@ -430,7 +583,7 @@ export class ContextEngineImpl implements ContextEngine {
     perFileMs: number;
     runBudget: RunBudget;
   }): Promise<
-    | { status: "emit"; unit: ReviewUnit; definitionTruncated: boolean; capSkipped: number }
+    | { status: "emit"; unit: ReviewUnit; definitionTruncated: boolean; capSkipped: number; diagnostics: ContextDiagnostic[] }
     | { status: "skip"; reason: UnitSkip["reason"]; requiredTokens: number }
   > {
     const { diff, file, symbol } = input;
@@ -489,8 +642,9 @@ export class ContextEngineImpl implements ContextEngine {
     }
 
     let capSkipped = 0;
+    const unitDiagnostics: ContextDiagnostic[] = [];
     try {
-      const callees = await resolveCalleesForSymbol({
+      const callees = await this.calleesResolver({
         filePath: file.path,
         symbol,
         reader: input.reader,
@@ -518,12 +672,26 @@ export class ContextEngineImpl implements ContextEngine {
         );
       }
       capSkipped += callees.diagnostics.filter((diagnostic) => diagnostic.reason === "cap-reached").length;
-    } catch {
-      // Best-effort: callees omitted on failure.
+      for (const diagnostic of callees.diagnostics) {
+        if (diagnostic.reason === "parse-cancelled") {
+          unitDiagnostics.push({ stage: "callee", path: file.path, symbol: symbol.name, code: "parse-cancelled", reason: "callee parse cancelled" });
+        } else if (diagnostic.reason === "cap-reached") {
+          unitDiagnostics.push({ stage: "callee", path: file.path, symbol: symbol.name, code: "cap-reached", reason: "callee cap reached" });
+        }
+      }
+    } catch (error) {
+      const code = errorCodeOf(error);
+      unitDiagnostics.push({
+        stage: "callee",
+        path: file.path,
+        symbol: symbol.name,
+        code: throwDiagnosticCode(error, input.runBudget, "callee-failed"),
+        reason: `callee resolution failed (${code})`,
+      });
     }
 
     try {
-      const callers = await resolveCallersForSymbol({
+      const callers = await this.callersResolver({
         filePath: file.path,
         symbol,
         reader: input.reader,
@@ -549,12 +717,26 @@ export class ContextEngineImpl implements ContextEngine {
         );
       }
       capSkipped += callers.diagnostics.filter((diagnostic) => diagnostic.reason === "cap-reached").length;
-    } catch {
-      // Best-effort: callers omitted on failure.
+      for (const diagnostic of callers.diagnostics) {
+        if (diagnostic.reason === "parse-cancelled") {
+          unitDiagnostics.push({ stage: "caller", path: file.path, symbol: symbol.name, code: "parse-cancelled", reason: "caller parse cancelled" });
+        } else if (diagnostic.reason === "cap-reached") {
+          unitDiagnostics.push({ stage: "caller", path: file.path, symbol: symbol.name, code: "cap-reached", reason: "caller cap reached" });
+        }
+      }
+    } catch (error) {
+      const code = errorCodeOf(error);
+      unitDiagnostics.push({
+        stage: "caller",
+        path: file.path,
+        symbol: symbol.name,
+        code: throwDiagnosticCode(error, input.runBudget, "caller-failed"),
+        reason: `caller resolution failed (${code})`,
+      });
     }
 
     try {
-      const tests = await resolveTestsForSymbol({
+      const tests = await this.testsResolver({
         filePath: file.path,
         symbol,
         reader: input.reader,
@@ -580,8 +762,22 @@ export class ContextEngineImpl implements ContextEngine {
         );
       }
       capSkipped += tests.diagnostics.filter((diagnostic) => diagnostic.reason === "cap-reached").length;
-    } catch {
-      // Best-effort: tests omitted on failure.
+      for (const diagnostic of tests.diagnostics) {
+        if (diagnostic.reason === "parse-cancelled") {
+          unitDiagnostics.push({ stage: "test", path: file.path, symbol: symbol.name, code: "parse-cancelled", reason: "test parse cancelled" });
+        } else if (diagnostic.reason === "cap-reached") {
+          unitDiagnostics.push({ stage: "test", path: file.path, symbol: symbol.name, code: "cap-reached", reason: "test cap reached" });
+        }
+      }
+    } catch (error) {
+      const code = errorCodeOf(error);
+      unitDiagnostics.push({
+        stage: "test",
+        path: file.path,
+        symbol: symbol.name,
+        code: throwDiagnosticCode(error, input.runBudget, "test-failed"),
+        reason: `test resolution failed (${code})`,
+      });
     }
 
     const ranked = rankContextItems(candidates);
@@ -626,6 +822,6 @@ export class ContextEngineImpl implements ContextEngine {
       context: [definitionItem, ...outcome.includedItems],
       rules: outcome.keptRules,
     };
-    return { status: "emit", unit, definitionTruncated: outcome.definitionTruncated, capSkipped };
+    return { status: "emit", unit, definitionTruncated: outcome.definitionTruncated, capSkipped, diagnostics: unitDiagnostics };
   }
 }
