@@ -20,7 +20,7 @@ function readerFor(
   dir: string,
   headSha: string,
   mergeBase: string,
-  options: { maxBlobBytes?: number; maxTotalBytes?: number } = {},
+  options: { maxBlobBytes?: number; maxTotalBytes?: number; maxGrepBytes?: number } = {},
 ): SnapshotReader {
   return new SnapshotReader({ repoRoot: dir, headSha, mergeBase, ...options });
 }
@@ -216,6 +216,42 @@ describe("head commit search", () => {
       expect(await reader.grepHead("target")).toEqual([
         { path: "src/a.ts", line: 1, text: "function target(): number { return 1; }" },
       ]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("grep output cap overflow is GIT_FAILED", async () => {
+    const { dir, cleanup } = await makeRepo();
+    try {
+      const base = await writeAndCommit(dir, { "src/a.ts": "function target(): number { return 1; }\n" }, "base");
+      const reader = readerFor(dir, base, base, { maxGrepBytes: 10 });
+      try {
+        await reader.grepHead("target");
+        expect(false).toBe(true);
+      } catch (error) {
+        expect(error).toBeInstanceOf(ReviewerError);
+        expect((error as ReviewerError).code).toBe("GIT_FAILED");
+        expect((error as ReviewerError).cause as { reason?: unknown }).toEqual(
+          expect.objectContaining({ reason: "output-limit" }),
+        );
+      }
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("list results are copies that leave the cache intact", async () => {
+    const { dir, cleanup } = await makeRepo();
+    try {
+      const base = await writeAndCommit(dir, { "src/a.ts": "const v = 1;\n" }, "base");
+      const reader = readerFor(dir, base, base);
+      const head = await reader.listHeadFiles();
+      head.delete("src/a.ts");
+      expect((await reader.listHeadFiles()).has("src/a.ts")).toBe(true);
+      const index = await reader.listBaseFiles();
+      index.delete("src/a.ts");
+      expect((await reader.listBaseFiles()).has("src/a.ts")).toBe(true);
     } finally {
       await cleanup();
     }

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ReviewerError } from "../../src/core/errors.ts";
+import { RunBudget } from "../../src/context/limits.ts";
 import {
   SnapshotReader,
   isRegularBlob,
@@ -153,6 +154,19 @@ describe("snapshot reader construction", () => {
       expect(false).toBe(true);
     } catch (error) {
       expect(codeOf(error)).toBe("INTERNAL");
+    }
+  });
+
+  test("expired run budget rejects reads with GIT_FAILED", async () => {
+    let now = 1000;
+    const budget = new RunBudget({ maxRunMs: 100, maxTotalParseMs: 100 }, { now: () => now });
+    now = 2000;
+    const reader = new SnapshotReader({ repoRoot: "/repo", headSha: HEAD_SHA, mergeBase: BASE_SHA, runBudget: budget });
+    try {
+      await reader.listHeadFiles();
+      expect(false).toBe(true);
+    } catch (error) {
+      expect(codeOf(error)).toBe("GIT_FAILED");
     }
   });
 });

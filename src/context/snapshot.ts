@@ -233,7 +233,8 @@ export class SnapshotReader {
         await this.runGit(["ls-tree", "-r", "-z", "--full-tree", this.head], "git ls-tree (head)"),
       );
     }
-    return this.headIndex;
+    // Copy so callers cannot mutate the cached index.
+    return new Map(this.headIndex);
   }
 
   /** Tracked-file index of the merge-base commit; repo-relative POSIX paths. */
@@ -243,7 +244,8 @@ export class SnapshotReader {
         await this.runGit(["ls-tree", "-r", "-z", "--full-tree", this.base], "git ls-tree (base)"),
       );
     }
-    return this.baseIndex;
+    // Copy so callers cannot mutate the cached index.
+    return new Map(this.baseIndex);
   }
 
   /** Head-side source for a tracked regular file; renames resolve via path at head. */
