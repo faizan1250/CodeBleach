@@ -1,0 +1,582 @@
+import { createHash } from "node:crypto";
+import { DEFAULT_MAX_PARSE_TIME_MS } from "../config/defaults.ts";
+import type { ResolvedConfig } from "../config/schema.ts";
+import type { ContextEngine } from "../core/contracts.ts";
+import { ReviewerError } from "../core/errors.ts";
+import type { Logger } from "../core/logger.ts";
+import type {
+  ChangedFile,
+  ChangedSymbol,
+  DiffHunk,
+  DiffResult,
+  SymbolKind,
+} from "../types/diff.ts";
+import type {
+  ContextBuildDiagnostics,
+  ContextBuildResult,
+  ContextItem,
+  ReviewUnit,
+  ReviewUnitDiff,
+  ReviewUnitFile,
+  UnitSkip,
+} from "../types/context.ts";
+import type { Rule } from "../types/rules.ts";
+import { fitUnitToBudget } from "./budget.ts";
+import { resolveCalleesForSymbol } from "./calls.ts";
+import { resolveCallersForSymbol } from "./callers.ts";
+import { resolveImportsForFile } from "./imports.ts";
+import type { Definition, TypeDefinition } from "./language.ts";
+import { getAdapter } from "./language.ts";
+import { RunBudget } from "./limits.ts";
+import { parseSource } from "./parser.ts";
+import { selectRulesForFile } from "./rules.ts";
+import { rankContextItems, scoreItem } from "./rank.ts";
+import type { RankInput, RankProximity } from "./rank.ts";
+import { SnapshotReader } from "./snapshot.ts";
+import { MODULE_SYMBOL_NAME, mapChangedSymbolsForFile } from "./symbols.ts";
+import { estimateTokens } from "../utils/tokens.ts";
+import { detectLanguage } from "../diff/paths.ts";
+
+// Real ContextEngine (P3-11): one ReviewUnit per AST-derived ChangedSymbol,
+// budgeted by fitUnitToBudget, persisted as ContextBuildResult. Reads exact
+// commit snapshots only; never the working tree; never mutates DiffResult.
+
+export interface ContextEngineDeps {
+  logger: Logger;
+}
+
+function hash12(input: string): string {
+  return createHash("sha1").update(input).digest("hex").slice(0, 12);
+}
+
+export function stableUnitId(
+  headSha: string,
+  path: string,
+  kind: SymbolKind,
+  container: string | undefined,
+  name: string,
+  startLine: number,
+): string {
+  return `ctx-${hash12(`${headSha}${"\0"}${path}${"\0"}${kind}:${container ?? ""}:${name}:${startLine}`)}`;
+}
+
+export function stableItemId(unitId: string, kind: string, file: string, startLine: number): string {
+  return `${unitId}-${hash12(`${kind}${"\0"}${file}${"\0"}${startLine}`)}`;
+}
+
+export function toReviewUnitFile(file: ChangedFile): ReviewUnitFile {
+  return {
+    path: file.path,
+    oldPath: file.oldPath,
+    status: file.status,
+    language: file.language,
+    commentableLines: [...file.commentableLines],
+  };
+}
+
+export function relevantHunksForSymbol(file: ChangedFile, symbol: ChangedSymbol): DiffHunk[] {
+  const added = new Set(symbol.changedLines);
+  const deleted = new Set(symbol.deletedLines ?? []);
+  if (added.size === 0 && deleted.size === 0) return [];
+  return file.hunks.filter((hunk) => {
+    for (const line of hunk.lines) {
+      if (line.kind === "add" && line.newLine !== null && added.has(line.newLine)) return true;
+      if (line.kind === "del" && line.oldLine !== null && deleted.has(line.oldLine)) return true;
+    }
+    return false;
+  });
+}
+
+function hasContentChanges(file: ChangedFile): boolean {
+  for (const hunk of file.hunks) {
+    for (const line of hunk.lines) {
+      if (line.kind === "add" || line.kind === "del") return true;
+    }
+  }
+  return false;
+}
+
+function countHeadLines(source: string): number {
+  if (source === "") return 0;
+  let newlines = 0;
+  for (let index = 0; index < source.length; index += 1) {
+    if (source[index] === "\n") newlines += 1;
+  }
+  return source.endsWith("\n") ? newlines : newlines + 1;
+}
+
+function nearbyHeadText(source: string, file: ChangedFile, maxLines = 30, contextLines = 15): string {
+  const lines = source.split("\n");
+  if (lines.length === 0) return "";
+  let anchor: number | null = null;
+  for (const hunk of file.hunks) {
+    for (const line of hunk.lines) {
+      if ((line.kind === "add" || line.kind === "ctx") && line.newLine !== null) {
+        anchor = anchor === null ? line.newLine : Math.min(anchor, line.newLine);
+      }
+    }
+  }
+  const center = anchor ?? 1;
+  const from = Math.max(1, center - contextLines);
+  const to = Math.min(lines.length, from + maxLines - 1);
+  const adjustedFrom = Math.max(1, Math.min(from, Math.max(1, to - maxLines + 1)));
+  return lines.slice(adjustedFrom - 1, to).join("\n");
+}
+
+function splitSignatureBody(fullText: string, signatureText: string): { signature: string; body: string } {
+  if (fullText === signatureText) return { signature: signatureText, body: "" };
+  if (fullText.startsWith(signatureText)) {
+    return { signature: signatureText, body: fullText.slice(signatureText.length).replace(/^\r?\n/, "") };
+  }
+  return { signature: signatureText, body: fullText };
+}
+
+function typeSignatureBody(text: string): { signature: string; body: string } {
+  const lines = text.split("\n");
+  const signature = lines[0] ?? text;
+  const body = lines.slice(1).join("\n");
+  return { signature, body };
+}
+
+interface DefinitionText {
+  signature: string;
+  body: string;
+}
+
+function findDefinitionText(
+  definitions: readonly Definition[],
+  types: readonly TypeDefinition[],
+  symbol: ChangedSymbol,
+): DefinitionText | null {
+  if (symbol.kind === "type") {
+    const sameTypes = types.filter((type) => type.name === symbol.name);
+    const picked =
+      sameTypes.length === 1
+        ? sameTypes[0]
+        : (sameTypes.find((type) => type.range.startLine === symbol.startLine) ?? sameTypes[0]);
+    if (picked !== undefined) return typeSignatureBody(picked.text);
+    const sameDefs = definitions.filter(
+      (definition) => definition.kind === "type" && definition.name === symbol.name,
+    );
+    const pickedDef =
+      sameDefs.length === 1
+        ? sameDefs[0]
+        : (sameDefs.find((definition) => definition.fullRange.startLine === symbol.startLine) ?? sameDefs[0]);
+    if (pickedDef !== undefined) return splitSignatureBody(pickedDef.fullText, pickedDef.signatureText);
+    return null;
+  }
+  if (symbol.kind === "module") return null;
+  const same = definitions.filter(
+    (definition) =>
+      definition.name === symbol.name &&
+      definition.kind === symbol.kind &&
+      (definition.container ?? undefined) === (symbol.container ?? undefined),
+  );
+  const picked =
+    same.length === 1
+      ? same[0]
+      : (same.find((definition) => definition.fullRange.startLine === symbol.startLine) ?? same[0]);
+  if (picked === undefined) return null;
+  return splitSignatureBody(picked.fullText, picked.signatureText);
+}
+
+export class ContextEngineImpl implements ContextEngine {
+  private readonly logger: Logger;
+
+  constructor(deps: ContextEngineDeps) {
+    const logger = (deps as ContextEngineDeps | null | undefined)?.logger;
+    if (
+      logger === null ||
+      logger === undefined ||
+      typeof logger.debug !== "function" ||
+      typeof logger.info !== "function" ||
+      typeof logger.warn !== "function" ||
+      typeof logger.error !== "function"
+    ) {
+      throw new ReviewerError({
+        code: "INTERNAL",
+        message: "ContextEngineImpl requires a logger with debug/info/warn/error methods",
+      });
+    }
+    this.logger = logger;
+  }
+
+  async build(
+    diff: DiffResult,
+    config: ResolvedConfig,
+    repoDir: string,
+  ): Promise<ContextBuildResult> {
+    const started = performance.now();
+    const perFileMs = config.context.max_parse_time_ms ?? DEFAULT_MAX_PARSE_TIME_MS;
+    const runBudget = new RunBudget({
+      maxRunMs: config.context.max_run_time_ms,
+      maxTotalParseMs: config.context.max_total_parse_time_ms,
+    });
+    const reader = new SnapshotReader({
+      repoRoot: repoDir,
+      headSha: diff.headSha,
+      mergeBase: diff.mergeBase,
+      runBudget,
+    });
+    const maxTokens = config.context.max_tokens_per_unit;
+
+    const units: ReviewUnit[] = [];
+    const unitsSkipped: UnitSkip[] = [];
+    let filesParsed = 0;
+    let filesParseTimedOut = 0;
+    let unitsWithTruncatedDiff = 0;
+    let unitsWithTruncatedDefinition = 0;
+    let candidateFilesSkippedByCap = 0;
+    let parseBudgetExceeded = false;
+    let deadlineExceeded = false;
+
+    const filesConsidered = diff.files.length;
+    const importCache = new Map<string, Awaited<ReturnType<typeof resolveImportsForFile>>>();
+
+    const remainingFiles = [...diff.files];
+    for (const file of diff.files) {
+      remainingFiles.shift();
+      if (runBudget.remainingRunMs() <= 0) {
+        deadlineExceeded = true;
+        unitsSkipped.push({ path: file.path, symbol: "<pending>", reason: "run-deadline" });
+        for (const rest of remainingFiles) {
+          unitsSkipped.push({ path: rest.path, symbol: "<pending>", reason: "run-deadline" });
+        }
+        break;
+      }
+      if (file.skipReason !== undefined) continue;
+      if (!hasContentChanges(file)) continue;
+      if (file.status === "deleted") continue;
+
+      let symbols: ChangedSymbol[];
+      try {
+        symbols = await mapChangedSymbolsForFile({ file, reader, perFileMs, runBudget });
+      } catch (error) {
+        this.logger.warn("context file skipped", {
+          path: file.path,
+          code: error instanceof ReviewerError ? error.code : "UNKNOWN",
+        });
+        continue;
+      }
+      if (file.language !== null) filesParsed += 1;
+      if (symbols.length === 0) continue;
+
+      let headText: string | null = null;
+      let headDefinitions: Definition[] = [];
+      let headTypes: TypeDefinition[] = [];
+      let definitionParseCancelled = false;
+      if (file.language !== null) {
+        try {
+          headText = await reader.readHeadText(file.path);
+        } catch {
+          headText = null;
+        }
+        if (headText !== null) {
+          const language = detectLanguage(file.path);
+          if (language !== null) {
+            const parsed = await parseSource({
+              source: headText,
+              language,
+              filePath: file.path,
+              perFileMs,
+              runBudget,
+            });
+            if (parsed.tree === null) {
+              definitionParseCancelled = true;
+              filesParseTimedOut += 1;
+              if (parsed.skipReason === "cumulative-budget" || parsed.skipReason === "run-deadline") {
+                parseBudgetExceeded = parsed.skipReason === "cumulative-budget" || runBudget.remainingRunMs() <= 0;
+                if (runBudget.remainingRunMs() <= 0) deadlineExceeded = true;
+              }
+            } else {
+              try {
+                const adapter = getAdapter(language);
+                headDefinitions = adapter.extractDefinitions(parsed.tree, parsed.source);
+                headTypes = adapter.extractTypes(parsed.tree, parsed.source);
+              } finally {
+                parsed.tree.delete();
+              }
+            }
+          }
+        }
+      } else {
+        try {
+          headText = await reader.readHeadText(file.path);
+        } catch {
+          headText = null;
+        }
+      }
+
+      let imports = importCache.get(file.path);
+      if (imports === undefined && file.language !== null) {
+        try {
+          imports = await resolveImportsForFile({ importerPath: file.path, reader, perFileMs, runBudget });
+        } catch {
+          imports = { resolved: [], diagnostics: [] };
+        }
+        importCache.set(file.path, imports);
+      }
+
+      for (const symbol of symbols) {
+        if (runBudget.remainingRunMs() <= 0) {
+          deadlineExceeded = true;
+          unitsSkipped.push({ path: file.path, symbol: symbol.name, reason: "run-deadline" });
+          break;
+        }
+        try {
+          const built = await this.buildUnit({
+            diff,
+            file,
+            symbol,
+            headText,
+            headDefinitions,
+            headTypes,
+            definitionParseCancelled,
+            imports: imports?.resolved ?? [],
+            rules: selectRulesForFile(config.rules, file.path),
+            maxTokens,
+            reader,
+            perFileMs,
+            runBudget,
+          });
+          if (built.status === "emit") {
+            units.push(built.unit);
+            if (built.unit.diff.truncated) unitsWithTruncatedDiff += 1;
+            if (built.definitionTruncated) unitsWithTruncatedDefinition += 1;
+            candidateFilesSkippedByCap += built.capSkipped;
+          } else {
+            unitsSkipped.push({
+              path: file.path,
+              symbol: symbol.name,
+              reason: built.reason,
+              requiredTokens: built.requiredTokens,
+              maxTokens,
+            });
+            if (built.reason === "parse-cancelled" || built.reason === "parse-budget-exceeded") {
+              filesParseTimedOut += 1;
+            }
+          }
+        } catch (error) {
+          this.logger.warn("context symbol skipped", {
+            path: file.path,
+            symbol: symbol.name,
+            code: error instanceof ReviewerError ? error.code : "UNKNOWN",
+          });
+        }
+      }
+      if (deadlineExceeded) {
+        for (const rest of remainingFiles) {
+          unitsSkipped.push({ path: rest.path, symbol: "<pending>", reason: "run-deadline" });
+        }
+        break;
+      }
+    }
+
+    const elapsedMs = performance.now() - started;
+    if (runBudget.remainingRunMs() <= 0) deadlineExceeded = true;
+    const status = deadlineExceeded || parseBudgetExceeded ? "partial" : "complete";
+    const diagnostics: ContextBuildDiagnostics = {
+      elapsedMs,
+      deadlineExceeded,
+      parseBudgetExceeded,
+      filesConsidered,
+      filesParsed,
+      filesParseTimedOut,
+      unitsCreated: units.length,
+      unitsSkipped,
+      unitsWithTruncatedDiff,
+      unitsWithTruncatedDefinition,
+      candidateFilesSkippedByCap,
+      queryTimeouts: 0,
+    };
+    this.logger.info("context complete", {
+      headSha: diff.headSha,
+      filesConsidered,
+      unitsCreated: units.length,
+      unitsSkipped: unitsSkipped.length,
+      status,
+      elapsedMs,
+    });
+    return { units, status, diagnostics };
+  }
+
+  private async buildUnit(input: {
+    diff: DiffResult;
+    file: ChangedFile;
+    symbol: ChangedSymbol;
+    headText: string | null;
+    headDefinitions: readonly Definition[];
+    headTypes: readonly TypeDefinition[];
+    definitionParseCancelled: boolean;
+    imports: Awaited<ReturnType<typeof resolveImportsForFile>>["resolved"];
+    rules: Rule[];
+    maxTokens: number;
+    reader: SnapshotReader;
+    perFileMs: number;
+    runBudget: RunBudget;
+  }): Promise<
+    | { status: "emit"; unit: ReviewUnit; definitionTruncated: boolean; capSkipped: number }
+    | { status: "skip"; reason: UnitSkip["reason"]; requiredTokens: number }
+  > {
+    const { diff, file, symbol } = input;
+    const relevantHunks = relevantHunksForSymbol(file, symbol);
+    const hunks = relevantHunks.length > 0 ? relevantHunks : file.hunks;
+
+    let signature: string;
+    let body: string;
+    if (symbol.kind === "module" || file.language === null || input.definitionParseCancelled) {
+      signature = symbol.kind === "module" ? `<module> ${file.path}` : `${symbol.name} in ${file.path}`;
+      const fallback = input.headText === null ? "" : nearbyHeadText(input.headText, file);
+      body = fallback;
+    } else {
+      const found = findDefinitionText(input.headDefinitions, input.headTypes, symbol);
+      if (found === null) {
+        signature = `${symbol.name} in ${file.path}`;
+        body = input.headText === null ? "" : nearbyHeadText(input.headText, file);
+      } else {
+        signature = found.signature;
+        body = found.body;
+      }
+    }
+
+    const candidates: RankInput[] = [];
+    const pushCandidate = (item: ContextItem, proximity: RankProximity, refCount = 1): void => {
+      candidates.push({ item, proximity, refCount });
+    };
+
+    for (const resolved of input.imports) {
+      if (resolved.definition === null) continue;
+      const target = resolved.definition;
+      const isType = !("identityKey" in target);
+      const kind = isType ? ("type" as const) : ("definition" as const);
+      const startLine = isType ? target.range.startLine : target.fullRange.startLine;
+      const endLine = isType ? target.range.endLine : target.fullRange.endLine;
+      const text = isType ? target.text : target.fullText;
+      const tokens = estimateTokens(text);
+      const unitIdPreview = stableUnitId(diff.headSha, file.path, symbol.kind, symbol.container, symbol.name, symbol.startLine);
+      pushCandidate(
+        {
+          id: stableItemId(unitIdPreview, kind, resolved.targetPath, startLine),
+          kind,
+          file: resolved.targetPath,
+          startLine,
+          endLine,
+          text,
+          score: 0,
+          tokens,
+          reason: resolved.reason,
+        },
+        "direct-import",
+      );
+    }
+
+    let capSkipped = 0;
+    try {
+      const callees = await resolveCalleesForSymbol({
+        filePath: file.path,
+        symbol,
+        reader: input.reader,
+        perFileMs: input.perFileMs,
+        runBudget: input.runBudget,
+      });
+      for (const callee of callees.callees) {
+        const tokens = estimateTokens(callee.text);
+        const unitIdPreview = stableUnitId(diff.headSha, file.path, symbol.kind, symbol.container, symbol.name, symbol.startLine);
+        const proximity: RankProximity =
+          callee.path === file.path ? "same-file" : callee.reason.includes("import") ? "direct-import" : "other";
+        pushCandidate(
+          {
+            id: stableItemId(unitIdPreview, "callee", callee.path, callee.startLine),
+            kind: "callee",
+            file: callee.path,
+            startLine: callee.startLine,
+            endLine: callee.endLine,
+            text: callee.text,
+            score: 0,
+            tokens,
+            reason: callee.reason,
+          },
+          proximity,
+        );
+      }
+      capSkipped += callees.diagnostics.filter((diagnostic) => diagnostic.reason === "cap-reached").length;
+    } catch {
+      // Best-effort: callees omitted on failure.
+    }
+
+    try {
+      const callers = await resolveCallersForSymbol({
+        filePath: file.path,
+        symbol,
+        reader: input.reader,
+        perFileMs: input.perFileMs,
+        runBudget: input.runBudget,
+      });
+      for (const caller of callers.callers) {
+        const tokens = estimateTokens(caller.callerText);
+        const unitIdPreview = stableUnitId(diff.headSha, file.path, symbol.kind, symbol.container, symbol.name, symbol.startLine);
+        pushCandidate(
+          {
+            id: stableItemId(unitIdPreview, "caller", caller.path, caller.callerStartLine),
+            kind: "caller",
+            file: caller.path,
+            startLine: caller.callerStartLine,
+            endLine: caller.callerEndLine,
+            text: caller.callerText,
+            score: 0,
+            tokens,
+            reason: caller.reason,
+          },
+          caller.path === file.path ? "same-file" : "cross-file-caller",
+        );
+      }
+      capSkipped += callers.diagnostics.filter((diagnostic) => diagnostic.reason === "cap-reached").length;
+    } catch {
+      // Best-effort: callers omitted on failure.
+    }
+
+    const ranked = rankContextItems(candidates);
+    const outcome = fitUnitToBudget({
+      path: file.path,
+      symbol: symbol.name,
+      hunks,
+      definitionSignature: signature,
+      definitionBody: body,
+      rules: input.rules,
+      candidates: ranked,
+      maxTokens: input.maxTokens,
+    });
+    if (outcome.status === "skip") {
+      return { status: "skip", reason: outcome.reason, requiredTokens: outcome.requiredTokens };
+    }
+
+    const unitId = stableUnitId(diff.headSha, file.path, symbol.kind, symbol.container, symbol.name, symbol.startLine);
+    const definitionTokens = estimateTokens(outcome.definitionText);
+    const definitionItem: ContextItem = {
+      id: stableItemId(unitId, "definition", file.path, symbol.startLine),
+      kind: "definition",
+      file: file.path,
+      startLine: symbol.startLine,
+      endLine: symbol.endLine,
+      text: outcome.definitionText,
+      score: scoreItem("definition", "same-file"),
+      tokens: definitionTokens,
+      reason: "changed symbol definition",
+    };
+    const unit: ReviewUnit = {
+      id: unitId,
+      file: toReviewUnitFile(file),
+      diff: {
+        hunks: outcome.includedHunks,
+        originalHunkCount: hunks.length,
+        includedHunkCount: outcome.includedHunks.length,
+        omittedHunkCount: outcome.omittedHunkCount,
+        truncated: outcome.diffTruncated,
+      } satisfies ReviewUnitDiff,
+      symbol,
+      context: [definitionItem, ...outcome.includedItems],
+      rules: outcome.keptRules,
+    };
+    return { status: "emit", unit, definitionTruncated: outcome.definitionTruncated, capSkipped };
+  }
+}
