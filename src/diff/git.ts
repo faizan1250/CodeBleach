@@ -147,10 +147,13 @@ export interface DiffLogger {
 }
 
 // Pinned on both diff invocations so user/repo Git config cannot change output.
-const PINNED_DIFF_FLAGS: readonly string[] = [
+// Explicit flags override diff.algorithm, diff.interHunkContext,
+// diff.renames, and diff.indentHeuristic alike (ADR 0008/0009).
+export const PINNED_DIFF_FLAGS: readonly string[] = [
   "--diff-algorithm=myers",
   "--inter-hunk-context=0",
   "--find-renames=50%",
+  "--no-indent-heuristic",
 ];
 
 function invalidConfig(message: string): ReviewerError {
@@ -198,8 +201,9 @@ async function headBlobContent(
   sizeBytes: number,
 ): Promise<Uint8Array> {
   try {
-    // Bounded by the known blob size: overflow only when the configured byte
-    // limit itself exceeds the spawn cap, which fails safe as GIT_FAILED.
+    // Bounded by the known blob size. The schema ceiling on max_file_size_kb
+    // keeps sizeBytes+1 within the spawn cap, so overflow via size alone is
+    // unreachable; anything unexpected still fails safe as GIT_FAILED.
     const result = await runProcess({
       cmd: ["git", "show", `${headSha}:${path}`],
       cwd: repoRoot,

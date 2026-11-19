@@ -19,6 +19,13 @@ export const DEFAULT_MAX_CHANGED_LINES_PER_FILE = 1500;
 
 export const DEFAULT_MAX_FILE_SIZE_KB = 500;
 
+// Absolute ceiling for review.max_file_size_kb: headBlobContent reads
+// min(sizeBytes+1, 26MiB), so an accepted max must satisfy
+// max*1024+1 <= 26MiB, i.e. max <= floor((26*1024*1024-1)/1024) = 26623.
+// Larger values would admit a blob whose show overflows the per-stream
+// spawn cap and fails as GIT_FAILED instead of skipping as too-large.
+export const MAX_MAX_FILE_SIZE_KB = 26623;
+
 export const DEFAULT_IGNORE_PATHS: readonly string[] = [
   "**/*.lock",
   "dist/**",
