@@ -70,13 +70,13 @@ function errorCodeOf(error: unknown): string {
   return error instanceof ReviewerError ? error.code : "INTERNAL";
 }
 
-function timeoutReasonOf(error: unknown): "timeout" | "output-limit" | "abort" | null {
+function gitFailureReasonOf(error: unknown): "timeout" | "transport-output-limit" | "abort" | null {
   if (error instanceof ReviewerError) {
     const cause = error.cause as { reason?: unknown } | null | undefined;
     if (typeof cause === "object" && cause !== null && "reason" in cause) {
       const reason = (cause as { reason: unknown }).reason;
       if (reason === "timeout") return "timeout";
-      if (reason === "output-limit") return "output-limit";
+      if (reason === "output-limit") return "transport-output-limit";
       if (reason === "abort") return "abort";
     }
   }
@@ -85,9 +85,9 @@ function timeoutReasonOf(error: unknown): "timeout" | "output-limit" | "abort" |
 
 function throwDiagnosticCode(error: unknown, runBudget: RunBudget | undefined, fallback: string): string {
   if (runBudget !== undefined && runBudget.remainingRunMs() <= 0) return "deadline";
-  const timeoutReason = timeoutReasonOf(error);
-  if (timeoutReason === "timeout") return "timeout";
-  if (timeoutReason === "output-limit") return "cap-reached";
+  const gitReason = gitFailureReasonOf(error);
+  if (gitReason === "timeout") return "timeout";
+  if (gitReason === "transport-output-limit") return "transport-output-limit";
   return fallback;
 }
 

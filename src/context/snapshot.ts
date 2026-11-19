@@ -102,6 +102,19 @@ export function isGitTimeout(error: unknown): boolean {
   return (cause as { reason: unknown }).reason === "timeout";
 }
 
+/**
+ * True only when a Git subprocess exceeded its stdout/stderr byte cap
+ * (`runProcess` reason "output-limit"). Candidate caps, budgets, timeouts,
+ * and parse cancellations never qualify.
+ */
+export function isGitOutputLimit(error: unknown): boolean {
+  if (!(error instanceof ReviewerError) || error.code !== "GIT_FAILED") return false;
+  const cause = error.cause;
+  if (typeof cause !== "object" || cause === null) return false;
+  if (!("reason" in cause)) return false;
+  return (cause as { reason: unknown }).reason === "output-limit";
+}
+
 /** Parse `git ls-tree -r -z --full-tree` output; split metadata from path at the first tab only. */
 export function parseLsTreeZ(bytes: Uint8Array): Map<string, TreeEntry> {
   const index = new Map<string, TreeEntry>();

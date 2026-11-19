@@ -4,7 +4,7 @@ import type { Definition, ExportReference, ImportKind, ImportReference, TypeDefi
 import type { RunBudget } from "./limits.ts";
 import { ParseCache } from "./parse-cache.ts";
 import { isRegularBlob } from "./snapshot.ts";
-import { isGitTimeout } from "./snapshot.ts";
+import { isGitOutputLimit, isGitTimeout } from "./snapshot.ts";
 import type { SnapshotReader, TreeEntry } from "./snapshot.ts";
 
 // Relative-only import/type resolution against the head commit snapshot.
@@ -181,7 +181,7 @@ async function loadTarget(path: string, context: ResolveContext): Promise<Target
       }
     }
   } catch (error) {
-    if (isGitTimeout(error)) throw error;
+    if (isGitTimeout(error) || isGitOutputLimit(error)) throw error;
     loaded = { status: "read-failed" };
   }
   context.cache.set(path, loaded);
