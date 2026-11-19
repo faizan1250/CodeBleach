@@ -68,7 +68,7 @@ event → resolve SHAs → load config → git diff (local) → filter files
 - Parse unified diff into `ChangedFile[]` → `DiffHunk[]` → `DiffLine[]` with `oldLine`, `newLine`, and GitHub `position`.
 - **Valid comment targets** = lines on the RIGHT side present in a hunk (added or context). Compute `Set<number>` per file (`commentableLines`).
 - Use the review-comment API's `line` + `side: "RIGHT"` + `commit_id`; keep `position` as computed fallback.
-- Filters (each yields a `DiffSkipReason`, precedence `deleted > binary > lockfile > ignored > too-large > generated`): binary, deleted-only, lockfiles, `dist/`, `**/*.min.*`, generated (header markers `@generated`, `DO NOT EDIT`), files > N KB / N changed lines (config-driven), unsupported language (still listed, but no symbols).
+- Filters (each yields a `DiffSkipReason`, precedence `deleted > unsupported-mode > binary > lockfile > ignored > too-large > generated`): binary, deleted-only, lockfiles, `dist/`, `**/*.min.*`, generated (header markers `@generated`, `DO NOT EDIT`), files > N KB / N changed lines (config-driven), unsupported language (still listed, but no symbols).
 - Renames: carry `oldPath`; review only if content changed.
 - **Symbols (Phase 2):** one synthetic module-level symbol per eligible supported file with content hunks (`{ name: "<module>", kind: "module" }`, head-line range, added head lines); no AST parsing. Phase 3 refines it into real function/method/class symbols with Tree-sitter (ADR 0005).
 - **Initial languages:** TypeScript/TSX/JavaScript via case-insensitive extension mapping; anything else gets `language: null`. Add languages via a `LanguageAdapter` (see 4.2, Phase 3).
