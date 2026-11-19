@@ -26,6 +26,15 @@ bun run src/cli/index.ts review --demo --dry-run
 
 Writes a synthetic run artifact to `.reviewer-out/run.json`.
 
+## Diff (diagnostic, offline, no network or secrets)
+
+```bash
+bun run src/cli/index.ts diff --base <full-sha> --head <full-sha> [--repo .]
+```
+
+Prints the pretty `DiffResult` JSON to stdout; logs stay on stderr.
+Exit codes: `0` ok, `1` Git/parse failure, `2` config/usage error.
+
 ## Docs
 
 - Architecture: `systemdesign.md`
