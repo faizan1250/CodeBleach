@@ -5,6 +5,7 @@ import {
   DEFAULT_IGNORE_PATHS,
   DEFAULT_MAX_FILE_SIZE_KB,
   DEFAULT_MAX_FINDINGS,
+  MAX_MAX_FILE_SIZE_KB,
 } from "../../src/config/defaults.ts";
 
 describe("config schema", () => {
@@ -104,6 +105,28 @@ describe("config schema", () => {
   test("rejects non-positive max_file_size_kb", () => {
     expect(() => ConfigFileSchema.parse({ review: { max_file_size_kb: 0 } })).toThrow();
     expect(() => ConfigFileSchema.parse({ review: { max_file_size_kb: -5 } })).toThrow();
+  });
+
+  test("max_file_size_kb accepts the 26623 KB ceiling", () => {
+    expect(MAX_MAX_FILE_SIZE_KB).toBe(26623);
+    expect(ConfigFileSchema.parse({ review: { max_file_size_kb: 26623 } }).review.max_file_size_kb).toBe(
+      26623,
+    );
+    const overridden = ConfigFileSchema.parse({
+      path_overrides: [{ paths: ["tests/**"], review: { max_file_size_kb: 26623 } }],
+    });
+    expect(overridden.path_overrides[0]?.review.max_file_size_kb).toBe(26623);
+  });
+
+  test("max_file_size_kb rejects over-max with a field-named error", () => {
+    expect(() => ConfigFileSchema.parse({ review: { max_file_size_kb: 26624 } })).toThrow(
+      /max_file_size_kb.*26623/,
+    );
+    expect(() =>
+      ConfigFileSchema.parse({
+        path_overrides: [{ paths: ["tests/**"], review: { max_file_size_kb: 26624 } }],
+      }),
+    ).toThrow(/max_file_size_kb.*26623/);
   });
 
   test("rejects malformed globs in every glob field", () => {
