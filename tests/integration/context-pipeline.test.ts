@@ -6,6 +6,7 @@ import { createLogger } from "../../src/core/logger.ts";
 import { runPipeline } from "../../src/core/pipeline.ts";
 import { ReviewerError } from "../../src/core/errors.ts";
 import { ContextEngineImpl } from "../../src/context/engine.ts";
+import { RunBudget } from "../../src/context/limits.ts";
 import { GitDiffEngine } from "../../src/diff/git.ts";
 import { stubPublisher, stubValidationEngine } from "../../src/core/stubs.ts";
 import { ConfigFileSchema } from "../../src/config/schema.ts";
@@ -234,6 +235,95 @@ describe("p3-11 pipeline wiring", () => {
       const result = await context.build(diff, config, dir);
       expect(result.units).toEqual([]);
       expect(result.diagnostics.unitsSkipped.map((s) => s.reason)).toContain("mandatory-budget-exceeded");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("run deadline marks partial with a skip for every unprocessed file", async () => {
+    const { dir, cleanup } = await makeRepo();
+    try {
+      const baseSha = await writeAndCommit(
+        dir,
+        { "src/a.ts": "export function f(): number {\n  return 1;\n}\nexport function g(): number {\n  return 1;\n}\n" },
+        "base",
+      );
+      const headSha = await writeAndCommit(
+        dir,
+        { "src/a.ts": "export function f(): number {\n  return 2;\n}\nexport function g(): number {\n  return 3;\n}\n" },
+        "head",
+      );
+      const defaults = ConfigFileSchema.parse({});
+      const config = { ...defaults, context: { ...defaults.context, max_run_time_ms: 1 } };
+      const context = new ContextEngineImpl({ logger: logger() });
+      const diffEngine = new GitDiffEngine({ logger: logger() });
+      const diff = await diffEngine.run({ repoDir: dir, baseSha, headSha, config: defaults });
+      const result = await context.build(diff, config, dir);
+      expect(result.status).toBe("partial");
+      expect(result.diagnostics.deadlineExceeded).toBe(true);
+      expect(result.units).toEqual([]);
+      expect(result.diagnostics.unitsSkipped.length).toBeGreaterThan(0);
+      for (const skip of result.diagnostics.unitsSkipped) {
+        expect(skip.reason).toBe("run-deadline");
+      }
+      for (const file of diff.files) {
+        expect(result.diagnostics.unitsSkipped.some((skip) => skip.path === file.path)).toBe(true);
+      }
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("run deadline emits skips for every remaining symbol in the current file", async () => {
+    const { dir, cleanup } = await makeRepo();
+    try {
+      const baseSha = await writeAndCommit(
+        dir,
+        {
+          "src/a.ts":
+            "export function f(): number {\n  return 1;\n}\nexport function g(): number {\n  return 1;\n}\nexport function h(): number {\n  return 1;\n}\n",
+        },
+        "base",
+      );
+      const headSha = await writeAndCommit(
+        dir,
+        {
+          "src/a.ts":
+            "export function f(): number {\n  return 2;\n}\nexport function g(): number {\n  return 3;\n}\nexport function h(): number {\n  return 4;\n}\n",
+        },
+        "head",
+      );
+      const config = ConfigFileSchema.parse({});
+      const engine = new ContextEngineImpl({ logger: logger() });
+      const diffEngine = new GitDiffEngine({ logger: logger() });
+      const diff = await diffEngine.run({ repoDir: dir, baseSha, headSha, config });
+      const remainingRunMs = RunBudget.prototype.remainingRunMs;
+      let emitted = 0;
+      RunBudget.prototype.remainingRunMs = function (this: RunBudget): number {
+        if (emitted > 0) return 0;
+        return remainingRunMs.call(this);
+      };
+      const engineRecord = engine as unknown as {
+        buildUnit: (input: Record<string, unknown>) => Promise<unknown>;
+      };
+      const originalBuildUnit = engineRecord.buildUnit.bind(engine);
+      engineRecord.buildUnit = async (input: Record<string, unknown>): Promise<unknown> => {
+        const outcome = await originalBuildUnit(input);
+        emitted += 1;
+        return outcome;
+      };
+      try {
+        const result = await engine.build(diff, config, dir);
+        expect(result.status).toBe("partial");
+        expect(result.diagnostics.deadlineExceeded).toBe(true);
+        expect(result.units.map((unit) => unit.symbol.name)).toEqual(["f"]);
+        expect(result.diagnostics.unitsSkipped).toMatchObject([
+          { path: "src/a.ts", symbol: "g", reason: "run-deadline" },
+          { path: "src/a.ts", symbol: "h", reason: "run-deadline" },
+        ]);
+      } finally {
+        RunBudget.prototype.remainingRunMs = remainingRunMs;
+      }
     } finally {
       await cleanup();
     }

@@ -232,16 +232,20 @@ export class ContextEngineImpl implements ContextEngine {
 
     const filesConsidered = diff.files.length;
     const importCache = new Map<string, Awaited<ReturnType<typeof resolveImportsForFile>>>();
+    const pushPendingFrom = (startIndex: number): void => {
+      for (let rest = startIndex; rest < diff.files.length; rest += 1) {
+        const restFile = diff.files[rest];
+        if (restFile === undefined) continue;
+        unitsSkipped.push({ path: restFile.path, symbol: "<pending>", reason: "run-deadline" });
+      }
+    };
 
-    const remainingFiles = [...diff.files];
-    for (const file of diff.files) {
-      remainingFiles.shift();
+    for (let index = 0; index < diff.files.length; index += 1) {
+      const file = diff.files[index];
+      if (file === undefined) continue;
       if (runBudget.remainingRunMs() <= 0) {
         deadlineExceeded = true;
-        unitsSkipped.push({ path: file.path, symbol: "<pending>", reason: "run-deadline" });
-        for (const rest of remainingFiles) {
-          unitsSkipped.push({ path: rest.path, symbol: "<pending>", reason: "run-deadline" });
-        }
+        pushPendingFrom(index);
         break;
       }
       if (file.skipReason !== undefined) continue;
@@ -256,9 +260,13 @@ export class ContextEngineImpl implements ContextEngine {
           path: file.path,
           code: error instanceof ReviewerError ? error.code : "UNKNOWN",
         });
+        if (runBudget.remainingRunMs() <= 0) {
+          deadlineExceeded = true;
+          pushPendingFrom(index);
+          break;
+        }
         continue;
       }
-      if (file.language !== null) filesParsed += 1;
       if (symbols.length === 0) continue;
 
       let headText: string | null = null;
@@ -289,6 +297,7 @@ export class ContextEngineImpl implements ContextEngine {
                 if (runBudget.remainingRunMs() <= 0) deadlineExceeded = true;
               }
             } else {
+              filesParsed += 1;
               try {
                 const adapter = getAdapter(language);
                 headDefinitions = adapter.extractDefinitions(parsed.tree, parsed.source);
@@ -317,10 +326,16 @@ export class ContextEngineImpl implements ContextEngine {
         importCache.set(file.path, imports);
       }
 
-      for (const symbol of symbols) {
+      for (let symbolIndex = 0; symbolIndex < symbols.length; symbolIndex += 1) {
+        const symbol = symbols[symbolIndex];
+        if (symbol === undefined) continue;
         if (runBudget.remainingRunMs() <= 0) {
           deadlineExceeded = true;
-          unitsSkipped.push({ path: file.path, symbol: symbol.name, reason: "run-deadline" });
+          for (let rest = symbolIndex; rest < symbols.length; rest += 1) {
+            const restSymbol = symbols[rest];
+            if (restSymbol === undefined) continue;
+            unitsSkipped.push({ path: file.path, symbol: restSymbol.name, reason: "run-deadline" });
+          }
           break;
         }
         try {
@@ -365,9 +380,7 @@ export class ContextEngineImpl implements ContextEngine {
         }
       }
       if (deadlineExceeded) {
-        for (const rest of remainingFiles) {
-          unitsSkipped.push({ path: rest.path, symbol: "<pending>", reason: "run-deadline" });
-        }
+        pushPendingFrom(index + 1);
         break;
       }
     }
@@ -420,6 +433,9 @@ export class ContextEngineImpl implements ContextEngine {
   > {
     const { diff, file, symbol } = input;
     const relevantHunks = relevantHunksForSymbol(file, symbol);
+    if (relevantHunks.length === 0 && symbol.kind !== "module") {
+      this.logger.warn("context hunk fallback", { path: file.path, symbol: symbol.name });
+    }
     const hunks = relevantHunks.length > 0 ? relevantHunks : file.hunks;
 
     let signature: string;
