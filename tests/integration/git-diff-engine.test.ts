@@ -37,12 +37,12 @@ function makeLogger(): { calls: LoggedCall[]; logger: DiffLogger } {
 
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 
-async function git(dir: string, args: string[]): Promise<string> {
+export async function git(dir: string, args: string[]): Promise<string> {
   const result = await runProcess({ cmd: ["git", ...args], cwd: dir });
   return decode(result.stdout).trim();
 }
 
-async function makeRepo(): Promise<{ dir: string; cleanup: () => Promise<void> }> {
+export async function makeRepo(): Promise<{ dir: string; cleanup: () => Promise<void> }> {
   const dir = await mkdtemp(join(tmpdir(), "codebleach-p2-07-"));
   const cleanup = (): Promise<void> => rm(dir, { recursive: true, force: true });
   try {
@@ -69,6 +69,33 @@ async function writeAndCommit(
   }
   await git(dir, ["add", "-A"]);
   await git(dir, ["commit", "-m", message, "--quiet"]);
+  return git(dir, ["rev-parse", "HEAD"]);
+}
+
+// Fixed identity for deterministic SHAs; plumbing commits use it.
+const FIXED_GIT_ENV: Record<string, string> = {
+  GIT_AUTHOR_NAME: "CodeBleach Test",
+  GIT_AUTHOR_EMAIL: "edge@codebleach.local",
+  GIT_COMMITTER_NAME: "CodeBleach Test",
+  GIT_COMMITTER_EMAIL: "edge@codebleach.local",
+  GIT_AUTHOR_DATE: "2000-01-01T00:00:00Z",
+  GIT_COMMITTER_DATE: "2000-01-01T00:00:00Z",
+};
+
+// Commits the current index directly via plumbing.
+export async function commitIndex(dir: string, message: string): Promise<string> {
+  const tree = await git(dir, ["write-tree"]);
+  let parent: string | null = null;
+  try {
+    parent = await git(dir, ["rev-parse", "HEAD"]);
+  } catch {
+    parent = null;
+  }
+  const args =
+    parent === null ? ["commit-tree", tree, "-m", message] : ["commit-tree", tree, "-p", parent, "-m", message];
+  const result = await runProcess({ cmd: ["git", ...args], cwd: dir, env: FIXED_GIT_ENV });
+  const commit = decode(result.stdout).trim();
+  await git(dir, ["update-ref", "HEAD", commit]);
   return git(dir, ["rev-parse", "HEAD"]);
 }
 
