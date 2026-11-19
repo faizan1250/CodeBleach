@@ -23,10 +23,12 @@ describe("demo engines", () => {
     expect(diff.files).toHaveLength(1);
     expect(diff.baseSha).toBe(DEMO_BASE_SHA);
 
-    const units = await demoContextEngine.build(diff, config, ".");
+    const built = await demoContextEngine.build(diff, config, ".");
+    expect(built.status).toBe("complete");
+    const units = built.units;
     expect(units).toHaveLength(1);
     expect(units[0]?.file.path).toBe(diff.files[0]?.path);
-    expect(units[0]?.file).toBe(diff.files[0]);
+    expect(units[0]?.file.commentableLines).toEqual(diff.files[0]?.commentableLines);
     expect(units[0]?.symbol).toBe(diff.files[0]?.symbols[0]);
 
     const findings = await demoReviewEngine.review(units, config);
@@ -69,7 +71,8 @@ describe("demo engines", () => {
       config,
     });
     const lines = diff.files.flatMap((file) => file.hunks.flatMap((hunk) => hunk.lines.map((l) => l.text)));
-    const units = await demoContextEngine.build(diff, config, ".");
+    const built = await demoContextEngine.build(diff, config, ".");
+    const units = built.units;
     const findings = await demoReviewEngine.review(units, config);
     const validated = await demoValidationEngine.validate(findings, diff, units, config);
     const accepted = validated.filter((v) => v.status === "accepted");
@@ -96,7 +99,8 @@ describe("demo engines", () => {
       headSha: DEMO_HEAD_SHA,
       config,
     });
-    const units = await demoContextEngine.build(diff, config, ".");
+    const built = await demoContextEngine.build(diff, config, ".");
+    const units = built.units;
     const findings = await demoReviewEngine.review(units, config);
     const validated = await demoValidationEngine.validate(findings, diff, units, config);
     const addedByFile = new Map(

@@ -115,7 +115,7 @@ describe("cli diff", () => {
     }
   });
 
-  test("normal review keeps real diff then fails at context with diff in artifact", async () => {
+  test("normal review completes context then fails at stubbed review with diff in artifact", async () => {
     const { dir, cleanup } = await makeRepo();
     try {
       const base = await writeAndCommit(dir, { "src/a.ts": "const a = 1;\n" }, "base");
@@ -132,17 +132,24 @@ describe("cli diff", () => {
         error: { code: string };
         stages: Array<{ name: string; status: string }>;
         diff: { baseSha: string; headSha: string; files: unknown[] } | null;
+        units: Array<{ id: string }>;
+        contextStatus: string;
+        contextDiagnostics: { unitsCreated: number } | null;
       };
       expect(artifact.status).toBe("failed");
       expect(artifact.error.code).toBe("NOT_IMPLEMENTED");
       expect(artifact.stages).toMatchObject([
         { name: "config", status: "completed" },
         { name: "diff", status: "completed" },
-        { name: "context", status: "failed" },
+        { name: "context", status: "completed" },
+        { name: "review", status: "failed" },
       ]);
       expect(artifact.diff?.baseSha).toBe(base.toLowerCase());
       expect(artifact.diff?.headSha).toBe(head.toLowerCase());
       expect(artifact.diff?.files).toHaveLength(1);
+      expect(artifact.units).toHaveLength(1);
+      expect(artifact.contextStatus).toBe("complete");
+      expect(artifact.contextDiagnostics?.unitsCreated).toBe(1);
     } finally {
       await cleanup();
     }

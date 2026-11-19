@@ -18,6 +18,8 @@ function artifact(): RunArtifact {
     config: null,
     diff: null,
     units: [],
+    contextStatus: null,
+    contextDiagnostics: null,
     findings: [],
     validated: [],
     publishResult: null,

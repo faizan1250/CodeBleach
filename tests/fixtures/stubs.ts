@@ -54,13 +54,36 @@ export function createFixtureEngines(options: FixtureOptions = {}): FixtureEngin
       oldPath: null,
       status: "modified",
       language: "typescript",
-      hunks: [],
       commentableLines: [1],
-      symbols: [{ name: "f", kind: "function", startLine: 1, endLine: 2, changedLines: [1] }],
+    },
+    diff: {
+      hunks: [],
+      originalHunkCount: 0,
+      includedHunkCount: 0,
+      omittedHunkCount: 0,
+      truncated: false,
     },
     symbol: { name: "f", kind: "function", startLine: 1, endLine: 2, changedLines: [1] },
     context: [],
     rules: [],
+  };
+  const contextResult = {
+    units: [unit],
+    status: "complete" as const,
+    diagnostics: {
+      elapsedMs: 0,
+      deadlineExceeded: false,
+      parseBudgetExceeded: false,
+      filesConsidered: 0,
+      filesParsed: 0,
+      filesParseTimedOut: 0,
+      unitsCreated: 1,
+      unitsSkipped: [],
+      unitsWithTruncatedDiff: 0,
+      unitsWithTruncatedDefinition: 0,
+      candidateFilesSkippedByCap: 0,
+      queryTimeouts: 0,
+    },
   };
   const secret = options.secret ?? "nothing-secret";
   const finding: Finding = {
@@ -99,7 +122,7 @@ export function createFixtureEngines(options: FixtureOptions = {}): FixtureEngin
     context: {
       build: () => {
         maybeFail(order, "context", options);
-        return Promise.resolve([unit]);
+        return Promise.resolve(contextResult);
       },
     },
     review: {

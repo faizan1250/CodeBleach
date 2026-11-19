@@ -8,6 +8,7 @@ import type {
   ReviewUnit,
   ValidatedFinding,
 } from "../types/index.ts";
+import type { ContextBuildResult } from "../types/context.ts";
 import type { ResolvedConfig } from "../config/schema.ts";
 import type { Result } from "./result.ts";
 import type { ConfigLoadResult } from "../config/load.ts";
@@ -23,7 +24,7 @@ export interface DiffEngine {
 }
 
 export interface ContextEngine {
-  build(diff: DiffResult, config: ResolvedConfig, repoDir: string): Promise<ReviewUnit[]>;
+  build(diff: DiffResult, config: ResolvedConfig, repoDir: string): Promise<ContextBuildResult>;
 }
 
 export interface ReviewEngine {
