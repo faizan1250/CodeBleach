@@ -33,7 +33,7 @@ export interface RunArtifact {
   config: ResolvedConfig | null;
   diff: DiffResult | null;
   units: ReviewUnit[];
-  contextStatus: "complete" | "partial" | null;
+  contextStatus: "complete" | "partial" | "failed" | null;
   contextDiagnostics: ContextBuildDiagnostics | null;
   findings: Finding[];
   validated: ValidatedFinding[];

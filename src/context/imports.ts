@@ -1,10 +1,10 @@
 import { DEFAULT_MAX_PARSE_TIME_MS } from "../config/defaults.ts";
 import { detectLanguage } from "../diff/paths.ts";
-import { getAdapter } from "./language.ts";
 import type { Definition, ExportReference, ImportKind, ImportReference, TypeDefinition } from "./language.ts";
 import type { RunBudget } from "./limits.ts";
-import { parseSource } from "./parser.ts";
+import { ParseCache } from "./parse-cache.ts";
 import { isRegularBlob } from "./snapshot.ts";
+import { isGitTimeout } from "./snapshot.ts";
 import type { SnapshotReader, TreeEntry } from "./snapshot.ts";
 
 // Relative-only import/type resolution against the head commit snapshot.
@@ -133,6 +133,7 @@ interface ResolveContext {
   perFileMs: number;
   runBudget: RunBudget | undefined;
   cache: Map<string, TargetLoad>;
+  parseCache: ParseCache;
 }
 
 async function loadTarget(path: string, context: ResolveContext): Promise<TargetLoad> {
@@ -145,45 +146,42 @@ async function loadTarget(path: string, context: ResolveContext): Promise<Target
       loaded = { status: "read-failed" };
     } else {
       const source = await context.reader.readHeadText(path);
-      const parsed = await parseSource({
+      const cached = await context.parseCache.getOrParse({
+        commit: context.reader.headSha,
+        path,
         source,
         language,
-        filePath: path,
         perFileMs: context.perFileMs,
         runBudget: context.runBudget,
       });
-      try {
-        if (parsed.tree === null) {
-          loaded = { status: "parse-cancelled" };
-        } else {
-          const adapter = getAdapter(language);
-          const localExports = new Map<string, string>();
-          const reExports: ExportReference[] = [];
-          for (const ref of adapter.extractExports(parsed.tree, parsed.source)) {
-            if (ref.sourceSpecifier === null) {
-              if (ref.exportedName !== null && ref.localName !== null) {
-                localExports.set(ref.exportedName, ref.localName);
-              }
-            } else {
-              reExports.push(ref);
+      if (cached.status === "cancelled") {
+        loaded = { status: "parse-cancelled" };
+      } else {
+        const localExports = new Map<string, string>();
+        const reExports: ExportReference[] = [];
+        for (const ref of cached.snapshot.exports) {
+          if (ref.sourceSpecifier === null) {
+            if (ref.exportedName !== null && ref.localName !== null) {
+              localExports.set(ref.exportedName, ref.localName);
             }
+          } else {
+            reExports.push(ref);
           }
-          loaded = {
-            status: "parsed",
-            target: {
-              path,
-              definitions: adapter.extractDefinitions(parsed.tree, parsed.source),
-              types: adapter.extractTypes(parsed.tree, parsed.source),
-              localExports,
-              reExports,
-            },
-          };
         }
-      } finally {
-        parsed.tree?.delete();
+        loaded = {
+          status: "parsed",
+          target: {
+            path,
+            definitions: cached.snapshot.definitions,
+            types: cached.snapshot.types,
+            localExports,
+            reExports,
+          },
+        };
       }
     }
-  } catch {
+  } catch (error) {
+    if (isGitTimeout(error)) throw error;
     loaded = { status: "read-failed" };
   }
   context.cache.set(path, loaded);
@@ -362,6 +360,7 @@ export interface ResolveImportsOptions {
   perFileMs?: number | undefined;
   runBudget?: RunBudget | undefined;
   maxResolved?: number | undefined;
+  parseCache?: ParseCache | undefined;
 }
 
 export interface ResolveImportsResult {
@@ -385,27 +384,25 @@ export async function resolveImportsForFile(options: ResolveImportsOptions): Pro
   const diagnostics: ImportDiagnostic[] = [];
   const language = detectLanguage(importerPath);
   if (language === null) return { resolved, diagnostics };
+  const parseCache = options.parseCache ?? new ParseCache();
   const source = await reader.readHeadText(importerPath);
-  const parsed = await parseSource({
+  const cached = await parseCache.getOrParse({
+    commit: reader.headSha,
+    path: importerPath,
     source,
     language,
-    filePath: importerPath,
     perFileMs,
     runBudget: options.runBudget,
   });
-  if (parsed.tree === null) return { resolved, diagnostics };
-  let imports: ImportReference[];
-  try {
-    imports = getAdapter(language).extractImports(parsed.tree, parsed.source);
-  } finally {
-    parsed.tree.delete();
-  }
+  if (cached.status === "cancelled") return { resolved, diagnostics };
+  const imports = cached.snapshot.imports;
   const context: ResolveContext = {
     reader,
     headIndex: await reader.listHeadFiles(),
     perFileMs,
     runBudget: options.runBudget,
     cache: new Map(),
+    parseCache,
   };
   let processed = 0;
   for (const ref of imports) {

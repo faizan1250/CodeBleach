@@ -122,6 +122,10 @@ export const demoContextEngine: ContextEngine = {
           unitsWithTruncatedDefinition: 0,
           candidateFilesSkippedByCap: 0,
           queryTimeouts: 0,
+          parseCacheHits: 0,
+          parseCacheMisses: 0,
+          parseCacheEntries: 0,
+          diagnostics: [],
         },
       });
     }
@@ -174,6 +178,10 @@ export const demoContextEngine: ContextEngine = {
         unitsWithTruncatedDefinition: 0,
         candidateFilesSkippedByCap: 0,
         queryTimeouts: 0,
+        parseCacheHits: 0,
+        parseCacheMisses: 0,
+        parseCacheEntries: 0,
+        diagnostics: [],
       },
     };
     return Promise.resolve(result);

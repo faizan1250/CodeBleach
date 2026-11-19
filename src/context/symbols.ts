@@ -3,7 +3,7 @@ import { ReviewerError } from "../core/errors.ts";
 import type { RunBudget } from "./limits.ts";
 import { getAdapter } from "./language.ts";
 import type { Definition, DefinitionKind } from "./language.ts";
-import { parseSource } from "./parser.ts";
+import { ParseCache } from "./parse-cache.ts";
 import type { ErrorRange } from "./parser.ts";
 import { SnapshotReader } from "./snapshot.ts";
 import type { ChangedFile, ChangedSymbol, DiffHunk, SymbolKind } from "../types/diff.ts";
@@ -318,6 +318,7 @@ export interface MapFileSymbolsOptions {
   reader: SnapshotReader;
   perFileMs?: number | undefined;
   runBudget?: RunBudget | undefined;
+  parseCache?: ParseCache | undefined;
 }
 
 function gitFailed(message: string, cause?: unknown): ReviewerError {
@@ -392,32 +393,40 @@ export async function mapChangedSymbolsForFile(options: MapFileSymbolsOptions): 
   let headLineCount = headText === null ? 0 : countLines(headText);
   let headCancelled = false;
   if (headText !== null) {
-    const parsed = await parseSource({ source: headText, language, filePath: file.path, perFileMs, runBudget: options.runBudget });
-    try {
-      if (parsed.tree === null) {
-        headCancelled = true;
-        headLineCount = parsed.lineCount;
-      } else {
-        headDefinitions = adapter.extractDefinitions(parsed.tree, parsed.source);
-        headErrorRanges = parsed.errorRanges;
-        headLineCount = parsed.lineCount;
-      }
-    } finally {
-      parsed.tree?.delete();
+    const cache = options.parseCache ?? new ParseCache();
+    const cached = await cache.getOrParse({
+      commit: reader.headSha,
+      path: file.path,
+      source: headText,
+      language,
+      perFileMs,
+      runBudget: options.runBudget,
+    });
+    if (cached.status === "cancelled") {
+      headCancelled = true;
+      headLineCount = cached.lineCount;
+    } else {
+      headDefinitions = cached.snapshot.definitions;
+      headErrorRanges = cached.snapshot.errorRanges;
+      headLineCount = cached.snapshot.lineCount;
     }
   }
 
   let baseDefinitions: Definition[] = [];
   let baseErrorRanges: readonly ErrorRange[] = [];
   if (baseText !== null) {
-    const parsed = await parseSource({ source: baseText, language, filePath: file.oldPath ?? file.path, perFileMs, runBudget: options.runBudget });
-    try {
-      if (parsed.tree !== null) {
-        baseDefinitions = adapter.extractDefinitions(parsed.tree, parsed.source);
-        baseErrorRanges = parsed.errorRanges;
-      }
-    } finally {
-      parsed.tree?.delete();
+    const cache = options.parseCache ?? new ParseCache();
+    const cached = await cache.getOrParse({
+      commit: reader.mergeBase,
+      path: file.oldPath ?? file.path,
+      source: baseText,
+      language,
+      perFileMs,
+      runBudget: options.runBudget,
+    });
+    if (cached.status === "parsed") {
+      baseDefinitions = cached.snapshot.definitions;
+      baseErrorRanges = cached.snapshot.errorRanges;
     }
   }
 

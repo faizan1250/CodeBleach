@@ -12,11 +12,11 @@ import {
   resolveRelativePath,
 } from "./imports.ts";
 import type { ResolvedImport } from "./imports.ts";
-import { getAdapter } from "./language.ts";
 import type { CallReference, Definition, ExportReference, SymbolRange, TypeDefinition } from "./language.ts";
 import type { RunBudget } from "./limits.ts";
-import { parseSource } from "./parser.ts";
+import { ParseCache, callsInRange } from "./parse-cache.ts";
 import type { SnapshotReader, TreeEntry } from "./snapshot.ts";
+import { isGitTimeout } from "./snapshot.ts";
 
 // Static best-effort callee discovery for one changed symbol. Reads head-side
 // blobs only; never executes code or guesses across unrelated modules. Local
@@ -57,6 +57,7 @@ export interface ResolveCalleesOptions {
   perFileMs?: number | undefined;
   runBudget?: RunBudget | undefined;
   maxCallees?: number | undefined;
+  parseCache?: ParseCache | undefined;
 }
 
 export interface ResolveCalleesResult {
@@ -368,17 +369,19 @@ export async function resolveCalleesForSymbol(options: ResolveCalleesOptions): P
   const language = detectLanguage(filePath);
   if (language === null) return { callees: [], diagnostics: [] };
   const source = await reader.readHeadText(filePath);
-  const parsed = await parseSource({
+  const parseCache = options.parseCache ?? new ParseCache();
+  const cached = await parseCache.getOrParse({
+    commit: reader.headSha,
+    path: filePath,
     source,
     language,
-    filePath,
     perFileMs,
     runBudget: options.runBudget,
   });
-  if (parsed.tree === null) return { callees: [], diagnostics: [] };
-  try {
-    const adapter = getAdapter(language);
-    const localDefinitions = adapter.extractDefinitions(parsed.tree, parsed.source);
+  if (cached.status === "cancelled") return { callees: [], diagnostics: [] };
+  const snapshot = cached.snapshot;
+  {
+    const localDefinitions = snapshot.definitions;
     const scope: LocalScope =
       symbol.kind === "module"
         ? { name: "<module>", kind: "module" }
@@ -389,20 +392,14 @@ export async function resolveCalleesForSymbol(options: ResolveCalleesOptions): P
           };
     let calls: CallReference[];
     if (symbol.kind === "module") {
-      calls = adapter.extractCalls(parsed.tree.rootNode, parsed.source).filter((call) => call.containing === null);
+      calls = snapshot.calls.filter((call) => call.containing === null);
     } else {
       const definition = findSymbolDefinition(symbol, localDefinitions);
       if (definition === null) return { callees: [], diagnostics: [] };
-      const node = findDefinitionNode(parsed.tree.rootNode, definition);
-      if (node !== null) {
-        calls = adapter.extractCalls(node, parsed.source);
-      } else {
-        const start = definition.fullRange.startIndex;
-        const end = definition.fullRange.endIndex;
-        calls = adapter
-          .extractCalls(parsed.tree.rootNode, parsed.source)
-          .filter((call) => call.range.startIndex >= start && call.range.endIndex <= end);
-      }
+      // Range containment over root calls equals the old node-scoped walk:
+      // tree-sitter child spans nest inside their parent, and the previous
+      // node-miss fallback already used this exact filter.
+      calls = callsInRange(snapshot.calls, definition.fullRange.startIndex, definition.fullRange.endIndex);
     }
 
     const targets: CalleeTarget[] = [];
@@ -437,6 +434,7 @@ export async function resolveCalleesForSymbol(options: ResolveCalleesOptions): P
         reader,
         perFileMs,
         runBudget: options.runBudget,
+        parseCache,
         scope,
         targets,
         diagnostics,
@@ -449,8 +447,6 @@ export async function resolveCalleesForSymbol(options: ResolveCalleesOptions): P
       diagnostics.push({ filePath, symbol: symbol.name, callee: dropped.name, reason: "cap-reached" });
     }
     return { callees: kept, diagnostics };
-  } finally {
-    parsed.tree?.delete();
   }
 }
 
@@ -460,6 +456,7 @@ interface DeferredContext {
   reader: SnapshotReader;
   perFileMs: number;
   runBudget: RunBudget | undefined;
+  parseCache: ParseCache;
   scope: LocalScope;
   targets: CalleeTarget[];
   diagnostics: CalleeDiagnostic[];
@@ -472,6 +469,7 @@ async function resolveDeferred(calls: readonly CallReference[], context: Deferre
     reader,
     perFileMs: context.perFileMs,
     runBudget: context.runBudget,
+    parseCache: context.parseCache,
   });
   // Import-level misses surface as callee-level unresolved/ambiguous below;
   // the import diagnostics themselves stay with the P3-05 contract.
@@ -558,36 +556,33 @@ async function loadModule(path: string, context: DeferredContext): Promise<Loade
   let source: string;
   try {
     source = await context.reader.readHeadText(path);
-  } catch {
+  } catch (error) {
+    if (isGitTimeout(error)) throw error;
     return null;
   }
-  const parsed = await parseSource({
+  const cached = await context.parseCache.getOrParse({
+    commit: context.reader.headSha,
+    path,
     source,
     language,
-    filePath: path,
     perFileMs: context.perFileMs,
     runBudget: context.runBudget,
   });
-  if (parsed.tree === null) return "cancelled";
-  try {
-    const adapter = getAdapter(language);
-    const localExports = new Map<string, string>();
-    const reExports: ExportReference[] = [];
-    for (const ref of adapter.extractExports(parsed.tree, parsed.source)) {
-      if (ref.sourceSpecifier === null) {
-        if (ref.exportedName !== null && ref.localName !== null) localExports.set(ref.exportedName, ref.localName);
-      } else {
-        reExports.push(ref);
-      }
+  if (cached.status === "cancelled") return "cancelled";
+  const localExports = new Map<string, string>();
+  const reExports: ExportReference[] = [];
+  for (const ref of cached.snapshot.exports) {
+    if (ref.sourceSpecifier === null) {
+      if (ref.exportedName !== null && ref.localName !== null) localExports.set(ref.exportedName, ref.localName);
+    } else {
+      reExports.push(ref);
     }
-    return {
-      path,
-      definitions: adapter.extractDefinitions(parsed.tree, parsed.source),
-      types: adapter.extractTypes(parsed.tree, parsed.source),
-      localExports,
-      reExports,
-    };
-  } finally {
-    parsed.tree.delete();
   }
+  return {
+    path,
+    definitions: cached.snapshot.definitions,
+    types: cached.snapshot.types,
+    localExports,
+    reExports,
+  };
 }

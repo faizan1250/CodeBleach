@@ -39,7 +39,7 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
   let config: ResolvedConfig | undefined;
   let diff: DiffResult | undefined;
   let units: ReviewUnit[] = [];
-  let contextStatus: "complete" | "partial" | null = null;
+  let contextStatus: "complete" | "partial" | "failed" | null = null;
   let contextDiagnostics: ContextBuildDiagnostics | null = null;
   let findings: Finding[] = [];
   let validated: ValidatedFinding[] = [];

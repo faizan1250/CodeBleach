@@ -56,6 +56,16 @@ export interface UnitSkip {
   maxTokens?: number | undefined;
 }
 
+export type ContextDiagnosticStage = "snapshot" | "parse" | "import" | "caller" | "callee" | "test";
+
+export interface ContextDiagnostic {
+  stage: ContextDiagnosticStage;
+  path: string;
+  symbol?: string | undefined;
+  code: string;
+  reason: string;
+}
+
 export interface ContextBuildDiagnostics {
   elapsedMs: number;
   deadlineExceeded: boolean;
@@ -69,10 +79,14 @@ export interface ContextBuildDiagnostics {
   unitsWithTruncatedDefinition: number;
   candidateFilesSkippedByCap: number;
   queryTimeouts: number;
+  parseCacheHits: number;
+  parseCacheMisses: number;
+  parseCacheEntries: number;
+  diagnostics: ContextDiagnostic[];
 }
 
 export interface ContextBuildResult {
   units: ReviewUnit[];
-  status: "complete" | "partial";
+  status: "complete" | "partial" | "failed";
   diagnostics: ContextBuildDiagnostics;
 }

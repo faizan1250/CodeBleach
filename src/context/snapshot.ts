@@ -89,6 +89,19 @@ function isGrepNoMatch(error: unknown): boolean {
   return details.reason === "exit" && details.exitCode === 1;
 }
 
+/**
+ * True only for an actual timed-out Git subprocess (`runProcess` reason
+ * "timeout"). Deadline skips, parse cancellations, and non-timeout Git
+ * failures (exit, output-limit, abort) never qualify.
+ */
+export function isGitTimeout(error: unknown): boolean {
+  if (!(error instanceof ReviewerError) || error.code !== "GIT_FAILED") return false;
+  const cause = error.cause;
+  if (typeof cause !== "object" || cause === null) return false;
+  if (!("reason" in cause)) return false;
+  return (cause as { reason: unknown }).reason === "timeout";
+}
+
 /** Parse `git ls-tree -r -z --full-tree` output; split metadata from path at the first tab only. */
 export function parseLsTreeZ(bytes: Uint8Array): Map<string, TreeEntry> {
   const index = new Map<string, TreeEntry>();
@@ -346,6 +359,8 @@ export class SnapshotReader {
   }
 
   private async runGit(args: readonly string[], what: string, maxStdoutBytes?: number): Promise<Uint8Array> {
+    // Single attempt per call; no retry. Each timed-out invocation surfaces
+    // exactly once so callers can count timed-out Git queries without dedupe.
     try {
       const result = await runProcess({
         cmd: ["git", ...args],
