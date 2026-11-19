@@ -18,6 +18,7 @@ import type {
   ReviewUnit,
   ValidatedFinding,
 } from "../types/index.ts";
+import type { ContextBuildDiagnostics } from "../types/context.ts";
 
 function toReviewerError(error: unknown, stage: string): ReviewerError {
   if (error instanceof ReviewerError) return error;
@@ -38,6 +39,8 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
   let config: ResolvedConfig | undefined;
   let diff: DiffResult | undefined;
   let units: ReviewUnit[] = [];
+  let contextStatus: "complete" | "partial" | null = null;
+  let contextDiagnostics: ContextBuildDiagnostics | null = null;
   let findings: Finding[] = [];
   let validated: ValidatedFinding[] = [];
   let publishResult: PublishResult | null = null;
@@ -56,6 +59,8 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
       config: config ?? null,
       diff: diff ?? null,
       units,
+      contextStatus,
+      contextDiagnostics,
       findings,
       validated,
       publishResult,
@@ -121,24 +126,26 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
     diff = diffResult;
     await persist("running");
 
-    const unitList = await runStage(
+    const contextResult = await runStage(
       "context",
       () => deps.context.build(diffResult, resolved, input.repoDir),
-      (result) => result.length,
+      (result) => result.units.length,
     );
-    units = unitList;
+    units = contextResult.units;
+    contextStatus = contextResult.status;
+    contextDiagnostics = contextResult.diagnostics;
     await persist("running");
 
     findings = await runStage(
       "review",
-      () => deps.review.review(unitList, resolved),
+      () => deps.review.review(contextResult.units, resolved),
       (result) => result.length,
     );
     await persist("running");
 
     const validatedList = await runStage(
       "validation",
-      () => deps.validation.validate(findings, diffResult, unitList, resolved),
+      () => deps.validation.validate(findings, diffResult, contextResult.units, resolved),
       (result) => result.filter((item) => item.status === "accepted").length,
     );
     validated = validatedList;

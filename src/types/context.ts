@@ -15,7 +15,8 @@ export interface ContextItem {
 
 export interface ReviewUnit {
   id: string;
-  file: ChangedFile;
+  file: ReviewUnitFile;
+  diff: ReviewUnitDiff;
   symbol: ChangedSymbol;
   context: ContextItem[];
   rules: Rule[];

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { ResolvedConfig } from "../config/schema.ts";
 import { sanitizePayload } from "../utils/redact.ts";
 import type {
+  ContextBuildDiagnostics,
   DiffResult,
   Finding,
   PublishResult,
@@ -32,6 +33,8 @@ export interface RunArtifact {
   config: ResolvedConfig | null;
   diff: DiffResult | null;
   units: ReviewUnit[];
+  contextStatus: "complete" | "partial" | null;
+  contextDiagnostics: ContextBuildDiagnostics | null;
   findings: Finding[];
   validated: ValidatedFinding[];
   publishResult: PublishResult | null;

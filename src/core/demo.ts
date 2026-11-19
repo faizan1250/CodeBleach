@@ -7,6 +7,7 @@ import type {
 } from "./contracts.ts";
 import type {
   ChangedFile,
+  ContextBuildResult,
   Finding,
   ReviewUnit,
   ValidatedFinding,
@@ -104,11 +105,43 @@ export const demoDiffEngine: DiffEngine = {
 export const demoContextEngine: ContextEngine = {
   build: (diff) => {
     const file = diff.files[0];
-    if (file === undefined || file.symbols[0] === undefined) return Promise.resolve([]);
+    if (file === undefined || file.symbols[0] === undefined) {
+      return Promise.resolve({
+        units: [],
+        status: "complete",
+        diagnostics: {
+          elapsedMs: 0,
+          deadlineExceeded: false,
+          parseBudgetExceeded: false,
+          filesConsidered: 0,
+          filesParsed: 0,
+          filesParseTimedOut: 0,
+          unitsCreated: 0,
+          unitsSkipped: [],
+          unitsWithTruncatedDiff: 0,
+          unitsWithTruncatedDefinition: 0,
+          candidateFilesSkippedByCap: 0,
+          queryTimeouts: 0,
+        },
+      });
+    }
     const symbol = file.symbols[0];
     const unit: ReviewUnit = {
       id: "demo-unit-1",
-      file,
+      file: {
+        path: file.path,
+        oldPath: file.oldPath,
+        status: file.status,
+        language: file.language,
+        commentableLines: [...file.commentableLines],
+      },
+      diff: {
+        hunks: file.hunks,
+        originalHunkCount: file.hunks.length,
+        includedHunkCount: file.hunks.length,
+        omittedHunkCount: 0,
+        truncated: false,
+      },
       symbol,
       context: [
         {
@@ -125,7 +158,25 @@ export const demoContextEngine: ContextEngine = {
       ],
       rules: [],
     };
-    return Promise.resolve([unit]);
+    const result: ContextBuildResult = {
+      units: [unit],
+      status: "complete",
+      diagnostics: {
+        elapsedMs: 0,
+        deadlineExceeded: false,
+        parseBudgetExceeded: false,
+        filesConsidered: 1,
+        filesParsed: 0,
+        filesParseTimedOut: 0,
+        unitsCreated: 1,
+        unitsSkipped: [],
+        unitsWithTruncatedDiff: 0,
+        unitsWithTruncatedDefinition: 0,
+        candidateFilesSkippedByCap: 0,
+        queryTimeouts: 0,
+      },
+    };
+    return Promise.resolve(result);
   },
 };
 

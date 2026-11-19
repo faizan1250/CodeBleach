@@ -196,10 +196,33 @@ export interface ContextItem {
   text: string; score: number; tokens: number; reason: string;
 }
 export interface ReviewUnit {
-  id: string;
-  file: ChangedFile; symbol: ChangedSymbol;
+  id: string;                  // stable hash of headSha + path + symbol identity (P3-11)
+  file: ReviewUnitFile;        // lightweight projection; never the full ChangedFile hunks
+  diff: ReviewUnitDiff;        // only the budgeted whole hunks for this unit
+  symbol: ChangedSymbol;
   context: ContextItem[];
   rules: Rule[];               // explicit first, inferred second (flagged)
+}
+export interface ReviewUnitFile {
+  path: string; oldPath: string | null;
+  status: ChangedFile["status"];
+  language: ChangedFile["language"];
+  commentableLines: number[];
+}
+export interface ReviewUnitDiff {
+  hunks: DiffHunk[];           // whole hunks only, in original order
+  originalHunkCount: number; includedHunkCount: number;
+  omittedHunkCount: number; truncated: boolean;
+}
+// P3-11 wiring (ADR 0013): ContextEngine.build returns ContextBuildResult so
+// token/deadline omissions are explicit; the pipeline passes result.units to
+// the still-stubbed Review Engine (NOT_IMPLEMENTED) and persists
+// units + status + diagnostics in run.json. The complete DiffResult stays in
+// the artifact as the authoritative diff.
+export interface ContextBuildResult {
+  units: ReviewUnit[];
+  status: "complete" | "partial";
+  diagnostics: ContextBuildDiagnostics;
 }
 
 // ---- Findings ----
