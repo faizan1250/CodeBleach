@@ -164,9 +164,9 @@ export interface ChangedFile {
   commentableLines: number[];
   symbols: ChangedSymbol[];
 }
-// Closed union (ADR 0006); new reasons are a contract change, not an engine edit.
+// Closed union (ADRs 0006, 0010); new reasons are a contract change, not an engine edit.
 export type DiffSkipReason =
-  | "binary" | "generated" | "too-large" | "ignored" | "deleted" | "lockfile";
+  | "binary" | "generated" | "too-large" | "ignored" | "deleted" | "lockfile" | "unsupported-mode";
 export interface DiffResult { baseSha: string; headSha: string; mergeBase: string; files: ChangedFile[] }
 
 // ---- Context ----

@@ -7,7 +7,8 @@ export type ErrorCode =
   | "PROVIDER_BAD_OUTPUT"
   | "GITHUB_FAILED"
   | "NOT_IMPLEMENTED"
-  | "INTERNAL";
+  | "INTERNAL"
+  | "INVALID_INPUT";
 
 export class ReviewerError extends Error {
   readonly code: ErrorCode;

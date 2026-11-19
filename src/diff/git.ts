@@ -160,9 +160,20 @@ function invalidConfig(message: string): ReviewerError {
   return new ReviewerError({ code: "CONFIG_INVALID", message });
 }
 
-async function gitDiffBytes(repoRoot: string, args: readonly string[], what: string): Promise<Uint8Array> {
+async function gitDiffBytes(
+  repoRoot: string,
+  args: readonly string[],
+  what: string,
+  maxStdoutBytes?: number,
+): Promise<Uint8Array> {
   try {
-    return (await runProcess({ cmd: ["git", "diff", ...args], cwd: repoRoot })).stdout;
+    return (
+      await runProcess({
+        cmd: ["git", "diff", ...args],
+        cwd: repoRoot,
+        ...(maxStdoutBytes === undefined ? {} : { maxStdoutBytes }),
+      })
+    ).stdout;
   } catch (cause) {
     if (cause instanceof ReviewerError && cause.code === "INTERNAL") throw cause;
     throw gitFailed(
@@ -267,8 +278,14 @@ function skippedFile(
 
 export class GitDiffEngine implements DiffEngine {
   private readonly logger: DiffLogger;
+  // Patch-diff stdout cap only (bytes). Defaults to the spawn cap; metadata,
+  // blob-size, and blob-show paths keep their own caps. Per-stream enforcement
+  // lives in runProcess; no global mutable state. Rationale: ADR 0009 ceiling
+  // keeps an accepted blob's show under the spawn cap, so a small test cap
+  // exposes missing early lockfile/size filtering as GIT_FAILED overflow.
+  private readonly patchMaxStdoutBytes: number;
 
-  constructor(deps: { logger: DiffLogger }) {
+  constructor(deps: { logger: DiffLogger; patchMaxStdoutBytes?: number }) {
     const logger = deps?.logger;
     if (
       logger === null ||
@@ -284,6 +301,7 @@ export class GitDiffEngine implements DiffEngine {
       });
     }
     this.logger = logger;
+    this.patchMaxStdoutBytes = deps?.patchMaxStdoutBytes ?? DEFAULT_MAX_STDOUT_BYTES;
   }
 
   async run(input: {
@@ -329,6 +347,7 @@ export class GitDiffEngine implements DiffEngine {
           "--",
         ],
         "git diff patch",
+        this.patchMaxStdoutBytes,
       ),
     ]);
     const metadata = parseNameStatusZ(metadataBytes);
