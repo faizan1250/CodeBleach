@@ -327,8 +327,7 @@ describe("extract call sites", () => {
   });
 });
 
-describe("test file score and symbol names", () => {
-  test("ranks test paths above source paths", () => {
+describe("test file score and symbol names", () => {  test("ranks test paths above source paths", () => {
     const adapter = getAdapter("typescript");
     expect(adapter.getTestFileScore("src/greet.test.ts")).toBe(1);
     expect(adapter.getTestFileScore("src/greet.spec.tsx")).toBe(1);
@@ -355,6 +354,151 @@ describe("test file score and symbol names", () => {
         expect(params.length).toBeGreaterThan(0);
         expect(adapter.getSymbolName(params[0] as Node, source)).toBeNull();
         expect(adapter.getSymbolName(tree.rootNode, source)).toBeNull();
+      },
+    );
+  });
+});
+
+describe("tsx adapter", () => {
+  test("parses components and hooks without jsx interference", async () => {
+    await withTree(
+      'import { useState } from "react";\nexport function Card({ title }: { title: string }): unknown {\n  const [open, setOpen] = useState(false);\n  return <div className="card">{title}</div>;\n}\n',
+      (tree, source) => {
+        const adapter = getAdapter("tsx");
+        const defs = adapter.extractDefinitions(tree, source);
+        expect(defs.map((d) => [d.name, d.kind])).toEqual([["Card", "function"]]);
+        const cards = findAll(tree.rootNode, "function_declaration");
+        const calls = adapter.extractCalls(cards[0] as Node, source);
+        expect(calls.map((c) => c.root)).toEqual(["useState"]);
+      },
+      "tsx",
+    );
+  });
+});
+
+describe("javascript adapter", () => {
+  test("mirrors function class and arrow extraction", async () => {
+    await withTree(
+      'function f(a) { return a; }\nclass C { m() { helper(); } }\nconst arrow = (x) => x;\nconst { b } = require("./b");\nmodule.exports = { f };\n',
+      (tree, source) => {
+        const adapter = getAdapter("javascript");
+        const defs = adapter.extractDefinitions(tree, source);
+        expect(defs.map((d) => [d.name, d.kind, d.container ?? null])).toEqual([
+          ["f", "function", null],
+          ["C", "class", null],
+          ["m", "method", "C"],
+          ["arrow", "function", null],
+        ]);
+        const methods = findAll(tree.rootNode, "method_definition");
+        const calls = adapter.extractCalls(methods[0] as Node, source);
+        expect(calls.map((c) => c.callee)).toEqual(["helper()"]);
+        const roots = adapter.extractCalls(tree.rootNode, source).map((c) => c.root);
+        expect(roots).toContain("require");
+      },
+      "javascript",
+    );
+  });
+});
+
+describe("adapter edge cases", () => {
+  test("emoji before declarations keeps names and ranges", async () => {
+    await withTree(
+      "// hello 👋 world\n// café naïve résumé\nfunction target(): number { return 1; }\n",
+      (tree, source) => {
+        const defs = getAdapter("typescript").extractDefinitions(tree, source);
+        expect(defs).toHaveLength(1);
+        expect(defs[0]?.name).toBe("target");
+        expect(defs[0]?.fullRange).toMatchObject({ startLine: 3, endLine: 3 });
+        expect(defs[0]?.fullText).toBe("function target(): number { return 1; }");
+        expect(
+          source.slice(defs[0]?.fullRange.startIndex ?? 0, defs[0]?.fullRange.endIndex ?? 0),
+        ).toBe("function target(): number { return 1; }");
+      },
+    );
+  });
+
+  test("crlf sources keep 1-based line mapping", async () => {
+    await withTree("function a(): void {}\r\nfunction b(): void {}\r\n", (tree, source) => {
+      const defs = getAdapter("typescript").extractDefinitions(tree, source);
+      expect(defs.map((d) => [d.name, d.fullRange.startLine])).toEqual([
+        ["a", 1],
+        ["b", 2],
+      ]);
+    });
+  });
+
+  test("method modifiers do not affect names", async () => {
+    await withTree(
+      "class C {\n  static create(): C { return new C(); }\n  private reset(): void {}\n  get value(): number { return 1; }\n  set value(v: number) {}\n}\n",
+      (tree, source) => {
+        const defs = getAdapter("typescript").extractDefinitions(tree, source);
+        expect(defs.map((d) => [d.name, d.kind, d.container ?? null])).toEqual([
+          ["C", "class", null],
+          ["create", "method", "C"],
+          ["reset", "method", "C"],
+          ["value", "method", "C"],
+          ["value", "method", "C"],
+        ]);
+        expect(defs[3]?.identityKey).toBe("method:C:value");
+        expect(defs[4]?.identityKey).toBe("method:C:value#2");
+      },
+    );
+  });
+
+  test("generators are functions", async () => {
+    await withTree("function* gen(): Generator<number> { yield 1; }\n", (tree, source) => {
+      const defs = getAdapter("typescript").extractDefinitions(tree, source);
+      expect(defs.map((d) => [d.name, d.kind])).toEqual([["gen", "function"]]);
+    });
+  });
+
+  test("class expressions use the variable name", async () => {
+    await withTree("const C = class { m(): void {} };\n", (tree, source) => {
+      const defs = getAdapter("typescript").extractDefinitions(tree, source);
+      expect(defs.map((d) => [d.name, d.kind, d.container ?? null])).toEqual([
+        ["C", "class", null],
+        ["m", "method", "C"],
+      ]);
+    });
+  });
+
+  test("export assignment maps to the default export", async () => {
+    await withTree("function foo(): void {}\nexport = foo;\n", (tree, source) => {
+      const exports = getAdapter("typescript").extractExports(tree, source);
+      expect(exports).toEqual([
+        { exportedName: "default", localName: "foo", sourceSpecifier: null, kind: "default", range: { startLine: 2, endLine: 2 } },
+      ]);
+    });
+  });
+
+  test("default-exported classes keep their methods", async () => {
+    await withTree("export default class Store { load(): void {} }\n", (tree, source) => {
+      const defs = getAdapter("typescript").extractDefinitions(tree, source);
+      expect(defs.map((d) => [d.name, d.kind, d.exportKind, d.container ?? null])).toEqual([
+        ["Store", "class", "default", null],
+        ["load", "method", "none", "Store"],
+      ]);
+    });
+  });
+
+  test("string-named methods keep raw text", async () => {
+    await withTree('class C { "quoted"(): void {} }\n', (tree, source) => {
+      const defs = getAdapter("typescript").extractDefinitions(tree, source);
+      expect(defs.map((d) => d.name)).toEqual(["C", '"quoted"']);
+    });
+  });
+
+  test("super this and optional chains decompose", async () => {
+    await withTree(
+      "class D extends B {\n  m(): void {\n    super.m();\n    this.n();\n    fetch(1);\n  }\n}\n",
+      (tree, source) => {
+        const methods = findAll(tree.rootNode, "method_definition");
+        const calls = getAdapter("typescript").extractCalls(methods[0] as Node, source);
+        expect(calls.map((c) => [c.root, c.member, c.containing])).toEqual([
+          ["super", "m", "m"],
+          ["this", "n", "m"],
+          ["fetch", null, "m"],
+        ]);
       },
     );
   });
