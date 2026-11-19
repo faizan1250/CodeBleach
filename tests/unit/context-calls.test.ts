@@ -172,6 +172,23 @@ describe("matchLocalCall", () => {
     expect(match).toEqual({ status: "defer" });
   });
 
+  test("ignores method definitions for bare calls", () => {
+    const match = matchLocalCall(callRef("helper"), [def("helper", "method", "Service")], {
+      name: "run",
+      kind: "function",
+    });
+    expect(match).toEqual({ status: "defer" });
+  });
+
+  test("prefers non-method definitions for bare calls with same-name methods", () => {
+    const fn = def("helper", "function", undefined, 1);
+    const match = matchLocalCall(callRef("helper"), [def("helper", "method", "Service"), fn], {
+      name: "run",
+      kind: "function",
+    });
+    expect(match).toEqual({ status: "found", definitions: [fn] });
+  });
+
   test("maps this-calls to container methods", () => {
     const match = matchLocalCall(callRef("this", "helper"), [def("helper", "method", "Service")], {
       name: "run",
@@ -227,6 +244,12 @@ describe("dedupeCalleeTargets", () => {
       callRange: { startLine: 9, endLine: 9, startIndex: 90, endIndex: 99 },
     });
     expect(dedupeCalleeTargets([first, second])).toEqual([first]);
+  });
+
+  test("collapses overloads sharing path, kind, container, and name", () => {
+    const first = target("helper", "src/a.ts", 1);
+    const overload = target("helper", "src/a.ts", 5);
+    expect(dedupeCalleeTargets([first, overload])).toEqual([first]);
   });
 
   test("keeps same-name targets from different files", () => {

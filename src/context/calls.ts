@@ -105,7 +105,9 @@ export function matchLocalCall(
     return methods.length > 0 ? { status: "found", definitions: methods } : { status: "unresolved" };
   }
   if (call.member === null) {
-    const direct = definitions.filter((definition) => definition.name === root);
+    // Bare identifiers never invoke class methods (require this/super or
+    // ClassName.method); keep method resolution in the branches above.
+    const direct = definitions.filter((definition) => definition.kind !== "method" && definition.name === root);
     return direct.length > 0 ? { status: "found", definitions: direct } : { status: "defer" };
   }
   const statics = definitions.filter(
@@ -136,12 +138,12 @@ export function targetIdentity(path: string, definition: Definition | TypeDefini
   return `${path}\0type:${definition.name}:${definition.range.startLine}`;
 }
 
-/** Dedupe by target identity, keeping the earliest call site. */
+/** Dedupe by target identity (overloads share one entry), keeping the earliest call site. */
 export function dedupeCalleeTargets(targets: readonly CalleeTarget[]): CalleeTarget[] {
   const seen = new Set<string>();
   const out: CalleeTarget[] = [];
   for (const target of targets) {
-    const key = `${target.path}\0${target.kind}\0${target.container ?? ""}\0${target.name}\0${target.startLine}`;
+    const key = `${target.path}\0${target.kind}\0${target.container ?? ""}\0${target.name}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(target);

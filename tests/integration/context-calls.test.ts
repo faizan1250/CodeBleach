@@ -147,6 +147,24 @@ describe("context callee discovery from commit snapshots", () => {
     }
   });
 
+  test("bare call ignores same-file method definitions", async () => {
+    const { dir, cleanup, commit } = await setupRepo({
+      "src/a.ts":
+        "export class Service {\n  helper(): number {\n    return 1;\n  }\n}\nexport function run(): number {\n  return helper();\n}\n",
+    });
+    try {
+      const { callees, diagnostics } = await resolveCalleesForSymbol({
+        filePath: "src/a.ts",
+        symbol: symbolFor("run", "function", 6, 8),
+        reader: readerFor(dir, commit),
+      });
+      expect(callees).toEqual([]);
+      expect(diagnostics.map((entry) => entry.reason)).toContain("unresolved");
+    } finally {
+      await cleanup();
+    }
+  });
+
   test("constructor call resolves to the imported class", async () => {
     const { dir, cleanup, commit } = await setupRepo({
       "src/app.ts": 'import { Client } from "./client";\nexport function connect(): number {\n  return new Client().fetch();\n}\n',
