@@ -78,7 +78,7 @@ event → resolve SHAs → load config → git diff (local) → filter files
 ### 4.2 Context Engine (`src/context`)
 On-demand, per PR, **no persistent index** in MVP.
 
-`LanguageAdapter` interface (one per language): grammar wasm path, queries for definitions / imports / calls / types, test-file heuristics, symbol-name extraction.
+`LanguageAdapter` interface (`src/context/language.ts:89-101`, one per language): `extractDefinitions`, `extractImports`, `extractExports`, `extractCalls` (node-scoped), `extractTypes`, `extractCallSites` (whole-tree, target-scoped), `getTestFileScore`, `getSymbolName`, plus `language`/`extensions`/`grammarId`. One wasm grammar per language; test-file heuristics live in the shared adapter layer.
 
 For each `ChangedSymbol`, collect `ContextItem`s:
 
@@ -88,7 +88,7 @@ For each `ChangedSymbol`, collect `ContextItem`s:
 | imports/types | resolve import specifiers in file → read referenced type/interface definitions (relative imports only at first) |
 | callees | tree-sitter call expressions in body → resolve through imports → definition text (signature + body, truncated) |
 | callers | `git grep -n -w <symbolName>` (or `rg`) on head → parse hit files → keep hits that are real call expressions (not strings/comments) → enclosing function text. Cap N. |
-| tests | files matching test patterns that import the changed file OR mention the symbol name; ranked by (imports file) > (mentions symbol) > (same dir/name) |
+| tests | head-snapshot-only discovery per symbol (`src/context/tests.ts`): candidate test files (via `getTestFileScore` + symbol grep + bounded module scan) ranked by evidence — direct relative file import > symbol import through a barrel re-export > AST-verified call in test code > base-name match > comment/string-only mention (always weakest, never outranks AST-confirmed). A same-name local definition without import evidence excludes the file. Cap `MAX_TESTS_PER_SYMBOL=16` per symbol; snippet is a bounded extraction around the evidence line (`TEST_SNIPPET_CONTEXT_LINES=10`), never the whole file |
 | config | files referenced by `process.env.X`/config keys used in symbol (grep) — later |
 | similar | sibling functions in same file/dir with same kind; grep by shared identifiers — later, only if eval shows value |
 | conventions | explicit rules from config (always) + inferred (Phase 6) |
@@ -111,6 +111,14 @@ Ranking: score = kind weight (definition 100, type 85, callee 75, caller 65, tes
   surrounding file text only.
 
 Symbol resolution is **best-effort by name + import path**, not a type checker. Be explicit in prompts that callers/callees may be incomplete.
+
+Test discovery is bounded: `MAX_TEST_GREP_MATCHES=200` per symbol-name grep, `MAX_TEST_SCAN_FILES=200` scanned files, deterministic ordering throughout; expected misses stay silent, only `parse-cancelled`/`cap-reached`-class outcomes become diagnostics.
+
+`queryTimeouts` counts engine-observed timed-out Git subprocess calls only (`isGitTimeout` in `src/context/snapshot.ts:97`: `GIT_FAILED` whose cause reason is `"timeout"`). Git runs single-attempt with no retry, and resolvers rethrow timeout-cause errors instead of recording them as content misses, so the engine counts each exactly once at its catch sites. Deadline skips, parse cancellations, and non-timeout Git failures (exit, output-limit, abort) never increment it.
+
+Per-run parse cache (`src/context/parse-cache.ts`): one extraction bundle per `(commit, path, language)` key (lowercased commit; head/base entries stay separate via distinct SHAs). Stores plain extraction data only — never Tree/WASM handles — so nothing disposes beyond `clear()` at run end. Hits never touch the run budget; misses parse once under it (per-file, cumulative, and deadline limits all apply); cancelled parses are never cached. Caps `MAX_PARSE_CACHE_ENTRIES=256`, `MAX_PARSE_CACHE_BYTES=8MiB` (source-bytes proxy). Diagnostics carry additive `parseCacheHits/Misses/Entries`; `filesParsed` counts actual parses only (hits excluded). Cached outputs are byte-identical to uncached ones.
+
+Partial behavior: `ContextBuildResult.status` is `complete` (no issues) | `partial` (issues with units produced, or deadline/budget with zero units) | `failed` (zero units plus a retrieval-failure diagnostic; cap-only, budget-only, or parse-cancelled-only diagnostics stay `partial`). Engine diagnostics (`ContextDiagnostic{stage, path, symbol?, code, reason}`, stages `snapshot | parse | import | caller | callee | test`) are bounded (max 100, key-deduped) and carry static codes plus path/symbol truncated to 200 chars — never messages, source text, or file content. Partial/failed runs still persist `run.json` with units + diagnostics verbatim (redacted by `sanitizePayload`).
 
 ### 4.3 Review Engine (`src/review`)
 - **MVP: one agent, one pass per ReviewUnit** with a single focused prompt (bugs, null handling, security, regressions). Add specialized passes (security, concurrency, perf) as separate prompt files only if evals show recall gaps. Separate agents are justified only when a pass needs different tools/context or different models for cost; not before.
@@ -214,14 +222,17 @@ export interface ReviewUnitDiff {
   originalHunkCount: number; includedHunkCount: number;
   omittedHunkCount: number; truncated: boolean;
 }
-// P3-11 wiring (ADR 0013): ContextEngine.build returns ContextBuildResult so
-// token/deadline omissions are explicit; the pipeline passes result.units to
-// the still-stubbed Review Engine (NOT_IMPLEMENTED) and persists
-// units + status + diagnostics in run.json. The complete DiffResult stays in
-// the artifact as the authoritative diff.
+// P3-11 wiring (ADR 0013) + P3 hardening (ADR 0014): ContextEngine.build
+// returns ContextBuildResult so token/deadline omissions are explicit; the
+// pipeline passes result.units to the still-stubbed Review Engine
+// (NOT_IMPLEMENTED) and persists units + status + diagnostics in run.json.
+// The complete DiffResult stays in the artifact as the authoritative diff.
+// Status gains "failed" (zero units + retrieval failure); diagnostics gains
+// ContextDiagnostic[] plus parseCacheHits/Misses/Entries (filesParsed counts
+// actual parses only, cache hits excluded).
 export interface ContextBuildResult {
   units: ReviewUnit[];
-  status: "complete" | "partial";
+  status: "complete" | "partial" | "failed";
   diagnostics: ContextBuildDiagnostics;
 }
 
