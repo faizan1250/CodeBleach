@@ -152,10 +152,12 @@ export interface DiffHunk { oldStart: number; oldLines: number; newStart: number
 
 export interface ChangedSymbol {
   name: string;
-  kind: "function" | "method" | "class" | "module";
+  kind: "function" | "method" | "class" | "type" | "module";
   container?: string;
   startLine: number; endLine: number;
   changedLines: number[];      // head-side added line numbers inside this symbol
+  deletedLines?: number[];     // merge-base deleted line numbers (ADR 0012)
+  anchorLine?: number;          // head-side commentable anchor for deletion-only symbols
 }
 export interface ChangedFile {
   path: string; oldPath: string | null;

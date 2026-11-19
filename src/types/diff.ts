@@ -25,13 +25,19 @@ export interface DiffHunk {
   lines: DiffLine[];
 }
 
+export type SymbolKind = "function" | "method" | "class" | "type" | "module";
+
 export interface ChangedSymbol {
   name: string;
-  kind: "function" | "method" | "class" | "module";
+  kind: SymbolKind;
   container?: string | undefined;
   startLine: number;
   endLine: number;
   changedLines: number[];
+  /** Deleted line numbers in the merge-base snapshot; never head-side. */
+  deletedLines?: number[] | undefined;
+  /** 1-based head-side commentable line anchoring deletion-only review. */
+  anchorLine?: number | undefined;
 }
 
 export interface ChangedFile {
