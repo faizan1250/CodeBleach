@@ -20,6 +20,7 @@ describe("isValidGlobPattern", () => {
       "a?c.ts",
       "file?.ts",
       "*.min.*",
+      "**/*.min.*",
       "a/b/c",
       "a*b?c",
       ".eslintrc",
@@ -81,6 +82,16 @@ describe("matchGlob", () => {
     expect(matchGlob("src/a/b.ts", "src/*.ts")).toBe(false);
     expect(matchGlob("app.min.js", "*.min.*")).toBe(true);
     expect(matchGlob("app.js", "*.min.*")).toBe(false);
+    expect(matchGlob("src/app.min.js", "*.min.*")).toBe(false);
+  });
+
+  test("canonical minified pattern matches at root and at depth", () => {
+    for (const path of ["bundle.min.js", "src/app.min.js", "src/generated/bundle.min.js"]) {
+      expect(matchGlob(path, "**/*.min.*")).toBe(true);
+    }
+    expect(matchGlob("public/assets/app.min.css", "**/*.min.*")).toBe(true);
+    expect(matchGlob("src/app.js", "**/*.min.*")).toBe(false);
+    expect(matchGlob("src/minifier.js", "**/*.min.*")).toBe(false);
   });
 
   test("double-star spans segments and matches zero dirs after slash", () => {

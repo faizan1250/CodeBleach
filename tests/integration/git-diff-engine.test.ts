@@ -379,6 +379,29 @@ describe("filters", () => {
     }
   });
 
+  test("minified bundles skip as ignored under defaults", async () => {
+    const { dir, cleanup } = await makeRepo();
+    try {
+      const base = await writeAndCommit(dir, { "src/app.ts": "const a = 1;\n" }, "base");
+      const head = await writeAndCommit(
+        dir,
+        {
+          "src/app.ts": "const a = 2;\n",
+          "bundle.min.js": "var a=1;\nvar b=2;\n",
+          "public/assets/app.min.css": "a{color:red}\n",
+        },
+        "head",
+      );
+      const { result } = await runEngine(dir, base, head);
+      const byPath = new Map(result.files.map((file) => [file.path, file]));
+      expect(byPath.get("bundle.min.js")?.skipReason).toBe("ignored");
+      expect(byPath.get("public/assets/app.min.css")?.skipReason).toBe("ignored");
+      expect(byPath.get("src/app.ts")?.skipReason).toBeUndefined();
+    } finally {
+      await cleanup();
+    }
+  });
+
   test("generated marker outside the header window does not skip", async () => {
     const { dir, cleanup } = await makeRepo();
     try {

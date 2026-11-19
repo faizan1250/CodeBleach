@@ -188,6 +188,20 @@ describe("selectSkipReason", () => {
     ).toBe("ignored");
   });
 
+  test("minified bundles skip as ignored at root and at depth", () => {
+    const ignorePaths = ["**/*.min.*"];
+    for (const path of [
+      "bundle.min.js",
+      "app.min.css",
+      "src/generated/bundle.min.js",
+      "public/assets/app.min.css",
+    ]) {
+      expect(selectSkipReason(base({ path, ignorePaths }))).toBe("ignored");
+    }
+    expect(selectSkipReason(base({ path: "src/app.js", ignorePaths }))).toBeUndefined();
+    expect(selectSkipReason(base({ path: "src/minifier.js", ignorePaths }))).toBeUndefined();
+  });
+
   test("too-large beats generated for both byte and line caps", () => {
     expect(
       selectSkipReason(base({ headBlobBytes: 500 * 1024 + 1, headSample: "// @generated\n" })),
