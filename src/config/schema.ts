@@ -13,14 +13,17 @@ import {
   DEFAULT_MAX_FINDINGS,
   DEFAULT_MAX_PARSE_TIME_MS,
   DEFAULT_MAX_RUN_TIME_MS,
+  DEFAULT_MAX_TOKENS_PER_UNIT,
   DEFAULT_MAX_TOTAL_PARSE_TIME_MS,
   DEFAULT_SEVERITY_THRESHOLD,
   MAX_MAX_FILE_SIZE_KB,
   MAX_MAX_PARSE_TIME_MS,
   MAX_MAX_RUN_TIME_MS,
+  MAX_MAX_TOKENS_PER_UNIT,
   MAX_MAX_TOTAL_PARSE_TIME_MS,
   MIN_MAX_PARSE_TIME_MS,
   MIN_MAX_RUN_TIME_MS,
+  MIN_MAX_TOKENS_PER_UNIT,
   MIN_MAX_TOTAL_PARSE_TIME_MS,
   mergeIgnorePaths,
 } from "./defaults.ts";
@@ -133,6 +136,12 @@ const ContextSchema = z
       .min(MIN_MAX_TOTAL_PARSE_TIME_MS)
       .max(MAX_MAX_TOTAL_PARSE_TIME_MS)
       .default(DEFAULT_MAX_TOTAL_PARSE_TIME_MS),
+    max_tokens_per_unit: z
+      .number()
+      .int()
+      .min(MIN_MAX_TOKENS_PER_UNIT)
+      .max(MAX_MAX_TOKENS_PER_UNIT)
+      .default(DEFAULT_MAX_TOKENS_PER_UNIT),
   })
   .check((ctx) => {
     const context = ctx.value;
