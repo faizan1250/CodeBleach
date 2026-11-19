@@ -1,22 +1,20 @@
-import type { Tree } from "web-tree-sitter";
 import { DEFAULT_MAX_PARSE_TIME_MS } from "../config/defaults.ts";
 import { detectLanguage } from "../diff/paths.ts";
 import type { ChangedSymbol } from "../types/diff.ts";
 import { candidatePaths, isRelativeSpecifier, pickTarget, resolveRelativePath } from "./imports.ts";
 import { matchLocalCall, resolveExportedMember, targetIdentity } from "./calls.ts";
 import type { LocalScope, MemberResolutionContext } from "./calls.ts";
-import { getAdapter } from "./language.ts";
 import type {
   CallReference,
   Definition,
   ExportReference,
   ImportReference,
-  LanguageAdapter,
   SymbolRange,
   TypeDefinition,
 } from "./language.ts";
 import type { RunBudget } from "./limits.ts";
-import { parseSource } from "./parser.ts";
+import { ParseCache } from "./parse-cache.ts";
+import type { ParsedFileSnapshot } from "./parse-cache.ts";
 import type { SnapshotReader, TreeEntry } from "./snapshot.ts";
 import { isGitTimeout } from "./snapshot.ts";
 
@@ -65,6 +63,7 @@ export interface ResolveCallersOptions {
   maxCallers?: number | undefined;
   maxGrepMatches?: number | undefined;
   maxScanFiles?: number | undefined;
+  parseCache?: ParseCache | undefined;
 }
 
 export interface ResolveCallersResult {
@@ -98,6 +97,7 @@ interface CallerContext {
   headIndex: ReadonlyMap<string, TreeEntry>;
   perFileMs: number;
   runBudget: RunBudget | undefined;
+  parseCache: ParseCache;
   modules: Map<string, CallerModule | "cancelled" | null>;
 }
 
@@ -210,10 +210,10 @@ export function snippetAround(
   return { text: lines.slice(from - 1, to).join("\n"), startLine: from, endLine: to };
 }
 
-function assembleModule(path: string, tree: Tree, source: string, adapter: LanguageAdapter): CallerModule {
+function assembleSnapshot(path: string, snapshot: ParsedFileSnapshot): CallerModule {
   const localExports = new Map<string, string>();
   const reExports: ExportReference[] = [];
-  for (const ref of adapter.extractExports(tree, source)) {
+  for (const ref of snapshot.exports) {
     if (ref.sourceSpecifier === null) {
       if (ref.exportedName !== null && ref.localName !== null) localExports.set(ref.exportedName, ref.localName);
     } else {
@@ -222,9 +222,9 @@ function assembleModule(path: string, tree: Tree, source: string, adapter: Langu
   }
   return {
     path,
-    definitions: adapter.extractDefinitions(tree, source),
-    types: adapter.extractTypes(tree, source),
-    imports: adapter.extractImports(tree, source),
+    definitions: snapshot.definitions,
+    types: snapshot.types,
+    imports: snapshot.imports,
     localExports,
     reExports,
   };
@@ -246,24 +246,21 @@ async function loadCallerModule(path: string, context: CallerContext): Promise<C
     context.modules.set(path, null);
     return null;
   }
-  const parsed = await parseSource({
+  const cached = await context.parseCache.getOrParse({
+    commit: context.reader.headSha,
+    path,
     source,
     language,
-    filePath: path,
     perFileMs: context.perFileMs,
     runBudget: context.runBudget,
   });
-  if (parsed.tree === null) {
+  if (cached.status === "cancelled") {
     context.modules.set(path, "cancelled");
     return "cancelled";
   }
-  try {
-    const loaded = assembleModule(path, parsed.tree, parsed.source, getAdapter(language));
-    context.modules.set(path, loaded);
-    return loaded;
-  } finally {
-    parsed.tree.delete();
-  }
+  const loaded = assembleSnapshot(path, cached.snapshot);
+  context.modules.set(path, loaded);
+  return loaded;
 }
 
 function toMemberContext(context: CallerContext): MemberResolutionContext {
@@ -458,40 +455,41 @@ async function verifyCandidate(
     if (isGitTimeout(error)) throw error;
     return { sites: [], diagnostics: [] };
   }
-  const parsed = await parseSource({
+  const cached = await context.parseCache.getOrParse({
+    commit: context.reader.headSha,
+    path: candidate,
     source,
     language,
-    filePath: candidate,
     perFileMs: context.perFileMs,
     runBudget: context.runBudget,
   });
-  if (parsed.tree === null) {
+  if (cached.status === "cancelled") {
     return {
       sites: [],
       diagnostics: [{ filePath: target.filePath, symbol: target.symbolName, candidate, reason: "parse-cancelled" }],
     };
   }
-  try {
-    const adapter = getAdapter(language);
+  {
+    const snapshot = cached.snapshot;
     const { bindings, diagnostics } = await buildBindings(
-      adapter.extractImports(parsed.tree, parsed.source),
+      snapshot.imports,
       candidate,
       target,
       context,
     );
     if (bindings.size === 0) return { sites: [], diagnostics };
-    const definitions = adapter.extractDefinitions(parsed.tree, parsed.source);
+    const definitions = snapshot.definitions;
     const memberContext = toMemberContext(context);
     const sites: CallerSite[] = [];
     const callDiagnostics: CallerDiagnostic[] = [...diagnostics];
-    for (const call of adapter.extractCalls(parsed.tree.rootNode, parsed.source)) {
+    for (const call of snapshot.calls) {
       if (call.root === null || call.root === "this" || call.root === "super") continue;
       const binding = bindings.get(call.root);
       if (binding === undefined) continue;
       if (call.member === null) {
         // Bare constructor/news calls and direct calls both reference the target.
         if (binding.kind === "namespace") continue;
-        sites.push(toSite(candidate, enclosingCaller(definitions, call), parsed.source, call, callerReason(binding)));
+        sites.push(toSite(candidate, enclosingCaller(definitions, call), snapshot.source, call, callerReason(binding)));
         continue;
       }
       // Member access on a value binding is unverifiable without type
@@ -500,7 +498,7 @@ async function verifyCandidate(
       const outcome = await resolveExportedMember(binding.modulePath, call.member, memberContext);
       if (outcome.status === "found") {
         if (outcome.targetPath === target.filePath && targetIdentity(outcome.targetPath, outcome.definition) === target.targetId) {
-          sites.push(toSite(candidate, enclosingCaller(definitions, call), parsed.source, call, callerReason(binding)));
+          sites.push(toSite(candidate, enclosingCaller(definitions, call), snapshot.source, call, callerReason(binding)));
         }
       } else if (outcome.status === "ambiguous") {
         callDiagnostics.push({ filePath: target.filePath, symbol: target.symbolName, candidate: `${candidate}:${call.root}.${call.member}`, reason: "ambiguous" });
@@ -511,8 +509,6 @@ async function verifyCandidate(
       }
     }
     return { sites, diagnostics: callDiagnostics };
-  } finally {
-    parsed.tree.delete();
   }
 }
 
@@ -529,17 +525,20 @@ export async function resolveCallersForSymbol(options: ResolveCallersOptions): P
   const language = detectLanguage(filePath);
   if (language === null) return { callers: [], diagnostics: [] };
   const source = await reader.readHeadText(filePath);
-  const parsed = await parseSource({
+  const parseCache = options.parseCache ?? new ParseCache();
+  const cached = await parseCache.getOrParse({
+    commit: reader.headSha,
+    path: filePath,
     source,
     language,
-    filePath,
     perFileMs,
     runBudget: options.runBudget,
   });
-  if (parsed.tree === null) return { callers: [], diagnostics: [] };
-  try {
-    const adapter = getAdapter(language);
-    const targetModule = assembleModule(filePath, parsed.tree, parsed.source, adapter);
+  if (cached.status === "cancelled") return { callers: [], diagnostics: [] };
+  {
+    const targetModule = assembleSnapshot(filePath, cached.snapshot);
+    const sourceText = cached.snapshot.source;
+    const rootCalls = cached.snapshot.calls;
     const declaration = findTargetDeclaration(targetModule.definitions, targetModule.types, symbol);
     if (declaration === null || !("identityKey" in declaration) || declaration.kind === "type" || symbol.kind === "module") {
       return { callers: [], diagnostics: [] };
@@ -549,6 +548,7 @@ export async function resolveCallersForSymbol(options: ResolveCallersOptions): P
       headIndex: await reader.listHeadFiles(),
       perFileMs,
       runBudget: options.runBudget,
+      parseCache,
       modules: new Map([[filePath, targetModule]]),
     };
     const publicNames = targetPublicNames(targetModule.localExports, declaration);
@@ -561,7 +561,7 @@ export async function resolveCallersForSymbol(options: ResolveCallersOptions): P
     };
     const sites: CallerSite[] = [];
     const diagnostics: CallerDiagnostic[] = [];
-    for (const call of adapter.extractCalls(parsed.tree.rootNode, parsed.source)) {
+    for (const call of rootCalls) {
       if (call.range.startIndex >= declaration.fullRange.startIndex && call.range.endIndex <= declaration.fullRange.endIndex) {
         continue;
       }
@@ -574,7 +574,7 @@ export async function resolveCallersForSymbol(options: ResolveCallersOptions): P
           ...(scopeDef.container === undefined ? {} : { container: scopeDef.container }),
         };
       if (matchLocalCall(call, [declaration], scope).status !== "found") continue;
-      sites.push(toSite(filePath, scopeDef, parsed.source, call, callerReason(null)));
+      sites.push(toSite(filePath, scopeDef, sourceText, call, callerReason(null)));
     }
 
     const searchNames = [...new Set([symbol.name, ...publicNames])]
@@ -635,7 +635,5 @@ export async function resolveCallersForSymbol(options: ResolveCallersOptions): P
       diagnostics.push({ filePath, symbol: symbol.name, candidate: `${dropped.path}:${dropped.caller ?? "<module>"}`, reason: "cap-reached" });
     }
     return { callers: kept, diagnostics: dedupeDiagnostics(diagnostics) };
-  } finally {
-    parsed.tree.delete();
   }
 }

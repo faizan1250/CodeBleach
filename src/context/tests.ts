@@ -14,7 +14,7 @@ import type {
   TypeDefinition,
 } from "./language.ts";
 import type { RunBudget } from "./limits.ts";
-import { parseSource } from "./parser.ts";
+import { ParseCache, callSitesFor } from "./parse-cache.ts";
 import { scoreItem } from "./rank.ts";
 import type { RankProximity } from "./rank.ts";
 import type { SnapshotReader, TreeEntry } from "./snapshot.ts";
@@ -64,6 +64,7 @@ export interface ResolveTestsOptions {
   maxTests?: number | undefined;
   maxGrepMatches?: number | undefined;
   maxScanFiles?: number | undefined;
+  parseCache?: ParseCache | undefined;
 }
 
 export interface ResolveTestsResult {
@@ -87,6 +88,7 @@ interface TestContext {
   headIndex: ReadonlyMap<string, TreeEntry>;
   perFileMs: number;
   runBudget: RunBudget | undefined;
+  parseCache: ParseCache;
   modules: Map<string, TestModule | "cancelled" | null>;
   targetPath: string;
   targetId: string;
@@ -176,22 +178,23 @@ async function loadTestModule(path: string, context: TestContext): Promise<TestM
     context.modules.set(path, null);
     return null;
   }
-  const parsed = await parseSource({
+  const cached = await context.parseCache.getOrParse({
+    commit: context.reader.headSha,
+    path,
     source,
     language,
-    filePath: path,
     perFileMs: context.perFileMs,
     runBudget: context.runBudget,
   });
-  if (parsed.tree === null) {
+  if (cached.status === "cancelled") {
     context.modules.set(path, "cancelled");
     return "cancelled";
   }
-  try {
-    const adapter = getAdapter(language);
+  {
+    const snapshot = cached.snapshot;
     const localExports = new Map<string, string>();
     const reExports: ExportReference[] = [];
-    for (const ref of adapter.extractExports(parsed.tree, parsed.source)) {
+    for (const ref of snapshot.exports) {
       if (ref.sourceSpecifier === null) {
         if (ref.exportedName !== null && ref.localName !== null) localExports.set(ref.exportedName, ref.localName);
       } else {
@@ -200,21 +203,16 @@ async function loadTestModule(path: string, context: TestContext): Promise<TestM
     }
     const loaded: TestModule = {
       path,
-      source: parsed.source,
-      definitions: adapter.extractDefinitions(parsed.tree, parsed.source),
-      types: adapter.extractTypes(parsed.tree, parsed.source),
-      imports: adapter.extractImports(parsed.tree, parsed.source),
-      callSites: adapter.extractCallSites(parsed.tree, parsed.source, {
-        name: context.symbolName,
-        aliases: [...context.names],
-      }),
+      source: snapshot.source,
+      definitions: snapshot.definitions,
+      types: snapshot.types,
+      imports: snapshot.imports,
+      callSites: callSitesFor(snapshot.calls, [...context.names]),
       localExports,
       reExports,
     };
     context.modules.set(path, loaded);
     return loaded;
-  } finally {
-    parsed.tree.delete();
   }
 }
 
@@ -495,30 +493,32 @@ export async function resolveTestsForSymbol(options: ResolveTestsOptions): Promi
   if (language === null) return { tests: [], diagnostics: [] };
   if (symbol.kind === "module") return { tests: [], diagnostics: [] };
   const source = await reader.readHeadText(filePath);
-  const parsed = await parseSource({
+  const parseCache = options.parseCache ?? new ParseCache();
+  const cached = await parseCache.getOrParse({
+    commit: reader.headSha,
+    path: filePath,
     source,
     language,
-    filePath,
     perFileMs,
     runBudget: options.runBudget,
   });
-  if (parsed.tree === null) {
+  if (cached.status === "cancelled") {
     return {
       tests: [],
       diagnostics: [{ filePath, symbol: symbol.name, candidate: filePath, reason: "parse-cancelled" }],
     };
   }
-  try {
-    const adapter = getAdapter(language);
+  {
+    const snapshot = cached.snapshot;
     const localExports = new Map<string, string>();
-    for (const ref of adapter.extractExports(parsed.tree, parsed.source)) {
+    for (const ref of snapshot.exports) {
       if (ref.sourceSpecifier === null && ref.exportedName !== null && ref.localName !== null) {
         localExports.set(ref.exportedName, ref.localName);
       }
     }
     const declaration = findTargetDeclaration(
-      adapter.extractDefinitions(parsed.tree, parsed.source),
-      adapter.extractTypes(parsed.tree, parsed.source),
+      snapshot.definitions,
+      snapshot.types,
       symbol,
     );
     if (declaration === null) return { tests: [], diagnostics: [] };
@@ -527,6 +527,7 @@ export async function resolveTestsForSymbol(options: ResolveTestsOptions): Promi
       headIndex: await reader.listHeadFiles(),
       perFileMs,
       runBudget: options.runBudget,
+      parseCache,
       modules: new Map(),
       targetPath: filePath,
       targetId: targetIdentity(filePath, declaration),
@@ -588,7 +589,5 @@ export async function resolveTestsForSymbol(options: ResolveTestsOptions): Promi
       diagnostics.push({ filePath, symbol: symbol.name, candidate: `${dropped.path}:${dropped.testName ?? "<module>"}`, reason: "cap-reached" });
     }
     return { tests: kept, diagnostics: dedupeTestDiagnostics(diagnostics) };
-  } finally {
-    parsed.tree.delete();
   }
 }

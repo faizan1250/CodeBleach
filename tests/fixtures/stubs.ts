@@ -83,6 +83,9 @@ export function createFixtureEngines(options: FixtureOptions = {}): FixtureEngin
       unitsWithTruncatedDefinition: 0,
       candidateFilesSkippedByCap: 0,
       queryTimeouts: 0,
+      parseCacheHits: 0,
+      parseCacheMisses: 0,
+      parseCacheEntries: 0,
       diagnostics: [],
     },
   };

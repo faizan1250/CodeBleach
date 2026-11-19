@@ -28,9 +28,8 @@ import { resolveCalleesForSymbol } from "./calls.ts";
 import { resolveCallersForSymbol } from "./callers.ts";
 import { resolveImportsForFile } from "./imports.ts";
 import type { Definition, TypeDefinition } from "./language.ts";
-import { getAdapter } from "./language.ts";
 import { RunBudget } from "./limits.ts";
-import { parseSource } from "./parser.ts";
+import { ParseCache } from "./parse-cache.ts";
 import type { ParseSkipReason } from "./parser.ts";
 import { selectRulesForFile } from "./rules.ts";
 import { rankContextItems, scoreItem } from "./rank.ts";
@@ -281,6 +280,11 @@ export class ContextEngineImpl implements ContextEngine {
       mergeBase: diff.mergeBase,
       runBudget,
     });
+    // One parsed snapshot per unique (commit, path, language) for this run:
+    // head and base stay separate through distinct commit SHAs. Entries hold
+    // plain extraction data only (never Tree handles), so the map is dropped
+    // at run end; a throw still frees it via GC with nothing native to leak.
+    const parseCache = new ParseCache();
     const maxTokens = config.context.max_tokens_per_unit;
 
     const units: ReviewUnit[] = [];
@@ -347,7 +351,7 @@ export class ContextEngineImpl implements ContextEngine {
 
       let symbols: ChangedSymbol[];
       try {
-        symbols = await mapChangedSymbolsForFile({ file, reader, perFileMs, runBudget });
+        symbols = await mapChangedSymbolsForFile({ file, reader, perFileMs, runBudget, parseCache });
       } catch (error) {
         if (isGitTimeout(error)) queryTimeouts += 1;
         const code = errorCodeOf(error);
@@ -393,36 +397,33 @@ export class ContextEngineImpl implements ContextEngine {
         if (headText !== null) {
           const language = detectLanguage(file.path);
           if (language !== null) {
-            const parsed = await parseSource({
+            const cached = await parseCache.getOrParse({
+              commit: reader.headSha,
+              path: file.path,
               source: headText,
               language,
-              filePath: file.path,
               perFileMs,
               runBudget,
             });
-            if (parsed.tree === null) {
+            if (cached.status === "cancelled") {
               definitionParseCancelled = true;
               filesParseTimedOut += 1;
               pushDiagnostic(
                 "parse",
                 file.path,
                 undefined,
-                parseSkipDiagnosticCode(parsed.skipReason, runBudget),
-                `definition parse cancelled (${parsed.skipReason ?? "cancelled"})`,
+                parseSkipDiagnosticCode(cached.skipReason, runBudget),
+                `definition parse cancelled (${cached.skipReason})`,
               );
-              if (parsed.skipReason === "cumulative-budget" || parsed.skipReason === "run-deadline") {
-                parseBudgetExceeded = parsed.skipReason === "cumulative-budget" || runBudget.remainingRunMs() <= 0;
+              if (cached.skipReason === "cumulative-budget" || cached.skipReason === "run-deadline") {
+                parseBudgetExceeded = cached.skipReason === "cumulative-budget" || runBudget.remainingRunMs() <= 0;
                 if (runBudget.remainingRunMs() <= 0) deadlineExceeded = true;
               }
             } else {
-              filesParsed += 1;
-              try {
-                const adapter = getAdapter(language);
-                headDefinitions = adapter.extractDefinitions(parsed.tree, parsed.source);
-                headTypes = adapter.extractTypes(parsed.tree, parsed.source);
-              } finally {
-                parsed.tree.delete();
-              }
+              // Cache hits reuse the symbols-stage parse without consuming budget.
+              if (!cached.hit) filesParsed += 1;
+              headDefinitions = cached.snapshot.definitions;
+              headTypes = cached.snapshot.types;
             }
           }
         }
@@ -446,7 +447,7 @@ export class ContextEngineImpl implements ContextEngine {
       let imports = importCache.get(file.path);
       if (imports === undefined && file.language !== null) {
         try {
-          imports = await this.importsResolver({ importerPath: file.path, reader, perFileMs, runBudget });
+          imports = await this.importsResolver({ importerPath: file.path, reader, perFileMs, runBudget, parseCache });
         } catch (error) {
           if (isGitTimeout(error)) queryTimeouts += 1;
           const code = errorCodeOf(error);
@@ -489,6 +490,7 @@ export class ContextEngineImpl implements ContextEngine {
             reader,
             perFileMs,
             runBudget,
+            parseCache,
             noteGitTimeout: () => {
               queryTimeouts += 1;
             },
@@ -569,8 +571,12 @@ export class ContextEngineImpl implements ContextEngine {
       unitsWithTruncatedDefinition,
       candidateFilesSkippedByCap,
       queryTimeouts,
+      parseCacheHits: parseCache.stats().hits,
+      parseCacheMisses: parseCache.stats().misses,
+      parseCacheEntries: parseCache.stats().entries,
       diagnostics: engineDiagnostics,
     };
+    parseCache.clear();
     this.logger.info("context complete", {
       headSha: diff.headSha,
       filesConsidered,
@@ -596,6 +602,7 @@ export class ContextEngineImpl implements ContextEngine {
     reader: SnapshotReader;
     perFileMs: number;
     runBudget: RunBudget;
+    parseCache: ParseCache;
     noteGitTimeout: () => void;
   }): Promise<
     | { status: "emit"; unit: ReviewUnit; definitionTruncated: boolean; capSkipped: number; diagnostics: ContextDiagnostic[] }
@@ -665,6 +672,7 @@ export class ContextEngineImpl implements ContextEngine {
         reader: input.reader,
         perFileMs: input.perFileMs,
         runBudget: input.runBudget,
+        parseCache: input.parseCache,
       });
       for (const callee of callees.callees) {
         const tokens = estimateTokens(callee.text);
@@ -713,6 +721,7 @@ export class ContextEngineImpl implements ContextEngine {
         reader: input.reader,
         perFileMs: input.perFileMs,
         runBudget: input.runBudget,
+        parseCache: input.parseCache,
       });
       for (const caller of callers.callers) {
         const tokens = estimateTokens(caller.callerText);
@@ -759,6 +768,7 @@ export class ContextEngineImpl implements ContextEngine {
         reader: input.reader,
         perFileMs: input.perFileMs,
         runBudget: input.runBudget,
+        parseCache: input.parseCache,
       });
       for (const testSite of tests.tests) {
         const tokens = estimateTokens(testSite.text);

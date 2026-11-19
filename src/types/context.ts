@@ -79,6 +79,9 @@ export interface ContextBuildDiagnostics {
   unitsWithTruncatedDefinition: number;
   candidateFilesSkippedByCap: number;
   queryTimeouts: number;
+  parseCacheHits: number;
+  parseCacheMisses: number;
+  parseCacheEntries: number;
   diagnostics: ContextDiagnostic[];
 }
 
