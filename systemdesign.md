@@ -254,11 +254,17 @@ rules:                                # explicit knowledge
 path_overrides:
   - paths: ["tests/**"]
     review: { categories: { performance: false } }
+context:
+  max_run_time_ms: 120000
+  max_parse_time_ms: 2000
+  max_total_parse_time_ms: 30000
 ```
 
 Behavior: missing file → defaults. Invalid file → `ConfigError` (CLI exit 2); in Action, publish a single comment describing the config error rather than silently reviewing with defaults. User `ignore.paths` extend (never replace) the built-in defaults. A `.reviewer.yml` symlink is followed only when its resolved target stays inside the resolved repository root and is a regular file; outside targets, dangling links, loops, and directories are config errors, never silent defaults. Unknown keys → error (catches typos). Evolution: `version` field + `migrate(raw)` registry chain; new fields are always optional with defaults.
 
 Optional `review.max_file_size_kb` (default 500 KB, absolute ceiling 26623 KB, ADRs 0007, 0009) is measured from the head-commit blob; over-limit files skip with `"too-large"`. An accepted blob plus its 1-byte growth sentinel must fit the 26 MiB per-stream blob-read cap, so values above the ceiling are rejected at config load. Configured glob fields are validated against the documented `*`/`**`/`**/`/`?` subset at load time.
+
+Optional `context` time limits bound the Context Engine (Phase 3): `max_run_time_ms` (default 120000, 5000–600000) is the overall wall-clock deadline, `max_parse_time_ms` (default 2000, 100–30000) caps one file parse, `max_total_parse_time_ms` (default 30000, 1000–180000) caps cumulative parsing. Config load rejects `max_parse_time_ms > max_total_parse_time_ms > max_run_time_ms` violations as `CONFIG_INVALID`. (`max_tokens_per_unit` arrives with the P3-10 budget work.)
 
 ---
 
