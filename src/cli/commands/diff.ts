@@ -1,7 +1,7 @@
 import { loadConfig } from "../../config/load.ts";
 import type { Logger } from "../../core/logger.ts";
 import { ReviewerError } from "../../core/errors.ts";
-import { GitDiffEngine } from "../../diff/git.ts";
+import { GitDiffEngine, resolveRepoRoot, resolveRevision } from "../../diff/git.ts";
 import { exitCodeForError } from "../exit-codes.ts";
 
 export interface DiffOptions {
@@ -31,11 +31,19 @@ export async function runDiff(options: DiffOptions, logger: Logger): Promise<num
   try {
     const loaded = await loadConfig(options.repo);
     if (!loaded.ok) throw loaded.error;
+    // CLI resolves revs (full SHAs, symbolic refs, unique abbrevs) to full
+    // commit SHAs via `rev-parse --verify --end-of-options <rev>^{commit}`
+    // before the engine; the engine stays full-SHA-only. Dash-prefixed input
+    // is INVALID_INPUT pre-Git; missing objects are GIT_FAILED with a fetch
+    // hint; JSON stdout carries full baseSha/headSha, logs stay on stderr.
+    const repoRoot = await resolveRepoRoot(options.repo);
+    const baseSha = await resolveRevision(repoRoot, base, "baseSha");
+    const headSha = await resolveRevision(repoRoot, head, "headSha");
     const engine = new GitDiffEngine({ logger });
     const result = await engine.run({
       repoDir: options.repo,
-      baseSha: base,
-      headSha: head,
+      baseSha,
+      headSha,
       config: loaded.value.config,
     });
     console.log(JSON.stringify(result, null, 2));
