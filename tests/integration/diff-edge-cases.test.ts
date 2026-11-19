@@ -459,8 +459,16 @@ describe("E09 CLI diff validation and INVALID_INPUT policy", () => {
     expect(exitCodeForError(new ReviewerError({ code: "CONFIG_INVALID", message: "cfg" }))).toBe(2);
   });
 
-  test("validation matrix with symbolic HEAD refs, unknown branch, and INVALID_INPUT rows", async () => {
-    const { dir, cleanup } = await makeRepo();
+  interface TwoCommitRepo {
+    dir: string;
+    base: string;
+    head: string;
+    blobId: string;
+    cleanup: () => Promise<void>;
+  }
+
+  async function makeTwoCommitRepo(): Promise<TwoCommitRepo> {
+    const { dir, cleanup: cleanupRepo } = await makeRepo();
     let outside: string | null = null;
     try {
       outside = await mkdtemp(join(tmpdir(), "codebleach-edge-out-"));
@@ -477,72 +485,203 @@ describe("E09 CLI diff validation and INVALID_INPUT policy", () => {
       const a2Blob = await git(dir, ["hash-object", "-w", a2Outside]);
       await git(dir, ["update-index", "--add", "--cacheinfo", `100644,${a2Blob},src/a.ts`]);
       const head = await commitIndex(dir, "head");
-      const valid = await runCli(["diff", "--base", base, "--head", head, "--repo", dir], dir);
-      expect(valid.code).toBe(0);
-      const parsed = JSON.parse(valid.stdout) as {
-        baseSha: string;
-        headSha: string;
-        mergeBase: string;
-        files: Array<{ path: string }>;
+      const blobId = await git(dir, ["hash-object", "-w", a2Outside]);
+      const outer = outside;
+      return {
+        dir,
+        base,
+        head,
+        blobId,
+        cleanup: async () => {
+          await rm(outer, { recursive: true, force: true });
+          await cleanupRepo();
+        },
       };
-      expect(parsed.baseSha).toBe(base.toLowerCase());
-      expect(parsed.headSha).toBe(head.toLowerCase());
-      expect(parsed.mergeBase).toBe(base.toLowerCase());
+    } catch (error) {
+      if (outside !== null) await rm(outside, { recursive: true, force: true });
+      await cleanupRepo();
+      throw error;
+    }
+  }
+
+  interface DiffStdout {
+    baseSha: string;
+    headSha: string;
+    mergeBase: string;
+    files: Array<{ path: string }>;
+  }
+
+  test("full SHAs exit 0 with normalized output", async () => {
+    const fixture = await makeTwoCommitRepo();
+    try {
+      const valid = await runCli(
+        ["diff", "--base", fixture.base, "--head", fixture.head, "--repo", fixture.dir],
+        fixture.dir,
+      );
+      expect(valid.code).toBe(0);
+      const parsed = JSON.parse(valid.stdout) as DiffStdout;
+      expect(parsed.baseSha).toBe(fixture.base.toLowerCase());
+      expect(parsed.headSha).toBe(fixture.head.toLowerCase());
+      expect(parsed.mergeBase).toBe(fixture.base.toLowerCase());
       expect(isFullCommitSha(parsed.baseSha)).toBe(true);
       expect(isFullCommitSha(parsed.headSha)).toBe(true);
       expect(parsed.files.map((file) => file.path)).toEqual(["src/a.ts"]);
       expect(valid.stderr.length).toBeGreaterThan(0);
-      expect(await git(dir, ["rev-parse", "HEAD~1"])).toBe(base);
-      // RED: CLI must resolve symbolic refs to full SHAs, not just pass SHAs through.
-      const symbolic = await runCli(["diff", "--base", "HEAD~1", "--head", "HEAD", "--repo", dir], dir);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  // RED: CLI must resolve symbolic refs to full SHAs, not just pass SHAs through.
+  test("symbolic HEAD resolves to head SHA", async () => {
+    const fixture = await makeTwoCommitRepo();
+    try {
+      const symbolic = await runCli(
+        ["diff", "--base", fixture.base, "--head", "HEAD", "--repo", fixture.dir],
+        fixture.dir,
+      );
       expect(symbolic.code).toBe(0);
-      const parsedSymbolic = JSON.parse(symbolic.stdout) as {
-        baseSha: string;
-        headSha: string;
-        mergeBase: string;
-        files: Array<{ path: string }>;
-      };
-      expect(parsedSymbolic.baseSha).toBe(base.toLowerCase());
-      expect(parsedSymbolic.headSha).toBe(head.toLowerCase());
-      expect(parsedSymbolic.mergeBase).toBe(base.toLowerCase());
-      expect(isFullCommitSha(parsedSymbolic.baseSha)).toBe(true);
-      expect(isFullCommitSha(parsedSymbolic.headSha)).toBe(true);
-      expect(parsedSymbolic.files.map((file) => file.path)).toEqual(["src/a.ts"]);
+      const parsed = JSON.parse(symbolic.stdout) as DiffStdout;
+      expect(parsed.baseSha).toBe(fixture.base.toLowerCase());
+      expect(parsed.headSha).toBe(fixture.head.toLowerCase());
+      expect(parsed.mergeBase).toBe(fixture.base.toLowerCase());
+      expect(isFullCommitSha(parsed.baseSha)).toBe(true);
+      expect(isFullCommitSha(parsed.headSha)).toBe(true);
+      expect(parsed.files.map((file) => file.path)).toEqual(["src/a.ts"]);
       expect(symbolic.stderr.length).toBeGreaterThan(0);
-      const missingBase = await runCli(["diff", "--head", head, "--repo", dir], dir);
-      expect(missingBase.code).toBe(2);
-      const missingHead = await runCli(["diff", "--base", base, "--repo", dir], dir);
-      expect(missingHead.code).toBe(2);
-      const unknownFlag = await runCli(["diff", "--bogus"], dir);
-      expect(unknownFlag.code).toBe(2);
-      const malformed = await runCli(["diff", "--base", "not-a-sha", "--head", head, "--repo", dir], dir);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  // RED: CLI must resolve symbolic refs to full SHAs, not just pass SHAs through.
+  test("symbolic HEAD~1 resolves to base SHA", async () => {
+    const fixture = await makeTwoCommitRepo();
+    try {
+      expect(await git(fixture.dir, ["rev-parse", "HEAD~1"])).toBe(fixture.base);
+      const symbolic = await runCli(
+        ["diff", "--base", "HEAD~1", "--head", fixture.head, "--repo", fixture.dir],
+        fixture.dir,
+      );
+      expect(symbolic.code).toBe(0);
+      const parsed = JSON.parse(symbolic.stdout) as DiffStdout;
+      expect(parsed.baseSha).toBe(fixture.base.toLowerCase());
+      expect(parsed.headSha).toBe(fixture.head.toLowerCase());
+      expect(parsed.mergeBase).toBe(fixture.base.toLowerCase());
+      expect(isFullCommitSha(parsed.baseSha)).toBe(true);
+      expect(isFullCommitSha(parsed.headSha)).toBe(true);
+      expect(parsed.files.map((file) => file.path)).toEqual(["src/a.ts"]);
+      expect(symbolic.stderr.length).toBeGreaterThan(0);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  // RED: malformed rev must be INVALID_INPUT exit 2, not GIT_FAILED exit 1.
+  test("malformed base is INVALID_INPUT exit 2", async () => {
+    const fixture = await makeTwoCommitRepo();
+    try {
+      const malformed = await runCli(
+        ["diff", "--base", "not-a-sha", "--head", fixture.head, "--repo", fixture.dir],
+        fixture.dir,
+      );
       expect(malformed.code).toBe(2);
       expect(malformed.stderr).toMatch(/INVALID_INPUT/);
-      const missingCommit = "0123456789abcdef0123456789abcdef01234567";
-      const unresolved = await runCli(["diff", "--base", base, "--head", missingCommit, "--repo", dir], dir);
-      expect(unresolved.code).toBe(1);
-      expect(unresolved.stderr).toMatch(/fetch sufficient history/i);
-      expect(unresolved.stderr).toMatch(/headSha/);
-      // RED: unknown symbolic ref is INVALID_INPUT exit 2, distinct from the
-      // well-formed-but-missing-commit exit 1 row above.
-      const unknownBranch = await runCli(["diff", "--base", "no-such-branch", "--head", head, "--repo", dir], dir);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  // RED: unknown symbolic ref is INVALID_INPUT exit 2, distinct from the
+  // well-formed-but-missing-commit exit 1 row.
+  test("unknown branch ref is INVALID_INPUT exit 2", async () => {
+    const fixture = await makeTwoCommitRepo();
+    try {
+      const unknownBranch = await runCli(
+        ["diff", "--base", "no-such-branch", "--head", fixture.head, "--repo", fixture.dir],
+        fixture.dir,
+      );
       expect(unknownBranch.code).toBe(2);
       expect(unknownBranch.stderr).toMatch(/INVALID_INPUT/);
-      // RED: dash-prefixed input must reach revision validation as INVALID_INPUT exit 2,
-      // not arg-parse rejection. Equals-form carries the dash value through to the engine.
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  // RED: dash-prefixed input must reach revision validation as INVALID_INPUT exit 2,
+  // not arg-parse rejection. Equals-form carries the dash value through to the engine.
+  test("dash-prefixed base reaches validation as INVALID_INPUT exit 2", async () => {
+    const fixture = await makeTwoCommitRepo();
+    try {
       const dashPrefixed = await runCli(
-        ["diff", "--base=--verify", "--head", head, "--repo", dir],
-        dir,
+        ["diff", "--base=--verify", "--head", fixture.head, "--repo", fixture.dir],
+        fixture.dir,
       );
       expect(dashPrefixed.code).toBe(2);
       expect(dashPrefixed.stderr).toMatch(/INVALID_INPUT/);
-      const blobId = await git(dir, ["hash-object", "-w", a2Outside]);
-      const nonCommit = await runCli(["diff", "--base", blobId, "--head", head, "--repo", dir], dir);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  test("missing --base exits 2", async () => {
+    const fixture = await makeTwoCommitRepo();
+    try {
+      const missingBase = await runCli(["diff", "--head", fixture.head, "--repo", fixture.dir], fixture.dir);
+      expect(missingBase.code).toBe(2);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  test("missing --head exits 2", async () => {
+    const fixture = await makeTwoCommitRepo();
+    try {
+      const missingHead = await runCli(["diff", "--base", fixture.base, "--repo", fixture.dir], fixture.dir);
+      expect(missingHead.code).toBe(2);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  test("unknown flag exits 2", async () => {
+    const fixture = await makeTwoCommitRepo();
+    try {
+      const unknownFlag = await runCli(["diff", "--bogus"], fixture.dir);
+      expect(unknownFlag.code).toBe(2);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  test("well-formed-but-missing commit exits 1 with fetch hint", async () => {
+    const fixture = await makeTwoCommitRepo();
+    try {
+      const missingCommit = "0123456789abcdef0123456789abcdef01234567";
+      const unresolved = await runCli(
+        ["diff", "--base", fixture.base, "--head", missingCommit, "--repo", fixture.dir],
+        fixture.dir,
+      );
+      expect(unresolved.code).toBe(1);
+      expect(unresolved.stderr).toMatch(/fetch sufficient history/i);
+      expect(unresolved.stderr).toMatch(/headSha/);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  // RED: blob SHA names no commit, so INVALID_INPUT exit 2, not GIT_FAILED exit 1.
+  test("non-commit blob base is INVALID_INPUT exit 2", async () => {
+    const fixture = await makeTwoCommitRepo();
+    try {
+      const nonCommit = await runCli(
+        ["diff", "--base", fixture.blobId, "--head", fixture.head, "--repo", fixture.dir],
+        fixture.dir,
+      );
       expect(nonCommit.code).toBe(2);
       expect(nonCommit.stderr).toMatch(/INVALID_INPUT/);
     } finally {
-      if (outside !== null) await rm(outside, { recursive: true, force: true });
-      await cleanup();
+      await fixture.cleanup();
     }
   });
 
