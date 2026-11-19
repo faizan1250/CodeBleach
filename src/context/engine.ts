@@ -402,6 +402,7 @@ export class ContextEngineImpl implements ContextEngine {
       unitsWithTruncatedDefinition,
       candidateFilesSkippedByCap,
       queryTimeouts: 0,
+      diagnostics: [],
     };
     this.logger.info("context complete", {
       headSha: diff.headSha,

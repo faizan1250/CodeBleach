@@ -83,6 +83,7 @@ export function createFixtureEngines(options: FixtureOptions = {}): FixtureEngin
       unitsWithTruncatedDefinition: 0,
       candidateFilesSkippedByCap: 0,
       queryTimeouts: 0,
+      diagnostics: [],
     },
   };
   const secret = options.secret ?? "nothing-secret";

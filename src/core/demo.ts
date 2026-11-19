@@ -122,6 +122,7 @@ export const demoContextEngine: ContextEngine = {
           unitsWithTruncatedDefinition: 0,
           candidateFilesSkippedByCap: 0,
           queryTimeouts: 0,
+          diagnostics: [],
         },
       });
     }
@@ -174,6 +175,7 @@ export const demoContextEngine: ContextEngine = {
         unitsWithTruncatedDefinition: 0,
         candidateFilesSkippedByCap: 0,
         queryTimeouts: 0,
+        diagnostics: [],
       },
     };
     return Promise.resolve(result);
