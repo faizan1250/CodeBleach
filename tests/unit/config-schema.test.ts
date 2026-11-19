@@ -60,6 +60,11 @@ describe("config schema", () => {
     expect(config.ignore.paths).toEqual([...DEFAULT_IGNORE_PATHS]);
   });
 
+  test("defaults ignore minified bundles", () => {
+    expect(DEFAULT_IGNORE_PATHS).toContain("**/*.min.*");
+    expect(ConfigFileSchema.parse({}).ignore.paths).toContain("**/*.min.*");
+  });
+
   test("rejects unknown keys at every level", () => {
     expect(() => ConfigFileSchema.parse({ bogus: true })).toThrow();
     expect(() => ConfigFileSchema.parse({ review: { bogus: true } })).toThrow();
