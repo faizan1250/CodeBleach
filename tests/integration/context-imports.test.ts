@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveImportsForFile } from "../../src/context/imports.ts";
+import { RunBudget } from "../../src/context/limits.ts";
 import { SnapshotReader } from "../../src/context/snapshot.ts";
 import { commitIndex, git, makeRepo } from "../helpers/git-repo.ts";
 
@@ -248,6 +249,163 @@ describe("context relative imports from commit snapshots", () => {
       expect(resolved.map((entry) => entry.specifier)).toEqual(["./a"]);
       expect(diagnostics).toEqual([
         { importerPath: "src/app.ts", specifier: "./b", reason: "cap-reached" },
+      ]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("type-only namespace import resolves the whole module", async () => {
+    const { dir, cleanup, commit } = await setupRepo({
+      "src/app.ts": 'import type * as ns from "./types";\n',
+      "src/types.ts": "export interface Props {\n  name: string;\n}\nexport type Id = string;\n",
+    });
+    try {
+      const { resolved, diagnostics } = await resolveImportsForFile({
+        importerPath: "src/app.ts",
+        reader: readerFor(dir, commit),
+      });
+      expect(diagnostics).toEqual([]);
+      expect(resolved).toHaveLength(1);
+      expect(resolved[0]).toMatchObject({
+        targetPath: "src/types.ts",
+        kind: "type-only",
+        localName: "ns",
+        importedName: null,
+        reason: "relative type-only import",
+      });
+      expect(resolved[0]?.definition).toBeNull();
+      expect([...(resolved[0]?.availableExports ?? [])]).toEqual(["Id", "Props"]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("parent-of-top-level specifier probes the root index", async () => {
+    const { dir, cleanup, commit } = await setupRepo({
+      "src/app.ts": 'import { rootFn } from "..";\n',
+      "index.ts": "export function rootFn(): void {}\n",
+    });
+    try {
+      const { resolved, diagnostics } = await resolveImportsForFile({
+        importerPath: "src/app.ts",
+        reader: readerFor(dir, commit),
+      });
+      expect(diagnostics).toEqual([]);
+      expect(resolved).toHaveLength(1);
+      expect(resolved[0]).toMatchObject({ targetPath: "index.ts" });
+      expect(resolved[0]?.definition).toMatchObject({ name: "rootFn" });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  function chainFiles(links: number): Record<string, string> {
+    const files: Record<string, string> = { "src/app.ts": 'import { x } from "./l0";\n' };
+    for (let index = 0; index < links; index += 1) {
+      files[`src/l${index}.ts`] = `export { x } from "./l${index + 1}";\n`;
+    }
+    files[`src/l${links}.ts`] = "export function x(): number {\n  return 1;\n}\n";
+    return files;
+  }
+
+  test("re-export chain at the depth limit still resolves", async () => {
+    const { dir, cleanup, commit } = await setupRepo(chainFiles(8));
+    try {
+      const { resolved, diagnostics } = await resolveImportsForFile({
+        importerPath: "src/app.ts",
+        reader: readerFor(dir, commit),
+      });
+      expect(diagnostics).toEqual([]);
+      expect(resolved).toHaveLength(1);
+      expect(resolved[0]).toMatchObject({ targetPath: "src/l8.ts", reason: "relative named re-export" });
+      expect(resolved[0]?.definition).toMatchObject({ name: "x" });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("re-export chain past the depth limit reports depth-exceeded", async () => {
+    const { dir, cleanup, commit } = await setupRepo(chainFiles(10));
+    try {
+      const { resolved, diagnostics } = await resolveImportsForFile({
+        importerPath: "src/app.ts",
+        reader: readerFor(dir, commit),
+      });
+      expect(resolved).toEqual([]);
+      expect(diagnostics).toEqual([
+        { importerPath: "src/app.ts", specifier: "./l0", reason: "depth-exceeded" },
+      ]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("two-file re-export cycle terminates with export-not-found", async () => {
+    const { dir, cleanup, commit } = await setupRepo({
+      "src/app.ts": 'import { x } from "./a";\n',
+      "src/a.ts": 'export { x } from "./b";\n',
+      "src/b.ts": 'export { x } from "./a";\n',
+    });
+    try {
+      const { resolved, diagnostics } = await resolveImportsForFile({
+        importerPath: "src/app.ts",
+        reader: readerFor(dir, commit),
+      });
+      expect(resolved).toEqual([]);
+      expect(diagnostics).toEqual([
+        { importerPath: "src/app.ts", specifier: "./a", reason: "export-not-found" },
+      ]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  // Scripted clock: the first `allowedCalls` reads see time 0, later reads see
+  // a blown deadline, so exactly the parses after the cutoff are cancelled.
+  function budgetThatFreezesAfter(allowedCalls: number): RunBudget {
+    let calls = 0;
+    return new RunBudget(
+      { maxRunMs: 60_000, maxTotalParseMs: 1_000_000 },
+      { now: () => (calls++ < allowedCalls ? 0 : 1_000_000_000_000) },
+    );
+  }
+
+  test("cancelled direct target parse surfaces parse-cancelled", async () => {
+    const { dir, cleanup, commit } = await setupRepo({
+      "src/app.ts": 'import * as ns from "./big";\n',
+      "src/big.ts": "export function a(): void {}\n",
+    });
+    try {
+      const { resolved, diagnostics } = await resolveImportsForFile({
+        importerPath: "src/app.ts",
+        reader: readerFor(dir, commit),
+        runBudget: budgetThatFreezesAfter(2),
+      });
+      expect(resolved).toEqual([]);
+      expect(diagnostics).toEqual([
+        { importerPath: "src/app.ts", specifier: "./big", reason: "parse-cancelled" },
+      ]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("cancelled chain target parse surfaces parse-cancelled", async () => {
+    const { dir, cleanup, commit } = await setupRepo({
+      "src/app.ts": 'import { x } from "./barrel";\n',
+      "src/barrel.ts": 'export { x } from "./real";\n',
+      "src/real.ts": "export function x(): void {}\n",
+    });
+    try {
+      const { resolved, diagnostics } = await resolveImportsForFile({
+        importerPath: "src/app.ts",
+        reader: readerFor(dir, commit),
+        runBudget: budgetThatFreezesAfter(3),
+      });
+      expect(resolved).toEqual([]);
+      expect(diagnostics).toEqual([
+        { importerPath: "src/app.ts", specifier: "./barrel", reason: "parse-cancelled" },
       ]);
     } finally {
       await cleanup();

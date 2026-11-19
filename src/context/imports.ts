@@ -61,7 +61,9 @@ export function isRelativeSpecifier(specifier: string): boolean {
   );
 }
 
-/** Resolve a relative specifier against the importer; null when it escapes the repo. */
+/** Resolve a relative specifier against the importer; null when it escapes the repo.
+ * A specifier normalizing exactly to the repo root yields "" so callers can
+ * probe the root index files via `candidatePaths`. */
 export function resolveRelativePath(importerPath: string, specifier: string): string | null {
   if (!isRelativeSpecifier(specifier) || specifier.includes("\0")) return null;
   const slash = importerPath.lastIndexOf("/");
@@ -75,11 +77,13 @@ export function resolveRelativePath(importerPath: string, specifier: string): st
     }
     parts.push(segment);
   }
-  return parts.length === 0 ? null : parts.join("/");
+  return parts.join("/");
 }
 
-/** Deterministic probe order: exact path, sibling extensions, then index files. */
+/** Deterministic probe order: exact path, sibling extensions, then index files.
+ * An empty base probes the repo-root index files. */
 export function candidatePaths(resolvedBase: string): string[] {
+  if (resolvedBase === "") return [...PROBE_INDEX_FILES];
   return [
     resolvedBase,
     ...PROBE_EXTENSIONS.map((extension) => `${resolvedBase}${extension}`),
@@ -255,6 +259,7 @@ type ExportResolution =
   | { status: "found"; definition: Definition | TypeDefinition; targetPath: string }
   | { status: "missing" }
   | { status: "ambiguous" }
+  | { status: "parse-cancelled" }
   | { status: "depth-exceeded" };
 
 /**
@@ -275,12 +280,14 @@ async function resolveExported(
   if (visited.has(visitKey)) return { status: "missing" };
   visited.add(visitKey);
   const loaded = await loadTarget(targetPath, context);
+  if (loaded.status === "parse-cancelled") return { status: "parse-cancelled" };
   if (loaded.status !== "parsed") return { status: "missing" };
   const target = loaded.target;
   const direct = findDirect(target, wanted, typeOnly);
   if (direct !== null) return { status: "found", definition: direct, targetPath };
   const hits: Array<{ definition: Definition | TypeDefinition; targetPath: string }> = [];
   let ambiguous = false;
+  let parseCancelled = false;
   let depthExceeded = false;
   for (const ref of target.reExports) {
     if (ref.sourceSpecifier === null || !isRelativeSpecifier(ref.sourceSpecifier)) continue;
@@ -310,6 +317,8 @@ async function resolveExported(
       if (!duplicate) hits.push({ definition: nested.definition, targetPath: nested.targetPath });
     } else if (nested.status === "ambiguous") {
       ambiguous = true;
+    } else if (nested.status === "parse-cancelled") {
+      parseCancelled = true;
     } else if (nested.status === "depth-exceeded") {
       depthExceeded = true;
     }
@@ -318,10 +327,16 @@ async function resolveExported(
   const single = hits[0];
   if (single !== undefined && !ambiguous) return { status: "found", ...single };
   if (ambiguous) return { status: "ambiguous" };
+  // Cancelled branches mean absence was never established; report the budget
+  // signal rather than a misleading export-not-found. A concrete unambiguous
+  // hit above still wins: best-effort returns what it could prove.
+  if (parseCancelled) return { status: "parse-cancelled" };
   if (depthExceeded) return { status: "depth-exceeded" };
   return { status: "missing" };
 }
 
+// Direct declarations plus named re-exports only. Transitive `export *`
+// barrel names stay out: enumerating them is P3-07 export-map scope, not P3-05.
 function exportNamesOf(target: ParsedTarget): string[] {
   const names = new Set<string>();
   for (const definition of target.definitions) {
@@ -417,7 +432,7 @@ export async function resolveImportsForFile(options: ResolveImportsOptions): Pro
       diagnostics.push(diagnostic(importerPath, ref.sourceSpecifier, "not-source"));
       continue;
     }
-    const targetPath = pick.status === "found" ? pick.path : base;
+    const targetPath = pick.path;
     if (ref.kind === "side-effect") {
       resolved.push({
         importerPath,
@@ -431,7 +446,9 @@ export async function resolveImportsForFile(options: ResolveImportsOptions): Pro
       });
       continue;
     }
-    if (ref.kind === "namespace") {
+    // `import type * as ns` arrives as type-only with a null importedName;
+    // it names the whole module, not a single export.
+    if (ref.kind === "namespace" || (ref.kind === "type-only" && ref.importedName === null && ref.localName !== null)) {
       const loaded = await loadTarget(targetPath, context);
       if (loaded.status === "parse-cancelled") {
         diagnostics.push(diagnostic(importerPath, ref.sourceSpecifier, "parse-cancelled"));
@@ -480,6 +497,8 @@ export async function resolveImportsForFile(options: ResolveImportsOptions): Pro
       });
     } else if (outcome.status === "ambiguous") {
       diagnostics.push(diagnostic(importerPath, ref.sourceSpecifier, "ambiguous-reexport"));
+    } else if (outcome.status === "parse-cancelled") {
+      diagnostics.push(diagnostic(importerPath, ref.sourceSpecifier, "parse-cancelled"));
     } else if (outcome.status === "depth-exceeded") {
       diagnostics.push(diagnostic(importerPath, ref.sourceSpecifier, "depth-exceeded"));
     } else {

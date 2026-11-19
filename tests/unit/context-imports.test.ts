@@ -37,6 +37,11 @@ describe("resolveRelativePath", () => {
     expect(resolveRelativePath("src/app.ts", "../../evil")).toBeNull();
     expect(resolveRelativePath("app.ts", "../evil")).toBeNull();
   });
+
+  test("normalizes the repository root to an empty base", () => {
+    expect(resolveRelativePath("src/app.ts", "..")).toBe("");
+    expect(resolveRelativePath("app.ts", ".")).toBe("");
+  });
 });
 
 describe("candidatePaths", () => {
@@ -50,6 +55,10 @@ describe("candidatePaths", () => {
       "src/util/index.tsx",
       "src/util/index.js",
     ]);
+  });
+
+  test("probes root index files for an empty base", () => {
+    expect(candidatePaths("")).toEqual(["index.ts", "index.tsx", "index.js"]);
   });
 });
 
