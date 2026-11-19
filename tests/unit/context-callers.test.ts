@@ -77,8 +77,15 @@ function site(
   };
 }
 
-function symbolFor(name: string, kind: ChangedSymbol["kind"], startLine: number): ChangedSymbol {
-  return { name, kind, startLine, endLine: startLine + 2, changedLines: [startLine] };
+function symbolFor(name: string, kind: ChangedSymbol["kind"], startLine: number, container?: string): ChangedSymbol {
+  return {
+    name,
+    kind,
+    startLine,
+    endLine: startLine + 2,
+    changedLines: [startLine],
+    ...(container === undefined ? {} : { container }),
+  };
 }
 
 async function partsFor(source: string): Promise<{
@@ -111,28 +118,28 @@ describe("targetPublicNames", () => {
     const parts = await partsFor("export function greet(): string {\n  return \"hi\";\n}\n");
     const declaration = parts.definitions.find((entry) => entry.name === "greet");
     if (declaration === undefined) throw new Error("expected a greet definition");
-    expect(targetPublicNames(parts, declaration)).toEqual(["greet"]);
+    expect(targetPublicNames(parts.localExports, declaration)).toEqual(["greet"]);
   });
 
   test("default export exposes the default name", async () => {
     const parts = await partsFor("export default function helper(): number {\n  return 1;\n}\n");
     const declaration = parts.definitions.find((entry) => entry.name === "helper");
     if (declaration === undefined) throw new Error("expected a helper definition");
-    expect(targetPublicNames(parts, declaration)).toEqual(["default"]);
+    expect(targetPublicNames(parts.localExports, declaration)).toEqual(["default"]);
   });
 
   test("aliased export exposes the public name", async () => {
     const parts = await partsFor("function helper(): number {\n  return 1;\n}\nexport { helper as util };\n");
     const declaration = parts.definitions.find((entry) => entry.name === "helper");
     if (declaration === undefined) throw new Error("expected a helper definition");
-    expect(targetPublicNames(parts, declaration)).toEqual(["util"]);
+    expect(targetPublicNames(parts.localExports, declaration)).toEqual(["util"]);
   });
 
   test("non-exported declaration exposes nothing", async () => {
     const parts = await partsFor("function hidden(): void {}\nexport function shown(): void {}\n");
     const declaration = parts.definitions.find((entry) => entry.name === "hidden");
     if (declaration === undefined) throw new Error("expected a hidden definition");
-    expect(targetPublicNames(parts, declaration)).toEqual([]);
+    expect(targetPublicNames(parts.localExports, declaration)).toEqual([]);
   });
 });
 
@@ -141,7 +148,7 @@ describe("findTargetDeclaration", () => {
     const found = findTargetDeclaration(
       [def("run", "method", "Service", 5), def("run", "function", undefined, 1)],
       [],
-      symbolFor("run", "method", 5),
+      symbolFor("run", "method", 5, "Service"),
     );
     expect(found).toMatchObject({ kind: "method", name: "run", container: "Service" });
   });
