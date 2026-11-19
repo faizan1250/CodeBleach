@@ -37,6 +37,12 @@ ignore:
 repository:
   language: typescript
 
+# Context Engine time budgets. Enforced as parse <= total <= run.
+context:
+  max_run_time_ms: 120000
+  max_parse_time_ms: 2000
+  max_total_parse_time_ms: 30000
+
 # Explicit repo rules. Cited by id in findings; violations may use the rule severity.
 rules:
   - id: arch-001

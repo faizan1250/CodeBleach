@@ -11,8 +11,17 @@ import {
   DEFAULT_MAX_CHANGED_LINES_PER_FILE,
   DEFAULT_MAX_FILE_SIZE_KB,
   DEFAULT_MAX_FINDINGS,
+  DEFAULT_MAX_PARSE_TIME_MS,
+  DEFAULT_MAX_RUN_TIME_MS,
+  DEFAULT_MAX_TOTAL_PARSE_TIME_MS,
   DEFAULT_SEVERITY_THRESHOLD,
   MAX_MAX_FILE_SIZE_KB,
+  MAX_MAX_PARSE_TIME_MS,
+  MAX_MAX_RUN_TIME_MS,
+  MAX_MAX_TOTAL_PARSE_TIME_MS,
+  MIN_MAX_PARSE_TIME_MS,
+  MIN_MAX_RUN_TIME_MS,
+  MIN_MAX_TOTAL_PARSE_TIME_MS,
   mergeIgnorePaths,
 } from "./defaults.ts";
 
@@ -107,6 +116,42 @@ const PathOverrideSchema = z.strictObject({
   review: PartialReviewSchema,
 });
 
+const ContextSchema = z
+  .strictObject({
+    max_run_time_ms: z.number().int().min(MIN_MAX_RUN_TIME_MS).max(MAX_MAX_RUN_TIME_MS).default(
+      DEFAULT_MAX_RUN_TIME_MS,
+    ),
+    max_parse_time_ms: z
+      .number()
+      .int()
+      .min(MIN_MAX_PARSE_TIME_MS)
+      .max(MAX_MAX_PARSE_TIME_MS)
+      .default(DEFAULT_MAX_PARSE_TIME_MS),
+    max_total_parse_time_ms: z
+      .number()
+      .int()
+      .min(MIN_MAX_TOTAL_PARSE_TIME_MS)
+      .max(MAX_MAX_TOTAL_PARSE_TIME_MS)
+      .default(DEFAULT_MAX_TOTAL_PARSE_TIME_MS),
+  })
+  .check((ctx) => {
+    const context = ctx.value;
+    if (context.max_parse_time_ms > context.max_total_parse_time_ms) {
+      ctx.issues.push({
+        code: "custom",
+        message: `max_parse_time_ms (${context.max_parse_time_ms}) must be <= max_total_parse_time_ms (${context.max_total_parse_time_ms})`,
+        input: ctx.value,
+      });
+    }
+    if (context.max_total_parse_time_ms > context.max_run_time_ms) {
+      ctx.issues.push({
+        code: "custom",
+        message: `max_total_parse_time_ms (${context.max_total_parse_time_ms}) must be <= max_run_time_ms (${context.max_run_time_ms})`,
+        input: ctx.value,
+      });
+    }
+  });
+
 export const ConfigFileSchema = z.strictObject({
   version: z.literal(CONFIG_VERSION).default(CONFIG_VERSION),
   review: ReviewSchema.prefault({}),
@@ -121,6 +166,7 @@ export const ConfigFileSchema = z.strictObject({
       language: z.enum(LANGUAGES).default(DEFAULT_LANGUAGE),
     })
     .prefault({}),
+  context: ContextSchema.prefault({}),
   rules: z
     .array(RuleSchema)
     .default([])

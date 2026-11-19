@@ -15,6 +15,24 @@ export const DEFAULT_CONFIDENCE_THRESHOLD = 0.85;
 
 export const DEFAULT_MAX_FINDINGS = 10;
 
+export const DEFAULT_MAX_RUN_TIME_MS = 120000;
+
+export const DEFAULT_MAX_PARSE_TIME_MS = 2000;
+
+export const DEFAULT_MAX_TOTAL_PARSE_TIME_MS = 30000;
+
+export const MIN_MAX_RUN_TIME_MS = 5000;
+
+export const MAX_MAX_RUN_TIME_MS = 600000;
+
+export const MIN_MAX_PARSE_TIME_MS = 100;
+
+export const MAX_MAX_PARSE_TIME_MS = 30000;
+
+export const MIN_MAX_TOTAL_PARSE_TIME_MS = 1000;
+
+export const MAX_MAX_TOTAL_PARSE_TIME_MS = 180000;
+
 export const DEFAULT_MAX_CHANGED_LINES_PER_FILE = 1500;
 
 export const DEFAULT_MAX_FILE_SIZE_KB = 500;
