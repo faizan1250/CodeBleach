@@ -1,1 +1,21 @@
-{"dependencies":{"zod":"^4.6.7"},"devDependencies":{"@types/bun":"^1.4.4","typescript":"^7.0.2"},"name":"codebleach","private":true,"scripts":{"check":"bun run typecheck && bun test","review":"bun run src/cli/index.ts review","test":"bun test","typecheck":"tsc --noEmit"},"type":"module","version":"0.1.0"}
+{
+  "dependencies": {
+    "@vscode/tree-sitter-wasm": "0.3.1",
+    "web-tree-sitter": "0.25.10",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "typescript": "^7.0.2"
+  },
+  "name": "codebleach",
+  "private": true,
+  "scripts": {
+    "check": "bun run typecheck && bun test",
+    "review": "bun run src/cli/index.ts review",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "type": "module",
+  "version": "0.1.0"
+}
