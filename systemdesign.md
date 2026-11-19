@@ -64,7 +64,7 @@ event → resolve SHAs → load config → git diff (local) → filter files
 
 ### 4.1 Diff Engine (`src/diff`)
 - **Source of truth:** local Git object database at `<mergeBase>` and `<head>` (needs `fetch-depth: 0` or explicit SHA fetch). Don't rely on the REST `patch` field (truncated for large files). The working tree may be dirty and must not affect output; sizes/headers come from head blobs.
-- Both diff invocations pin `--diff-algorithm=myers --inter-hunk-context=0 --find-renames=50%` (metadata and patch alike) so user Git config cannot change output; copy detection stays off (ADR 0008).
+- Both diff invocations pin `--diff-algorithm=myers --inter-hunk-context=0 --find-renames=50% --no-indent-heuristic` (metadata and patch alike) so user Git config cannot change output; copy detection stays off (ADRs 0008, 0009).
 - Parse unified diff into `ChangedFile[]` → `DiffHunk[]` → `DiffLine[]` with `oldLine`, `newLine`, and GitHub `position`.
 - **Valid comment targets** = lines on the RIGHT side present in a hunk (added or context). Compute `Set<number>` per file (`commentableLines`).
 - Use the review-comment API's `line` + `side: "RIGHT"` + `commit_id`; keep `position` as computed fallback.
@@ -256,7 +256,7 @@ path_overrides:
 
 Behavior: missing file → defaults. Invalid file → `ConfigError` (CLI exit 2); in Action, publish a single comment describing the config error rather than silently reviewing with defaults. User `ignore.paths` extend (never replace) the built-in defaults. A `.reviewer.yml` symlink is followed only when its resolved target stays inside the resolved repository root and is a regular file; outside targets, dangling links, loops, and directories are config errors, never silent defaults. Unknown keys → error (catches typos). Evolution: `version` field + `migrate(raw)` registry chain; new fields are always optional with defaults.
 
-Optional `review.max_file_size_kb` (default 500 KB, ADR 0007) is measured from the head-commit blob; over-limit files skip with `"too-large"`. Configured glob fields are validated against the documented `*`/`**`/`**/`/`?` subset at load time.
+Optional `review.max_file_size_kb` (default 500 KB, absolute ceiling 26623 KB, ADRs 0007, 0009) is measured from the head-commit blob; over-limit files skip with `"too-large"`. An accepted blob plus its 1-byte growth sentinel must fit the 26 MiB per-stream blob-read cap, so values above the ceiling are rejected at config load. Configured glob fields are validated against the documented `*`/`**`/`**/`/`?` subset at load time.
 
 ---
 
