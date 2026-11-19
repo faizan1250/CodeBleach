@@ -9,7 +9,7 @@ import { exitCodeForError } from "../../src/cli/exit-codes.ts";
 import { GitDiffEngine, isFullCommitSha, normalizeCommitSha } from "../../src/diff/git.ts";
 import type { DiffLogger } from "../../src/diff/git.ts";
 import { DEFAULT_MAX_STDOUT_BYTES } from "../../src/utils/spawn.ts";
-import { commitIndex, git, makeRepo } from "./git-diff-engine.test.ts";
+import { commitIndex, git, makeRepo } from "../helpers/git-repo.ts";
 
 const CLI = join(dirname(import.meta.dir), "..", "src", "cli", "index.ts");
 
