@@ -64,6 +64,7 @@ export interface SkipDecisionInput {
   status: ChangedFile["status"];
   path: string;
   binary: boolean;
+  unsupportedMode?: boolean | undefined;
   ignorePaths: readonly string[];
   headBlobBytes: number | null;
   headSample: string | null;
@@ -72,9 +73,13 @@ export interface SkipDecisionInput {
   maxChangedLinesPerFile: number;
 }
 
-// Fixed precedence: deleted > binary > lockfile > ignored > too-large > generated.
+// Fixed precedence (ADR 0010): deleted > unsupported-mode > binary >
+// lockfile > ignored > too-large > generated. Mode determines readability
+// before any content check; binary (numstat) needs no patch; path filters
+// run before blob sizes; sizes before patches; generated last.
 export function selectSkipReason(input: SkipDecisionInput): DiffSkipReason | undefined {
   if (input.status === "deleted") return "deleted";
+  if (input.unsupportedMode === true) return "unsupported-mode";
   if (input.binary) return "binary";
   if (isLockfile(input.path)) return "lockfile";
   for (const pattern of input.ignorePaths) {

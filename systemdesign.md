@@ -64,11 +64,13 @@ event → resolve SHAs → load config → git diff (local) → filter files
 
 ### 4.1 Diff Engine (`src/diff`)
 - **Source of truth:** local Git object database at `<mergeBase>` and `<head>` (needs `fetch-depth: 0` or explicit SHA fetch). Don't rely on the REST `patch` field (truncated for large files). The working tree may be dirty and must not affect output; sizes/headers come from head blobs.
-- Both diff invocations pin `--diff-algorithm=myers --inter-hunk-context=0 --find-renames=50% --no-indent-heuristic` (metadata and patch alike) so user Git config cannot change output; copy detection stays off (ADRs 0008, 0009).
+- Raw metadata via `git diff --raw -z --no-abbrev` (old/new mode, blob OIDs, status, renames, paths) classifies `120000`/`160000` either side as `unsupported-mode` (typechanges/gitlinks/symlinks); `100644`<->`100755` stays supported. Binary via `git diff --numstat -z` (renames ok), no patch for detection.
+- Raw, numstat, and patch invocations all pin `--diff-algorithm=myers --inter-hunk-context=0 --find-renames=50% --no-indent-heuristic` so user Git config cannot change output; copy detection stays off (ADRs 0008, 0009). Blob sizes via `git cat-file --batch-check` (head-side, never a gitlink as blob); patches ONLY for eligible files via safe pathspec (argv arrays, no shell). Never fetch the full patch for rejectable files.
+- CLI resolves revs via `git rev-parse --verify --end-of-options <rev>^{commit}` (dash-prefixed rejected pre-Git as `INVALID_INPUT`); engine stays full-SHA-only. Missing objects are `GIT_FAILED` with a fetch hint.
 - Parse unified diff into `ChangedFile[]` → `DiffHunk[]` → `DiffLine[]` with `oldLine`, `newLine`, and GitHub `position`.
 - **Valid comment targets** = lines on the RIGHT side present in a hunk (added or context). Compute `Set<number>` per file (`commentableLines`).
 - Use the review-comment API's `line` + `side: "RIGHT"` + `commit_id`; keep `position` as computed fallback.
-- Filters (each yields a `DiffSkipReason`, precedence `deleted > binary > lockfile > ignored > too-large > generated`): binary, deleted-only, lockfiles, `dist/`, `**/*.min.*`, generated (header markers `@generated`, `DO NOT EDIT`), files > N KB / N changed lines (config-driven), unsupported language (still listed, but no symbols).
+- Filters (each yields a `DiffSkipReason`, precedence `deleted > unsupported-mode > binary > lockfile > ignored > too-large > generated`): binary, deleted-only, lockfiles, `dist/`, `**/*.min.*`, generated (header markers `@generated`, `DO NOT EDIT`), files > N KB / N changed lines (config-driven), unsupported language (still listed, but no symbols).
 - Renames: carry `oldPath`; review only if content changed.
 - **Symbols (Phase 2):** one synthetic module-level symbol per eligible supported file with content hunks (`{ name: "<module>", kind: "module" }`, head-line range, added head lines); no AST parsing. Phase 3 refines it into real function/method/class symbols with Tree-sitter (ADR 0005).
 - **Initial languages:** TypeScript/TSX/JavaScript via case-insensitive extension mapping; anything else gets `language: null`. Add languages via a `LanguageAdapter` (see 4.2, Phase 3).
@@ -164,9 +166,9 @@ export interface ChangedFile {
   commentableLines: number[];
   symbols: ChangedSymbol[];
 }
-// Closed union (ADR 0006); new reasons are a contract change, not an engine edit.
+// Closed union (ADRs 0006, 0010); new reasons are a contract change, not an engine edit.
 export type DiffSkipReason =
-  | "binary" | "generated" | "too-large" | "ignored" | "deleted" | "lockfile";
+  | "binary" | "generated" | "too-large" | "ignored" | "deleted" | "lockfile" | "unsupported-mode";
 export interface DiffResult { baseSha: string; headSha: string; mergeBase: string; files: ChangedFile[] }
 
 // ---- Context ----

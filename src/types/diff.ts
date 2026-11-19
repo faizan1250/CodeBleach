@@ -6,7 +6,8 @@ export type DiffSkipReason =
   | "too-large"
   | "ignored"
   | "deleted"
-  | "lockfile";
+  | "lockfile"
+  | "unsupported-mode";
 
 export interface DiffLine {
   kind: "add" | "del" | "ctx";

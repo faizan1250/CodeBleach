@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { ReviewerError } from "../../src/core/errors.ts";
 import {
   parseNameStatusZ,
+  parseNumstatZ,
+  parseRawDiffZ,
   parseUnifiedDiff,
   type FileChangeMetadata,
 } from "../../src/diff/parse.ts";
@@ -450,5 +452,49 @@ describe("parseUnifiedDiff hunks", () => {
   test("rejects garbage lines outside hunks", () => {
     const patch = ["diff --git a/a.ts b/a.ts", "not a real header", "@@ -1,1 +1,1 @@", " x", ""].join("\n");
     parseFailedOf(() => parseUnifiedDiff(patch, [fileMeta({ path: "a.ts" })]));
+  });
+});
+
+describe("parseRawDiffZ", () => {
+  test("maps modes, OIDs, and statuses incl renames and typechanges", () => {
+    const sha = "a".repeat(40);
+    const raw = (fields: string[]): Uint8Array => new TextEncoder().encode(`${fields.join("\0")}\0`);
+    expect(parseRawDiffZ(raw([`:100644 100644 ${sha} ${sha} M`, "src/a.ts"]))).toEqual([
+      expect.objectContaining({ status: "modified", path: "src/a.ts", oldMode: "100644", newMode: "100644" }),
+    ]);
+    expect(parseRawDiffZ(raw([`:100644 120000 ${sha} ${sha} T`, "src/link.ts"]))).toEqual([
+      expect.objectContaining({ status: "modified", rawStatus: "T" }),
+    ]);
+    expect(parseRawDiffZ(raw([`:100644 100644 ${sha} ${sha} R100`, "o.ts", "n.ts"]))).toEqual([
+      expect.objectContaining({ status: "renamed", path: "n.ts", oldPath: "o.ts" }),
+    ]);
+  });
+
+  test("rejects copies, malformed info, and truncated records", () => {
+    const sha = "b".repeat(40);
+    const raw = (fields: string[]): Uint8Array => new TextEncoder().encode(`${fields.join("\0")}\0`);
+    for (const fields of [
+      [`:100644 100644 ${sha} ${sha} C100`, "o.ts", "n.ts"],
+      [":100644 100644 short short M", "a.ts"],
+      [":100644 100644", "a.ts"],
+      [`:100644 100644 ${sha} ${sha} R100`, "only-one"],
+    ]) {
+      parseFailedOf(() => parseRawDiffZ(raw(fields)));
+    }
+  });
+});
+
+describe("parseNumstatZ", () => {
+  test("maps text, binary, and renames preserving order", () => {
+    const raw = (s: string): Uint8Array => new TextEncoder().encode(s);
+    expect(parseNumstatZ(raw("1\t1\tsrc/a.ts\0"))).toEqual([
+      { path: "src/a.ts", oldPath: null, binary: false },
+    ]);
+    expect(parseNumstatZ(raw("-\t-\tasset/logo.png\0"))).toEqual([
+      { path: "asset/logo.png", oldPath: null, binary: true },
+    ]);
+    expect(parseNumstatZ(raw("1\t1\t\0src/old.ts\0src/new.ts\0"))).toEqual([
+      { path: "src/new.ts", oldPath: "src/old.ts", binary: false },
+    ]);
   });
 });

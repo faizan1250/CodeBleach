@@ -79,6 +79,156 @@ export function parseNameStatusZ(output: Uint8Array): FileChangeMetadata[] {
   return records;
 }
 
+export interface RawFileMetadata extends FileChangeMetadata {
+  oldMode: string;
+  newMode: string;
+  oldSha: string;
+  newSha: string;
+  rawStatus: string;
+}
+
+const MODE_PATTERN = /^[0-7]{6}$/;
+const OID_PATTERN = /^[0-9a-f]{40}$|^[0-9a-f]{64}$/i;
+
+// Parses `git diff --raw -z --no-abbrev` output. NUL-delimited fields are
+// authoritative; modes and full blob OIDs distinguish symlinks/gitlinks
+// (120000/160000) from regular files before any patch is fetched.
+export function parseRawDiffZ(output: Uint8Array): RawFileMetadata[] {
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(output);
+  } catch {
+    throw parseFailed("raw diff output is not valid UTF-8");
+  }
+  if (text.length === 0) return [];
+  if (!text.endsWith("\0")) {
+    throw parseFailed("raw diff output is truncated (missing NUL terminator)");
+  }
+  const fields = text.split("\0");
+  fields.pop();
+  const records: RawFileMetadata[] = [];
+  let index = 0;
+  while (index < fields.length) {
+    const info = fields[index];
+    if (info === undefined || !info.startsWith(":")) {
+      throw parseFailed(`raw record ${records.length}: missing ':' info ${excerptLine(info ?? "")}`);
+    }
+    const parts = info.slice(1).split(" ");
+    if (parts.length !== 5) {
+      throw parseFailed(`raw record ${records.length}: malformed info ${excerptLine(info)}`);
+    }
+    const [oldMode, newMode, oldSha, newSha, rawStatus] = parts as [string, string, string, string, string];
+    if (oldMode === undefined || !MODE_PATTERN.test(oldMode) || newMode === undefined || !MODE_PATTERN.test(newMode)) {
+      throw parseFailed(`raw record ${records.length}: invalid mode pair ${excerptLine(info)}`);
+    }
+    if (oldSha === undefined || !OID_PATTERN.test(oldSha) || newSha === undefined || !OID_PATTERN.test(newSha)) {
+      throw parseFailed(`raw record ${records.length}: invalid OIDs ${excerptLine(info)}`);
+    }
+    if (rawStatus === undefined) {
+      throw parseFailed(`raw record ${records.length}: missing status ${excerptLine(info)}`);
+    }
+    if (rawStatus === "A" || rawStatus === "M" || rawStatus === "D" || rawStatus === "T") {
+      const path = fields[index + 1];
+      if (path === undefined || path.length === 0) {
+        throw parseFailed(`raw record ${records.length}: status "${rawStatus}" is missing its path`);
+      }
+      records.push({
+        status: rawStatus === "A" ? "added" : rawStatus === "D" ? "deleted" : "modified",
+        path,
+        oldPath: null,
+        oldMode,
+        newMode,
+        oldSha: oldSha.toLowerCase(),
+        newSha: newSha.toLowerCase(),
+        rawStatus,
+      });
+      index += 2;
+    } else if (RENAME_STATUS_PATTERN.test(rawStatus)) {
+      const oldPath = fields[index + 1];
+      const newPath = fields[index + 2];
+      if (oldPath === undefined || newPath === undefined || oldPath.length === 0 || newPath.length === 0) {
+        throw parseFailed(`raw record ${records.length}: rename "${rawStatus}" is missing its old/new path pair`);
+      }
+      records.push({
+        status: "renamed",
+        path: newPath,
+        oldPath,
+        oldMode,
+        newMode,
+        oldSha: oldSha.toLowerCase(),
+        newSha: newSha.toLowerCase(),
+        rawStatus,
+      });
+      index += 3;
+    } else {
+      throw parseFailed(`raw record ${records.length}: unsupported status ${excerptLine(rawStatus)}`);
+    }
+  }
+  return records;
+}
+
+export interface NumstatEntry {
+  path: string;
+  oldPath: string | null;
+  binary: boolean;
+}
+
+// Parses `git diff --numstat -z` output for binary detection only (no patch
+// needed). Renames arrive as an empty path slot followed by old/new NUL
+// fields; binary is `-`/`-`. Order matches --raw under identical flags.
+export function parseNumstatZ(output: Uint8Array): NumstatEntry[] {
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(output);
+  } catch {
+    throw parseFailed("numstat output is not valid UTF-8");
+  }
+  if (text.length === 0) return [];
+  if (!text.endsWith("\0")) {
+    throw parseFailed("numstat output is truncated (missing NUL terminator)");
+  }
+  const fields = text.split("\0");
+  fields.pop();
+  const entries: NumstatEntry[] = [];
+  let index = 0;
+  while (index < fields.length) {
+    const head = fields[index];
+    if (head === undefined) {
+      throw parseFailed(`numstat record ${entries.length}: truncated`);
+    }
+    const firstTab = head.indexOf("\t");
+    const secondTab = firstTab === -1 ? -1 : head.indexOf("\t", firstTab + 1);
+    if (firstTab === -1 || secondTab === -1) {
+      throw parseFailed(`numstat record ${entries.length}: malformed counts ${excerptLine(head)}`);
+    }
+    const added = head.slice(0, firstTab);
+    const deleted = head.slice(firstTab + 1, secondTab);
+    const rest = head.slice(secondTab + 1);
+    if (
+      added === undefined ||
+      deleted === undefined ||
+      !(/^[0-9]+$/.test(added) || added === "-") ||
+      !(/^[0-9]+$/.test(deleted) || deleted === "-")
+    ) {
+      throw parseFailed(`numstat record ${entries.length}: malformed counts ${excerptLine(head)}`);
+    }
+    const binary = added === "-" || deleted === "-";
+    if (rest.length === 0) {
+      const oldPath = fields[index + 1];
+      const newPath = fields[index + 2];
+      if (oldPath === undefined || newPath === undefined || oldPath.length === 0 || newPath.length === 0) {
+        throw parseFailed(`numstat record ${entries.length}: rename is missing its old/new path pair`);
+      }
+      entries.push({ path: newPath, oldPath, binary });
+      index += 3;
+    } else {
+      entries.push({ path: rest, oldPath: null, binary });
+      index += 1;
+    }
+  }
+  return entries;
+}
+
 function isFileHeaderLine(line: string): boolean {
   return (
     line.startsWith("new file mode ") ||

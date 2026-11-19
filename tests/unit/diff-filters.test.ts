@@ -135,6 +135,7 @@ describe("selectSkipReason", () => {
         base({
           status: "deleted",
           binary: true,
+          unsupportedMode: true,
           path: "yarn.lock",
           ignorePaths: ["**"],
           headBlobBytes: null,
@@ -143,6 +144,22 @@ describe("selectSkipReason", () => {
         }),
       ),
     ).toBe("deleted");
+  });
+
+  test("unsupported-mode beats binary, lockfile, ignored, too-large, and generated", () => {
+    expect(
+      selectSkipReason(
+        base({
+          unsupportedMode: true,
+          binary: true,
+          path: "yarn.lock",
+          ignorePaths: ["**"],
+          headBlobBytes: 500 * 1024 + 1,
+          headSample: "// @generated\n",
+          changedLines: 9999,
+        }),
+      ),
+    ).toBe("unsupported-mode");
   });
 
   test("binary beats lockfile, ignored, too-large, and generated", () => {

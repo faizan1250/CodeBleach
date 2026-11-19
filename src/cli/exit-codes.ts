@@ -7,7 +7,11 @@ import { ReviewerError } from "../core/errors.ts";
  */
 export function exitCodeForError(error: unknown): number {
   if (error instanceof ReviewerError) {
-    return error.code === "CONFIG_INVALID" || error.code === "CONFIG_UNSUPPORTED_VERSION" ? 2 : 1;
+    return error.code === "CONFIG_INVALID" ||
+      error.code === "CONFIG_UNSUPPORTED_VERSION" ||
+      error.code === "INVALID_INPUT"
+      ? 2
+      : 1;
   }
   const code = (error as { code?: unknown } | null | undefined)?.code;
   if (typeof code === "string" && code.startsWith("ERR_PARSE_ARGS")) return 2;

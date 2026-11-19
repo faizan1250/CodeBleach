@@ -40,8 +40,8 @@ describe("normalizeCommitSha", () => {
     expect(normalizeCommitSha(SHA64.toUpperCase(), "headSha")).toBe(SHA64);
   });
 
-  test("rejects invalid SHAs as GIT_FAILED naming the label", () => {
-    for (const bad of ["HEAD", SHA40.slice(0, 7), "", "--verify"]) {
+  test("rejects abbreviated SHAs and refs as GIT_FAILED naming the label", () => {
+    for (const bad of ["HEAD", SHA40.slice(0, 7), ""]) {
       let caught: unknown = null;
       try {
         normalizeCommitSha(bad, "baseSha");
@@ -52,5 +52,17 @@ describe("normalizeCommitSha", () => {
       expect((caught as ReviewerError).code).toBe("GIT_FAILED");
       expect((caught as Error).message).toMatch(/baseSha/);
     }
+  });
+
+  test("rejects dash-prefixed input as INVALID_INPUT naming the label", () => {
+    let caught: unknown = null;
+    try {
+      normalizeCommitSha("--verify", "baseSha");
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ReviewerError);
+    expect((caught as ReviewerError).code).toBe("INVALID_INPUT");
+    expect((caught as Error).message).toMatch(/baseSha/);
   });
 });

@@ -40,6 +40,10 @@ export interface RunProcessOptions {
   maxStderrBytes?: number;
   env?: Record<string, string | undefined>;
   signal?: AbortSignal;
+  // Optional bytes/string fed to the child via a piped stdin stream
+  // (e.g. object IDs for `git cat-file --batch-check`). Absent preserves
+  // the previous `stdin: "ignore"` behavior; no shell involved.
+  stdinData?: Uint8Array | string | undefined;
 }
 
 export interface RunProcessResult {
@@ -116,12 +120,18 @@ export async function runProcess(options: RunProcessOptions): Promise<RunProcess
   }
   let proc: ReturnType<typeof Bun.spawn>;
   try {
+    // Piped stdin only for callers that supply stdinData (batch-check);
+    // otherwise preserve the previous ignore behavior. No shell involved.
+    const stdinBody =
+      options.stdinData === undefined
+        ? undefined
+        : new Response(options.stdinData).body ?? undefined;
     proc = Bun.spawn([...argv], {
       ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
       env: childEnv(options.env),
       stdout: "pipe",
       stderr: "pipe",
-      stdin: "ignore",
+      ...(stdinBody === undefined ? { stdin: "ignore" as const } : { stdin: stdinBody as never }),
     });
   } catch (cause) {
     throw new ReviewerError({

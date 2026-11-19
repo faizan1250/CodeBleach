@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { ChangedFile, DiffSkipReason } from "../../src/types/diff.ts";
 import type { DiffSkipReason as BarrelSkipReason } from "../../src/types/index.ts";
 
-// Exhaustive at the type level: adding a seventh reason breaks the sort below.
+// Exhaustive at the type level: adding an eighth reason breaks the sort below.
 const ALL_REASONS: readonly DiffSkipReason[] = [
   "binary",
   "generated",
@@ -10,6 +10,7 @@ const ALL_REASONS: readonly DiffSkipReason[] = [
   "ignored",
   "deleted",
   "lockfile",
+  "unsupported-mode",
 ];
 
 function stubFile(skipReason: ChangedFile["skipReason"]): ChangedFile {
@@ -26,7 +27,7 @@ function stubFile(skipReason: ChangedFile["skipReason"]): ChangedFile {
 }
 
 describe("DiffSkipReason contract", () => {
-  test("covers exactly the six documented skip reasons", () => {
+  test("covers exactly the seven documented skip reasons", () => {
     expect([...ALL_REASONS].sort()).toEqual([
       "binary",
       "deleted",
@@ -34,6 +35,7 @@ describe("DiffSkipReason contract", () => {
       "ignored",
       "lockfile",
       "too-large",
+      "unsupported-mode",
     ]);
   });
 

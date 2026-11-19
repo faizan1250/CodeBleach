@@ -7,7 +7,7 @@ import type { ResolvedConfig } from "../../src/config/schema.ts";
 import { ReviewerError } from "../../src/core/errors.ts";
 import { GitDiffEngine, PINNED_DIFF_FLAGS } from "../../src/diff/git.ts";
 import type { DiffLogger } from "../../src/diff/git.ts";
-import { runProcess } from "../../src/utils/spawn.ts";
+import { commitIndex, git, makeRepo } from "../helpers/git-repo.ts";
 
 interface LoggedCall {
   level: string;
@@ -34,28 +34,6 @@ function makeLogger(): { calls: LoggedCall[]; logger: DiffLogger } {
 }
 
 // Structural use only; satisfied by the spy above and the real Logger.
-
-const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
-
-async function git(dir: string, args: string[]): Promise<string> {
-  const result = await runProcess({ cmd: ["git", ...args], cwd: dir });
-  return decode(result.stdout).trim();
-}
-
-async function makeRepo(): Promise<{ dir: string; cleanup: () => Promise<void> }> {
-  const dir = await mkdtemp(join(tmpdir(), "codebleach-p2-07-"));
-  const cleanup = (): Promise<void> => rm(dir, { recursive: true, force: true });
-  try {
-    await git(dir, ["init"]);
-    await git(dir, ["config", "user.name", "CodeBleach Test"]);
-    await git(dir, ["config", "user.email", "p2-07@codebleach.local"]);
-    await git(dir, ["config", "commit.gpgsign", "false"]);
-    return { dir, cleanup };
-  } catch (error) {
-    await cleanup();
-    throw error;
-  }
-}
 
 async function writeAndCommit(
   dir: string,
