@@ -8,12 +8,12 @@ import {
   demoValidationEngine,
 } from "../../core/demo.ts";
 import { ReviewerError } from "../../core/errors.ts";
+import { GitDiffEngine } from "../../diff/git.ts";
 import { exitCodeForError } from "../exit-codes.ts";
 import type { Logger } from "../../core/logger.ts";
 import { runPipeline } from "../../core/pipeline.ts";
 import {
   stubContextEngine,
-  stubDiffEngine,
   stubPublisher,
   stubReviewEngine,
   stubValidationEngine,
@@ -55,7 +55,7 @@ export async function runReview(options: ReviewOptions, logger: Logger): Promise
         publisher: demoPublisher,
       }
     : {
-        diff: stubDiffEngine,
+        diff: new GitDiffEngine({ logger }),
         context: stubContextEngine,
         review: stubReviewEngine,
         validation: stubValidationEngine,
