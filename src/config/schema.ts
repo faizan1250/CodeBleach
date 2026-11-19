@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { SeveritySchema } from "../types/finding.ts";
 import { RULE_KINDS } from "../types/rules.ts";
+import { isValidGlobPattern } from "../utils/glob.ts";
 import {
   CONFIG_VERSION,
   DEFAULT_CATEGORIES,
@@ -8,12 +9,26 @@ import {
   DEFAULT_ENABLED,
   DEFAULT_LANGUAGE,
   DEFAULT_MAX_CHANGED_LINES_PER_FILE,
+  DEFAULT_MAX_FILE_SIZE_KB,
   DEFAULT_MAX_FINDINGS,
   DEFAULT_SEVERITY_THRESHOLD,
   mergeIgnorePaths,
 } from "./defaults.ts";
 
 export const LANGUAGES = ["typescript", "tsx", "javascript"] as const;
+
+const GlobPatternSchema = z
+  .string()
+  .min(1)
+  .check((ctx) => {
+    if (!isValidGlobPattern(ctx.value)) {
+      ctx.issues.push({
+        code: "custom",
+        message: `invalid glob pattern ${JSON.stringify(ctx.value)}: supported syntax is *, **, **/, and ? with / separators`,
+        input: ctx.value,
+      });
+    }
+  });
 
 const CategoriesSchema = z.strictObject({
   bugs: z.boolean().default(DEFAULT_CATEGORIES.bugs),
@@ -42,6 +57,7 @@ const ReviewSchema = z.strictObject({
     .default({}),
   max_findings: z.number().int().positive().default(DEFAULT_MAX_FINDINGS),
   max_changed_lines_per_file: z.number().int().positive().default(DEFAULT_MAX_CHANGED_LINES_PER_FILE),
+  max_file_size_kb: z.number().int().positive().default(DEFAULT_MAX_FILE_SIZE_KB),
 });
 
 const PartialCategoriesSchema = z.strictObject({
@@ -58,18 +74,19 @@ const PartialReviewSchema = z.strictObject({
   confidence_threshold: z.number().min(0).max(1).optional(),
   max_findings: z.number().int().positive().optional(),
   max_changed_lines_per_file: z.number().int().positive().optional(),
+  max_file_size_kb: z.number().int().positive().optional(),
 });
 
 const RuleSchema = z.strictObject({
   id: z.string().min(1),
   kind: z.enum(RULE_KINDS),
   text: z.string().min(1),
-  paths: z.array(z.string().min(1)).optional(),
+  paths: z.array(GlobPatternSchema).optional(),
   severity: SeveritySchema.optional(),
 });
 
 const PathOverrideSchema = z.strictObject({
-  paths: z.array(z.string().min(1)).min(1),
+  paths: z.array(GlobPatternSchema).min(1),
   review: PartialReviewSchema,
 });
 
@@ -79,7 +96,7 @@ export const ConfigFileSchema = z.strictObject({
   ignore: z
     .strictObject({
       // Additive: user entries extend the built-in defaults (merged, deduped).
-      paths: z.array(z.string().min(1)).optional().transform(mergeIgnorePaths),
+      paths: z.array(GlobPatternSchema).optional().transform(mergeIgnorePaths),
     })
     .prefault({}),
   repository: z

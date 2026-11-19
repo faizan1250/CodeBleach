@@ -17,6 +17,8 @@ export const DEFAULT_MAX_FINDINGS = 10;
 
 export const DEFAULT_MAX_CHANGED_LINES_PER_FILE = 1500;
 
+export const DEFAULT_MAX_FILE_SIZE_KB = 500;
+
 export const DEFAULT_IGNORE_PATHS: readonly string[] = [
   "**/*.lock",
   "dist/**",

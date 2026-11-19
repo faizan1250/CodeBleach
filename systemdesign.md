@@ -238,6 +238,7 @@ review:
     security: { confidence_threshold: 0.7 }
   max_findings: 10
   max_changed_lines_per_file: 1500
+  max_file_size_kb: 500               # over-limit head blobs skip with "too-large"
 ignore:
   paths: ["**/*.lock", "dist/**", "**/*.generated.*"]   # additive: merged over built-in defaults, see ADR 0004
 repository:
@@ -255,7 +256,7 @@ path_overrides:
 
 Behavior: missing file → defaults. Invalid file → `ConfigError` (CLI exit 2); in Action, publish a single comment describing the config error rather than silently reviewing with defaults. User `ignore.paths` extend (never replace) the built-in defaults. A `.reviewer.yml` symlink is followed only when its resolved target stays inside the resolved repository root and is a regular file; outside targets, dangling links, loops, and directories are config errors, never silent defaults. Unknown keys → error (catches typos). Evolution: `version` field + `migrate(raw)` registry chain; new fields are always optional with defaults.
 
-Phase 2 addition (P2-06, ADR 0007): optional `review.max_file_size_kb` (default 500 KB) measured from the head-commit blob; over-limit files skip with `"too-large"`. Configured glob fields are validated against the documented `*`/`**`/`**/`/`?` subset at load time.
+Optional `review.max_file_size_kb` (default 500 KB, ADR 0007) is measured from the head-commit blob; over-limit files skip with `"too-large"`. Configured glob fields are validated against the documented `*`/`**`/`**/`/`?` subset at load time.
 
 ---
 

@@ -108,18 +108,18 @@ describe("config schema", () => {
 
   test("rejects malformed globs in every glob field", () => {
     expect(() => ConfigFileSchema.parse({ ignore: { paths: ["src/{a,b}.ts"] } })).toThrow(
-      /invalid glob pattern "src\/\{a,b\}\.ts"/,
+      /invalid glob pattern \\"src\/\{a,b\}\.ts\\"/,
     );
     expect(() =>
       ConfigFileSchema.parse({
         rules: [{ id: "x", kind: "convention", text: "t", paths: ["src/[abc].ts"] }],
       }),
-    ).toThrow(/invalid glob pattern "src\/\[abc\]\.ts"/);
+    ).toThrow(/invalid glob pattern \\"src\/\[abc\]\.ts\\"/);
     expect(() =>
       ConfigFileSchema.parse({
         path_overrides: [{ paths: ["../escape.ts"], review: {} }],
       }),
-    ).toThrow(/invalid glob pattern "\.\.\/escape\.ts"/);
+    ).toThrow(/invalid glob pattern \\"\.\.\/escape\.ts\\"/);
   });
 
   test("accepts supported globs in every glob field", () => {
