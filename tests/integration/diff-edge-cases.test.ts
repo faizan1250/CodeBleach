@@ -8,7 +8,8 @@ import { ReviewerError } from "../../src/core/errors.ts";
 import { exitCodeForError } from "../../src/cli/exit-codes.ts";
 import { GitDiffEngine, isFullCommitSha, normalizeCommitSha } from "../../src/diff/git.ts";
 import type { DiffLogger } from "../../src/diff/git.ts";
-import { DEFAULT_MAX_STDOUT_BYTES, runProcess } from "../../src/utils/spawn.ts";
+import { DEFAULT_MAX_STDOUT_BYTES } from "../../src/utils/spawn.ts";
+import { commitIndex, git, makeRepo } from "./git-diff-engine.test.ts";
 
 const CLI = join(dirname(import.meta.dir), "..", "src", "cli", "index.ts");
 
@@ -36,32 +37,6 @@ function makeLogger(): { calls: LoggedCall[]; logger: DiffLogger } {
   };
 }
 
-const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
-
-async function git(
-  dir: string,
-  args: string[],
-  env?: Record<string, string | undefined>,
-): Promise<string> {
-  const result = await runProcess({ cmd: ["git", ...args], cwd: dir, ...(env === undefined ? {} : { env }) });
-  return decode(result.stdout).trim();
-}
-
-async function makeRepo(): Promise<{ dir: string; cleanup: () => Promise<void> }> {
-  const dir = await mkdtemp(join(tmpdir(), "codebleach-edge-"));
-  const cleanup = (): Promise<void> => rm(dir, { recursive: true, force: true });
-  try {
-    await git(dir, ["init"]);
-    await git(dir, ["config", "user.name", "CodeBleach Test"]);
-    await git(dir, ["config", "user.email", "edge@codebleach.local"]);
-    await git(dir, ["config", "commit.gpgsign", "false"]);
-    return { dir, cleanup };
-  } catch (error) {
-    await cleanup();
-    throw error;
-  }
-}
-
 function defaults(overrides: Record<string, unknown> = {}): ResolvedConfig {
   return ConfigFileSchema.parse(overrides);
 }
@@ -69,33 +44,6 @@ function defaults(overrides: Record<string, unknown> = {}): ResolvedConfig {
 function codeOf(error: unknown): string {
   expect(error).toBeInstanceOf(ReviewerError);
   return (error as ReviewerError).code;
-}
-
-// Fixed identity for deterministic SHAs; all commits in this file use it.
-const FIXED_GIT_ENV: Record<string, string> = {
-  GIT_AUTHOR_NAME: "CodeBleach Test",
-  GIT_AUTHOR_EMAIL: "edge@codebleach.local",
-  GIT_COMMITTER_NAME: "CodeBleach Test",
-  GIT_COMMITTER_EMAIL: "edge@codebleach.local",
-  GIT_AUTHOR_DATE: "2000-01-01T00:00:00Z",
-  GIT_COMMITTER_DATE: "2000-01-01T00:00:00Z",
-};
-
-// Commits the current index directly via plumbing.
-async function commitIndex(dir: string, message: string): Promise<string> {
-  const tree = await git(dir, ["write-tree"]);
-  let parent: string | null = null;
-  try {
-    parent = await git(dir, ["rev-parse", "HEAD"]);
-  } catch {
-    parent = null;
-  }
-  const args =
-    parent === null ? ["commit-tree", tree, "-m", message] : ["commit-tree", tree, "-p", parent, "-m", message];
-  const result = await runProcess({ cmd: ["git", ...args], cwd: dir, env: FIXED_GIT_ENV });
-  const commit = decode(result.stdout).trim();
-  await git(dir, ["update-ref", "HEAD", commit]);
-  return git(dir, ["rev-parse", "HEAD"]);
 }
 
 async function runEngine(
@@ -194,8 +142,23 @@ describe("E02 gitlink 160000 skips without contaminating app.ts", () => {
       expect(sub?.symbols).toEqual([]);
       const app = byPath.get("src/app.ts");
       expect(app?.skipReason).toBeUndefined();
-      expect(app?.hunks.length).toBeGreaterThan(0);
-      expect(app?.symbols).toHaveLength(1);
+      expect(app?.language).toBe("typescript");
+      expect(app?.hunks).toEqual([
+        {
+          oldStart: 1,
+          oldLines: 1,
+          newStart: 1,
+          newLines: 1,
+          lines: [
+            { kind: "del", oldLine: 1, newLine: null, position: 1, text: "const a = 1;" },
+            { kind: "add", oldLine: null, newLine: 1, position: 2, text: "const a = 2;" },
+          ],
+        },
+      ]);
+      expect(app?.commentableLines).toEqual([1]);
+      expect(app?.symbols).toEqual([
+        { name: "<module>", kind: "module", startLine: 1, endLine: 1, changedLines: [1] },
+      ]);
     } finally {
       if (outside !== null) await rm(outside, { recursive: true, force: true });
       await cleanup();
@@ -239,7 +202,23 @@ describe("E03 patch cap seam with oversize lockfile", () => {
       expect(byPath.get("yarn.lock")?.skipReason).toBe("lockfile");
       expect(byPath.get("yarn.lock")?.hunks).toEqual([]);
       expect(byPath.get("src/app.ts")?.skipReason).toBeUndefined();
-      expect(byPath.get("src/app.ts")?.symbols).toHaveLength(1);
+      expect(byPath.get("src/app.ts")?.language).toBe("typescript");
+      expect(byPath.get("src/app.ts")?.hunks).toEqual([
+        {
+          oldStart: 1,
+          oldLines: 1,
+          newStart: 1,
+          newLines: 1,
+          lines: [
+            { kind: "del", oldLine: 1, newLine: null, position: 1, text: "const a = 1;" },
+            { kind: "add", oldLine: null, newLine: 1, position: 2, text: "const a = 2;" },
+          ],
+        },
+      ]);
+      expect(byPath.get("src/app.ts")?.commentableLines).toEqual([1]);
+      expect(byPath.get("src/app.ts")?.symbols).toEqual([
+        { name: "<module>", kind: "module", startLine: 1, endLine: 1, changedLines: [1] },
+      ]);
     } finally {
       if (outside !== null) await rm(outside, { recursive: true, force: true });
       await cleanup();
@@ -285,7 +264,23 @@ describe("E04 oversize blob with smallest valid max_file_size_kb", () => {
       expect(byPath.get("large.txt")?.commentableLines).toEqual([]);
       expect(byPath.get("large.txt")?.symbols).toEqual([]);
       expect(byPath.get("src/app.ts")?.skipReason).toBeUndefined();
-      expect(byPath.get("src/app.ts")?.symbols).toHaveLength(1);
+      expect(byPath.get("src/app.ts")?.language).toBe("typescript");
+      expect(byPath.get("src/app.ts")?.hunks).toEqual([
+        {
+          oldStart: 1,
+          oldLines: 1,
+          newStart: 1,
+          newLines: 1,
+          lines: [
+            { kind: "del", oldLine: 1, newLine: null, position: 1, text: "const a = 1;" },
+            { kind: "add", oldLine: null, newLine: 1, position: 2, text: "const a = 2;" },
+          ],
+        },
+      ]);
+      expect(byPath.get("src/app.ts")?.commentableLines).toEqual([1]);
+      expect(byPath.get("src/app.ts")?.symbols).toEqual([
+        { name: "<module>", kind: "module", startLine: 1, endLine: 1, changedLines: [1] },
+      ]);
     } finally {
       if (outside !== null) await rm(outside, { recursive: true, force: true });
       await cleanup();
@@ -294,28 +289,31 @@ describe("E04 oversize blob with smallest valid max_file_size_kb", () => {
 });
 
 describe("E05 deletion-only keeps hardcoded hunk and module symbol", () => {
-  test("deleting the last line yields one hunk, commentable [1,2,3], empty changedLines", async () => {
+  test("deleting guard line 2 yields @@ -1,4 +1,3 @@, commentable [1,2,3], empty changedLines", async () => {
     const { dir, cleanup } = await makeRepo();
     let outside: string | null = null;
     try {
       outside = await mkdtemp(join(tmpdir(), "codebleach-edge-out-"));
       await mkdir(join(dir, "src"), { recursive: true });
-      await writeFile(join(dir, "src/shrink.ts"), "one\ntwo\nthree\nfour\n");
+      const baseContent = "export function f(x?: string) {\n  if (!x) return 0;\n  return x.length;\n}\n";
+      await writeFile(join(dir, "src/f.ts"), baseContent);
       const baseOutside = join(outside, "base");
-      await writeFile(baseOutside, "one\ntwo\nthree\nfour\n");
+      await writeFile(baseOutside, baseContent);
       const baseBlob = await git(dir, ["hash-object", "-w", baseOutside]);
-      await git(dir, ["update-index", "--add", "--cacheinfo", `100644,${baseBlob},src/shrink.ts`]);
+      await git(dir, ["update-index", "--add", "--cacheinfo", `100644,${baseBlob},src/f.ts`]);
       const base = await commitIndex(dir, "base");
-      await writeFile(join(dir, "src/shrink.ts"), "one\ntwo\nthree\n");
+      const headContent = "export function f(x?: string) {\n  return x.length;\n}\n";
+      await writeFile(join(dir, "src/f.ts"), headContent);
       const headOutside = join(outside, "head");
-      await writeFile(headOutside, "one\ntwo\nthree\n");
+      await writeFile(headOutside, headContent);
       const headBlob = await git(dir, ["hash-object", "-w", headOutside]);
-      await git(dir, ["update-index", "--add", "--cacheinfo", `100644,${headBlob},src/shrink.ts`]);
+      await git(dir, ["update-index", "--add", "--cacheinfo", `100644,${headBlob},src/f.ts`]);
       const head = await commitIndex(dir, "head");
       const result = await runEngine(dir, base, head);
       expect(result.files).toHaveLength(1);
       const file = result.files[0];
-      expect(file?.path).toBe("src/shrink.ts");
+      expect(file?.path).toBe("src/f.ts");
+      expect(file?.language).toBe("typescript");
       expect(file?.skipReason).toBeUndefined();
       expect(file?.hunks).toEqual([
         {
@@ -324,10 +322,10 @@ describe("E05 deletion-only keeps hardcoded hunk and module symbol", () => {
           newStart: 1,
           newLines: 3,
           lines: [
-            { kind: "ctx", oldLine: 1, newLine: 1, position: 1, text: "one" },
-            { kind: "ctx", oldLine: 2, newLine: 2, position: 2, text: "two" },
-            { kind: "ctx", oldLine: 3, newLine: 3, position: 3, text: "three" },
-            { kind: "del", oldLine: 4, newLine: null, position: 4, text: "four" },
+            { kind: "ctx", oldLine: 1, newLine: 1, position: 1, text: "export function f(x?: string) {" },
+            { kind: "del", oldLine: 2, newLine: null, position: 2, text: "  if (!x) return 0;" },
+            { kind: "ctx", oldLine: 3, newLine: 2, position: 3, text: "  return x.length;" },
+            { kind: "ctx", oldLine: 4, newLine: 3, position: 4, text: "}" },
           ],
         },
       ]);
@@ -341,7 +339,7 @@ describe("E05 deletion-only keeps hardcoded hunk and module symbol", () => {
     }
   });
 
-  test.todo("Phase 3 refines the deletion-only module symbol into real function symbols");
+  test.todo("Phase 3 anchors deletion-only module symbol to nearest surviving head-side line through hunk");
 });
 
 describe("E06 empty TypeScript file", () => {
@@ -406,7 +404,7 @@ describe("E07 mode-only change via update-index", () => {
 });
 
 describe("E08 symlink target edit via plumbing", () => {
-  test("symlink target change stays visible with target hunks and no symbol", async () => {
+  test("symlink target change skips as unsupported-mode with empty hunks/lines/symbols", async () => {
     const { dir, cleanup } = await makeRepo();
     let outside: string | null = null;
     try {
@@ -431,9 +429,9 @@ describe("E08 symlink target edit via plumbing", () => {
       const link = result.files.find((file) => file.path === "link");
       expect(link?.status).toBe("modified");
       expect(link?.language).toBeNull();
-      expect(link?.skipReason).toBeUndefined();
-      expect(link?.hunks).toHaveLength(1);
-      expect(link?.commentableLines).toEqual([1]);
+      expect(link?.skipReason).toBe("unsupported-mode");
+      expect(link?.hunks).toEqual([]);
+      expect(link?.commentableLines).toEqual([]);
       expect(link?.symbols).toEqual([]);
     } finally {
       if (outside !== null) await rm(outside, { recursive: true, force: true });
@@ -449,7 +447,7 @@ describe("E09 CLI diff validation and INVALID_INPUT policy", () => {
     expect(exitCodeForError(new ReviewerError({ code: "CONFIG_INVALID", message: "cfg" }))).toBe(2);
   });
 
-  test("validation matrix exits 0/2/2/2/1/2/2", async () => {
+  test("validation matrix exits 0/2/2/2/1/2/2/2 with HEAD~1 and INVALID_INPUT rows", async () => {
     const { dir, cleanup } = await makeRepo();
     let outside: string | null = null;
     try {
@@ -469,20 +467,38 @@ describe("E09 CLI diff validation and INVALID_INPUT policy", () => {
       const head = await commitIndex(dir, "head");
       const valid = await runCli(["diff", "--base", base, "--head", head, "--repo", dir], dir);
       expect(valid.code).toBe(0);
+      const parsed = JSON.parse(valid.stdout) as {
+        baseSha: string;
+        headSha: string;
+        mergeBase: string;
+        files: Array<{ path: string }>;
+      };
+      expect(parsed.baseSha).toBe(base.toLowerCase());
+      expect(parsed.headSha).toBe(head.toLowerCase());
+      expect(parsed.mergeBase).toBe(base.toLowerCase());
+      expect(isFullCommitSha(parsed.baseSha)).toBe(true);
+      expect(isFullCommitSha(parsed.headSha)).toBe(true);
+      expect(parsed.files.map((file) => file.path)).toEqual(["src/a.ts"]);
+      expect(valid.stderr.length).toBeGreaterThan(0);
+      expect(await git(dir, ["rev-parse", "HEAD~1"])).toBe(base);
       const missingBase = await runCli(["diff", "--head", head, "--repo", dir], dir);
       expect(missingBase.code).toBe(2);
       const missingHead = await runCli(["diff", "--base", base, "--repo", dir], dir);
       expect(missingHead.code).toBe(2);
       const unknownFlag = await runCli(["diff", "--bogus"], dir);
       expect(unknownFlag.code).toBe(2);
+      const malformed = await runCli(["diff", "--base", "not-a-sha", "--head", head, "--repo", dir], dir);
+      expect(malformed.code).toBe(2);
+      expect(malformed.stderr).toMatch(/INVALID_INPUT/);
       const missingCommit = "0123456789abcdef0123456789abcdef01234567";
       const unresolved = await runCli(["diff", "--base", base, "--head", missingCommit, "--repo", dir], dir);
       expect(unresolved.code).toBe(1);
       expect(unresolved.stderr).toMatch(/fetch sufficient history/i);
-      // RED: dash-prefixed and non-commit inputs must be INVALID_INPUT exit 2
-      // without reaching the engine. Currently they surface without that code.
+      expect(unresolved.stderr).toMatch(/headSha/);
+      // RED: dash-prefixed input must reach revision validation as INVALID_INPUT exit 2,
+      // not arg-parse rejection. Equals-form carries the dash value through to the engine.
       const dashPrefixed = await runCli(
-        ["diff", "--base", "--verify", "--head", head, "--repo", dir],
+        ["diff", "--base=--verify", "--head", head, "--repo", dir],
         dir,
       );
       expect(dashPrefixed.code).toBe(2);
