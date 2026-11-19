@@ -34,6 +34,7 @@ import { rankContextItems, scoreItem } from "./rank.ts";
 import type { RankInput, RankProximity } from "./rank.ts";
 import { SnapshotReader } from "./snapshot.ts";
 import { MODULE_SYMBOL_NAME, mapChangedSymbolsForFile } from "./symbols.ts";
+import { resolveTestsForSymbol } from "./tests.ts";
 import { estimateTokens } from "../utils/tokens.ts";
 import { detectLanguage } from "../diff/paths.ts";
 
@@ -549,6 +550,37 @@ export class ContextEngineImpl implements ContextEngine {
       capSkipped += callers.diagnostics.filter((diagnostic) => diagnostic.reason === "cap-reached").length;
     } catch {
       // Best-effort: callers omitted on failure.
+    }
+
+    try {
+      const tests = await resolveTestsForSymbol({
+        filePath: file.path,
+        symbol,
+        reader: input.reader,
+        perFileMs: input.perFileMs,
+        runBudget: input.runBudget,
+      });
+      for (const testSite of tests.tests) {
+        const tokens = estimateTokens(testSite.text);
+        const unitIdPreview = stableUnitId(diff.headSha, file.path, symbol.kind, symbol.container, symbol.name, symbol.startLine);
+        pushCandidate(
+          {
+            id: stableItemId(unitIdPreview, "test", testSite.path, testSite.startLine),
+            kind: "test",
+            file: testSite.path,
+            startLine: testSite.startLine,
+            endLine: testSite.endLine,
+            text: testSite.text,
+            score: 0,
+            tokens,
+            reason: testSite.reason,
+          },
+          testSite.proximity,
+        );
+      }
+      capSkipped += tests.diagnostics.filter((diagnostic) => diagnostic.reason === "cap-reached").length;
+    } catch {
+      // Best-effort: tests omitted on failure.
     }
 
     const ranked = rankContextItems(candidates);
