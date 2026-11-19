@@ -179,6 +179,12 @@ describe("E03 patch cap seam with oversize lockfile", () => {
       await writeFile(appOutside, "const a = 1;\n");
       const appBlob = await git(dir, ["hash-object", "-w", appOutside]);
       await git(dir, ["update-index", "--add", "--cacheinfo", `100644,${appBlob},src/app.ts`]);
+      const smallLock = "# yarn lockfile v1\n";
+      await writeFile(join(dir, "yarn.lock"), smallLock);
+      const smallLockOutside = join(outside, "lock-base");
+      await writeFile(smallLockOutside, smallLock);
+      const smallLockBlob = await git(dir, ["hash-object", "-w", smallLockOutside]);
+      await git(dir, ["update-index", "--add", "--cacheinfo", `100644,${smallLockBlob},yarn.lock`]);
       const base = await commitIndex(dir, "base");
       await writeFile(join(dir, "src/app.ts"), "const a = 2;\n");
       const app2Outside = join(outside, "app2");
@@ -192,7 +198,7 @@ describe("E03 patch cap seam with oversize lockfile", () => {
       const lockOutside = join(outside, "lock");
       await writeFile(lockOutside, lockContent);
       const lockBlob = await git(dir, ["hash-object", "-w", lockOutside]);
-      await git(dir, ["update-index", "--add", "--cacheinfo", `100644,${lockBlob},yarn.lock`]);
+      await git(dir, ["update-index", "--cacheinfo", `100644,${lockBlob},yarn.lock`]);
       const head = await commitIndex(dir, "head");
       const normal = await runEngine(dir, base, head);
       expect(normal.files.find((file) => file.path === "yarn.lock")?.skipReason).toBe("lockfile");
@@ -238,6 +244,12 @@ describe("E04 oversize blob with smallest valid max_file_size_kb", () => {
       await writeFile(appOutside, "const a = 1;\n");
       const appBlob = await git(dir, ["hash-object", "-w", appOutside]);
       await git(dir, ["update-index", "--add", "--cacheinfo", `100644,${appBlob},src/app.ts`]);
+      const smallBig = "line-0\n";
+      await writeFile(join(dir, "large.txt"), smallBig);
+      const smallBigOutside = join(outside, "big-base");
+      await writeFile(smallBigOutside, smallBig);
+      const smallBigBlob = await git(dir, ["hash-object", "-w", smallBigOutside]);
+      await git(dir, ["update-index", "--add", "--cacheinfo", `100644,${smallBigBlob},large.txt`]);
       const base = await commitIndex(dir, "base");
       await writeFile(join(dir, "src/app.ts"), "const a = 2;\n");
       const app2Outside = join(outside, "app2");
@@ -251,7 +263,7 @@ describe("E04 oversize blob with smallest valid max_file_size_kb", () => {
       const bigOutside = join(outside, "big");
       await writeFile(bigOutside, bigContent);
       const bigBlob = await git(dir, ["hash-object", "-w", bigOutside]);
-      await git(dir, ["update-index", "--add", "--cacheinfo", `100644,${bigBlob},large.txt`]);
+      await git(dir, ["update-index", "--cacheinfo", `100644,${bigBlob},large.txt`]);
       const head = await commitIndex(dir, "head");
       // Smallest valid Zod value (positive int) below the 26623 ceiling.
       const config = defaults({ review: { max_file_size_kb: 1 } });
@@ -447,7 +459,7 @@ describe("E09 CLI diff validation and INVALID_INPUT policy", () => {
     expect(exitCodeForError(new ReviewerError({ code: "CONFIG_INVALID", message: "cfg" }))).toBe(2);
   });
 
-  test("validation matrix exits 0/2/2/2/1/2/2/2 with HEAD~1 and INVALID_INPUT rows", async () => {
+  test("validation matrix with symbolic HEAD refs, unknown branch, and INVALID_INPUT rows", async () => {
     const { dir, cleanup } = await makeRepo();
     let outside: string | null = null;
     try {
@@ -481,6 +493,22 @@ describe("E09 CLI diff validation and INVALID_INPUT policy", () => {
       expect(parsed.files.map((file) => file.path)).toEqual(["src/a.ts"]);
       expect(valid.stderr.length).toBeGreaterThan(0);
       expect(await git(dir, ["rev-parse", "HEAD~1"])).toBe(base);
+      // RED: CLI must resolve symbolic refs to full SHAs, not just pass SHAs through.
+      const symbolic = await runCli(["diff", "--base", "HEAD~1", "--head", "HEAD", "--repo", dir], dir);
+      expect(symbolic.code).toBe(0);
+      const parsedSymbolic = JSON.parse(symbolic.stdout) as {
+        baseSha: string;
+        headSha: string;
+        mergeBase: string;
+        files: Array<{ path: string }>;
+      };
+      expect(parsedSymbolic.baseSha).toBe(base.toLowerCase());
+      expect(parsedSymbolic.headSha).toBe(head.toLowerCase());
+      expect(parsedSymbolic.mergeBase).toBe(base.toLowerCase());
+      expect(isFullCommitSha(parsedSymbolic.baseSha)).toBe(true);
+      expect(isFullCommitSha(parsedSymbolic.headSha)).toBe(true);
+      expect(parsedSymbolic.files.map((file) => file.path)).toEqual(["src/a.ts"]);
+      expect(symbolic.stderr.length).toBeGreaterThan(0);
       const missingBase = await runCli(["diff", "--head", head, "--repo", dir], dir);
       expect(missingBase.code).toBe(2);
       const missingHead = await runCli(["diff", "--base", base, "--repo", dir], dir);
@@ -495,6 +523,11 @@ describe("E09 CLI diff validation and INVALID_INPUT policy", () => {
       expect(unresolved.code).toBe(1);
       expect(unresolved.stderr).toMatch(/fetch sufficient history/i);
       expect(unresolved.stderr).toMatch(/headSha/);
+      // RED: unknown symbolic ref is INVALID_INPUT exit 2, distinct from the
+      // well-formed-but-missing-commit exit 1 row above.
+      const unknownBranch = await runCli(["diff", "--base", "no-such-branch", "--head", head, "--repo", dir], dir);
+      expect(unknownBranch.code).toBe(2);
+      expect(unknownBranch.stderr).toMatch(/INVALID_INPUT/);
       // RED: dash-prefixed input must reach revision validation as INVALID_INPUT exit 2,
       // not arg-parse rejection. Equals-form carries the dash value through to the engine.
       const dashPrefixed = await runCli(
