@@ -1,4 +1,4 @@
-import type { ChangedFile, ChangedSymbol } from "./diff.ts";
+import type { ChangedFile, ChangedSymbol, DiffHunk } from "./diff.ts";
 import type { Rule } from "./rules.ts";
 
 export interface ContextItem {
@@ -19,4 +19,59 @@ export interface ReviewUnit {
   symbol: ChangedSymbol;
   context: ContextItem[];
   rules: Rule[];
+}
+
+/** Lightweight file projection for budgeted review payloads (P3-10, wired in P3-11). */
+export interface ReviewUnitFile {
+  path: string;
+  oldPath: string | null;
+  status: ChangedFile["status"];
+  language: ChangedFile["language"];
+  commentableLines: number[];
+}
+
+/** Whole-hunk diff slice for one unit; never a partial hunk. */
+export interface ReviewUnitDiff {
+  hunks: DiffHunk[];
+  originalHunkCount: number;
+  includedHunkCount: number;
+  omittedHunkCount: number;
+  truncated: boolean;
+}
+
+export type UnitSkipReason =
+  | "mandatory-budget-exceeded"
+  | "diff-exceeds-budget"
+  | "run-deadline"
+  | "parse-cancelled"
+  | "parse-budget-exceeded"
+  | "candidate-cap-exceeded";
+
+export interface UnitSkip {
+  path: string;
+  symbol: string;
+  reason: UnitSkipReason;
+  requiredTokens?: number | undefined;
+  maxTokens?: number | undefined;
+}
+
+export interface ContextBuildDiagnostics {
+  elapsedMs: number;
+  deadlineExceeded: boolean;
+  parseBudgetExceeded: boolean;
+  filesConsidered: number;
+  filesParsed: number;
+  filesParseTimedOut: number;
+  unitsCreated: number;
+  unitsSkipped: UnitSkip[];
+  unitsWithTruncatedDiff: number;
+  unitsWithTruncatedDefinition: number;
+  candidateFilesSkippedByCap: number;
+  queryTimeouts: number;
+}
+
+export interface ContextBuildResult {
+  units: ReviewUnit[];
+  status: "complete" | "partial";
+  diagnostics: ContextBuildDiagnostics;
 }

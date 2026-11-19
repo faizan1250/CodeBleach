@@ -93,7 +93,22 @@ For each `ChangedSymbol`, collect `ContextItem`s:
 | similar | sibling functions in same file/dir with same kind; grep by shared identifiers — later, only if eval shows value |
 | conventions | explicit rules from config (always) + inferred (Phase 6) |
 
-Ranking: score = kind weight × proximity (same file > imported > grep hit) × reference count decay. Fill a **token budget** per ReviewUnit (default ~12k tokens context, hard cap config) in score order; always include definition + diff. Record `reason` and `tokens` per item. Unsupported language → diff hunks + ±30 lines surrounding file text only.
+Ranking: score = kind weight (definition 100, type 85, callee 75, caller 65, test 55)
+  × proximity (same-file 1.00, direct import 0.85, cross-file caller 0.75,
+  same-dir test 0.55, other 0.50) × reference-count decay
+  (`1 / (1 + 0.15 * (refs - 1))`); ties break by kind priority, path, start
+  line, then stable id (ADR 0013). Fill the per-unit hard cap
+  `context.max_tokens_per_unit` (default 12000, bounds 1000–24000, estimator
+  `ceil(bytes * 23 / 80)` plus 200-token framing reserve) in score order.
+  The hard cap always wins: rules are counted but never truncated (over-budget
+  mandatory payload skips the unit as `mandatory-budget-exceeded`); diff hunks
+  are kept whole in original order or omitted with `truncated: true` (no
+  fitting hunk skips as `diff-exceeds-budget`); the definition keeps its
+  signature and truncates its body at line boundaries. Over-deadline runs
+  return `ContextBuildResult{units, status: partial, diagnostics}` instead of
+  a success-shaped array. Always include definition + diff. Record `reason`
+  and `tokens` per item. Unsupported language → diff hunks + ±30 lines
+  surrounding file text only.
 
 Symbol resolution is **best-effort by name + import path**, not a type checker. Be explicit in prompts that callers/callees may be incomplete.
 
@@ -260,13 +275,14 @@ context:
   max_run_time_ms: 120000
   max_parse_time_ms: 2000
   max_total_parse_time_ms: 30000
+  max_tokens_per_unit: 12000
 ```
 
 Behavior: missing file → defaults. Invalid file → `ConfigError` (CLI exit 2); in Action, publish a single comment describing the config error rather than silently reviewing with defaults. User `ignore.paths` extend (never replace) the built-in defaults. A `.reviewer.yml` symlink is followed only when its resolved target stays inside the resolved repository root and is a regular file; outside targets, dangling links, loops, and directories are config errors, never silent defaults. Unknown keys → error (catches typos). Evolution: `version` field + `migrate(raw)` registry chain; new fields are always optional with defaults.
 
 Optional `review.max_file_size_kb` (default 500 KB, absolute ceiling 26623 KB, ADRs 0007, 0009) is measured from the head-commit blob; over-limit files skip with `"too-large"`. An accepted blob plus its 1-byte growth sentinel must fit the 26 MiB per-stream blob-read cap, so values above the ceiling are rejected at config load. Configured glob fields are validated against the documented `*`/`**`/`**/`/`?` subset at load time.
 
-Optional `context` time limits bound the Context Engine (Phase 3): `max_run_time_ms` (default 120000, 5000–600000) is the overall wall-clock deadline, `max_parse_time_ms` (default 2000, 100–30000) caps one file parse, `max_total_parse_time_ms` (default 30000, 1000–180000) caps cumulative parsing. Config load rejects `max_parse_time_ms > max_total_parse_time_ms > max_run_time_ms` violations as `CONFIG_INVALID`. (`max_tokens_per_unit` arrives with the P3-10 budget work.)
+Optional `context` time limits bound the Context Engine (Phase 3): `max_run_time_ms` (default 120000, 5000–600000) is the overall wall-clock deadline, `max_parse_time_ms` (default 2000, 100–30000) caps one file parse, `max_total_parse_time_ms` (default 30000, 1000–180000) caps cumulative parsing. Config load rejects `max_parse_time_ms > max_total_parse_time_ms > max_run_time_ms` violations as `CONFIG_INVALID`. The per-unit hard cap `max_tokens_per_unit` (default 12000, 1000–24000, ADR 0013) covers diff, definition, explicit rules, other context items, and framing reserve; rules are never truncated and hunks are kept whole.
 
 ---
 

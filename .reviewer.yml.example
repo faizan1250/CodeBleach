@@ -42,6 +42,8 @@ context:
   max_run_time_ms: 120000
   max_parse_time_ms: 2000
   max_total_parse_time_ms: 30000
+  # Approximate total review payload budget per ReviewUnit (hard cap).
+  max_tokens_per_unit: 12000
 
 # Explicit repo rules. Cited by id in findings; violations may use the rule severity.
 rules:
