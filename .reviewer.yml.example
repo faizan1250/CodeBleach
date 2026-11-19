@@ -27,7 +27,7 @@ review:
 
 ignore:
   # Additive: these entries EXTEND the built-in defaults
-  # (**/*.lock, dist/**, build/**, node_modules/**, **/*.generated.*, **/*.snap),
+  # (**/*.lock, dist/**, build/**, node_modules/**, **/*.generated.*, **/*.snap, **/*.min.*),
   # which always apply. Duplicates are dropped; defaults come first.
   paths:
     - "dist/**"

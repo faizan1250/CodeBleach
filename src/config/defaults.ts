@@ -33,6 +33,7 @@ export const DEFAULT_IGNORE_PATHS: readonly string[] = [
   "node_modules/**",
   "**/*.generated.*",
   "**/*.snap",
+  "**/*.min.*",
 ];
 
 export const DEFAULT_LANGUAGE = "typescript" as const;
