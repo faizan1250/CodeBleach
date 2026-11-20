@@ -71,9 +71,7 @@ describe("parse source", () => {
         if (child?.type === "function_declaration") fnRow = child.startPosition.row;
       }
       expect(fnRow).toBe(2);
-      expect(byHelper).toBe(
-        result.tree.rootNode.namedChild(result.tree.rootNode.namedChildCount - 1)?.text ?? "",
-      );
+      expect(byHelper).toBe(result.tree.rootNode.namedChild(result.tree.rootNode.namedChildCount - 1)?.text ?? "");
     } finally {
       result.tree?.delete();
     }
@@ -197,10 +195,7 @@ describe("parse source", () => {
 
   test("expired run deadline skips without parsing", async () => {
     let nowMs = 0;
-    const budget = new RunBudget(
-      { maxRunMs: 1000, maxTotalParseMs: 30000 },
-      { now: () => nowMs },
-    );
+    const budget = new RunBudget({ maxRunMs: 1000, maxTotalParseMs: 30000 }, { now: () => nowMs });
     nowMs = 5000;
     const result = await parseSource({
       source: "function late(): void {}\n",

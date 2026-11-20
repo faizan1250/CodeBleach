@@ -39,10 +39,7 @@ function codeOf(error: unknown): string {
 
 describe("parse ls-tree -z index", () => {
   test("parses regular entries", () => {
-    const bytes = concat([
-      entry("100644", "blob", OID_A, "src/a.ts"),
-      entry("100755", "blob", OID_B, "bin/run.sh"),
-    ]);
+    const bytes = concat([entry("100644", "blob", OID_A, "src/a.ts"), entry("100755", "blob", OID_B, "bin/run.sh")]);
     const index = parseLsTreeZ(bytes);
     expect(index.size).toBe(2);
     expect(index.get("src/a.ts")).toEqual({ mode: "100644", type: "blob", oid: OID_A, path: "src/a.ts" });

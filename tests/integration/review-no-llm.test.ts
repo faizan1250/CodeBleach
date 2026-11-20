@@ -34,11 +34,7 @@ async function writeAndCommit(dir: string, files: Record<string, string>, messag
 async function twoCommitRepo(): Promise<{ dir: string; base: string; head: string; cleanup: () => Promise<void> }> {
   const { dir, cleanup } = await makeRepo();
   const base = await writeAndCommit(dir, { "src/a.ts": "export function f(): number {\n  return 1;\n}\n" }, "base");
-  const head = await writeAndCommit(
-    dir,
-    { "src/a.ts": "export function f(): number {\n  return 2;\n}\n" },
-    "head",
-  );
+  const head = await writeAndCommit(dir, { "src/a.ts": "export function f(): number {\n  return 2;\n}\n" }, "head");
   return { dir, base, head, cleanup };
 }
 

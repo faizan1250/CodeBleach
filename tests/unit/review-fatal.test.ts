@@ -88,10 +88,7 @@ function configWith(llm: Record<string, number> = {}): ResolvedConfig {
   return ConfigFileSchema.parse({ llm });
 }
 
-function engineFor(
-  provider: LlmProvider,
-  env: Record<string, string | undefined> = { ...OPT_IN },
-): ReviewEngineImpl {
+function engineFor(provider: LlmProvider, env: Record<string, string | undefined> = { ...OPT_IN }): ReviewEngineImpl {
   return new ReviewEngineImpl({ provider, logger: nullLogger(), env, headSha: "head-abc" });
 }
 
@@ -274,11 +271,9 @@ describe("review fatal worker cancellation", () => {
   test("per-request timeouts stay partial without fataling the run", async () => {
     const fetchFn = ((_url: unknown, init?: RequestInit): Promise<Response> => {
       return new Promise((_resolve, reject) => {
-        init?.signal?.addEventListener(
-          "abort",
-          () => reject(new DOMException("aborted", "AbortError")),
-          { once: true },
-        );
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), {
+          once: true,
+        });
       });
     }) as typeof fetch;
     const provider = new OpenCodeProvider({ env: { ...GATE }, fetchFn, maxRetries: 0 });

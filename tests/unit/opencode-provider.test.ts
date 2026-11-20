@@ -92,10 +92,7 @@ describe("opencode provider identity", () => {
   });
 
   test("keeps one session id across transport retries", async () => {
-    const { calls, fetchFn } = captureFetch([
-      jsonResponse({ error: "busy" }, 500),
-      jsonResponse(okBody()),
-    ]);
+    const { calls, fetchFn } = captureFetch([jsonResponse({ error: "busy" }, 500), jsonResponse(okBody())]);
     const provider = new OpenCodeProvider({
       env: GATE,
       version: "0.1.0",
@@ -194,9 +191,7 @@ describe("opencode provider responses", () => {
   });
 
   test("falls back to the fixed model id and unknown usage", async () => {
-    const { fetchFn } = captureFetch([
-      jsonResponse({ status: "completed", output_text: "hi" }),
-    ]);
+    const { fetchFn } = captureFetch([jsonResponse({ status: "completed", output_text: "hi" })]);
     const provider = new OpenCodeProvider({ env: GATE, version: "0.1.0", fetchFn });
     const res = await provider.complete(REQUEST);
     expect(res.model).toBe(FIXED_MODEL_ID);
@@ -288,10 +283,7 @@ describe("opencode provider responses", () => {
 
 describe("opencode provider retries", () => {
   test("retries 500 then succeeds within the bound", async () => {
-    const { calls, fetchFn } = captureFetch([
-      jsonResponse({ error: "busy" }, 500),
-      jsonResponse(okBody()),
-    ]);
+    const { calls, fetchFn } = captureFetch([jsonResponse({ error: "busy" }, 500), jsonResponse(okBody())]);
     const provider = new OpenCodeProvider({
       env: GATE,
       version: "0.1.0",
@@ -343,10 +335,7 @@ describe("opencode provider retries", () => {
   });
 
   test("retries 408 then succeeds within the bound", async () => {
-    const { calls, fetchFn } = captureFetch([
-      jsonResponse({ error: "timeout" }, 408),
-      jsonResponse(okBody()),
-    ]);
+    const { calls, fetchFn } = captureFetch([jsonResponse({ error: "timeout" }, 408), jsonResponse(okBody())]);
     const provider = new OpenCodeProvider({
       env: GATE,
       version: "0.1.0",
@@ -375,10 +364,7 @@ describe("opencode provider retries", () => {
     const seen: number[] = [];
     const near = new Date(Date.now() + 5000).toUTCString();
     const far = new Date(Date.now() + 3_600_000).toUTCString();
-    const first = captureFetch([
-      jsonResponse({ error: "slow" }, 429, { "Retry-After": near }),
-      jsonResponse(okBody()),
-    ]);
+    const first = captureFetch([jsonResponse({ error: "slow" }, 429, { "Retry-After": near }), jsonResponse(okBody())]);
     const provider = new OpenCodeProvider({
       env: GATE,
       version: "0.1.0",
@@ -394,10 +380,7 @@ describe("opencode provider retries", () => {
     expect(seen[0]).toBeLessThanOrEqual(5000);
 
     const clamped: number[] = [];
-    const second = captureFetch([
-      jsonResponse({ error: "slow" }, 429, { "Retry-After": far }),
-      jsonResponse(okBody()),
-    ]);
+    const second = captureFetch([jsonResponse({ error: "slow" }, 429, { "Retry-After": far }), jsonResponse(okBody())]);
     const clamping = new OpenCodeProvider({
       env: GATE,
       version: "0.1.0",
@@ -446,10 +429,7 @@ describe("opencode provider retries", () => {
 
   test("abort during backoff fires no further fetch", async () => {
     const controller = new AbortController();
-    const { calls, fetchFn } = captureFetch([
-      jsonResponse({ error: "busy" }, 500),
-      jsonResponse(okBody()),
-    ]);
+    const { calls, fetchFn } = captureFetch([jsonResponse({ error: "busy" }, 500), jsonResponse(okBody())]);
     const provider = new OpenCodeProvider({
       env: GATE,
       version: "0.1.0",
@@ -519,10 +499,7 @@ describe("opencode provider retries", () => {
   });
 
   test("real backoff cleans up its timer and listener on success", async () => {
-    const { calls, fetchFn } = captureFetch([
-      jsonResponse({ error: "busy" }, 500),
-      jsonResponse(okBody()),
-    ]);
+    const { calls, fetchFn } = captureFetch([jsonResponse({ error: "busy" }, 500), jsonResponse(okBody())]);
     const provider = new OpenCodeProvider({ env: GATE, version: "0.1.0", fetchFn });
     const controller = new AbortController();
     const addSpy = spyOn(controller.signal, "addEventListener");
@@ -583,16 +560,17 @@ describe("opencode provider retries", () => {
   });
 
   test("times out requests with a retryable error", async () => {
-    const hanging = ((_url: unknown, init?: RequestInit) => new Promise<never>((_, reject) => {
-      const signal = init?.signal;
-      if (signal?.aborted === true) {
-        reject(signal.reason ?? new Error("aborted"));
-        return;
-      }
-      signal?.addEventListener("abort", () => reject(signal.reason ?? new Error("aborted")), {
-        once: true,
-      });
-    })) as unknown as typeof fetch;
+    const hanging = ((_url: unknown, init?: RequestInit) =>
+      new Promise<never>((_, reject) => {
+        const signal = init?.signal;
+        if (signal?.aborted === true) {
+          reject(signal.reason ?? new Error("aborted"));
+          return;
+        }
+        signal?.addEventListener("abort", () => reject(signal.reason ?? new Error("aborted")), {
+          once: true,
+        });
+      })) as unknown as typeof fetch;
     const provider = new OpenCodeProvider({
       env: GATE,
       version: "0.1.0",
@@ -651,9 +629,7 @@ describe("opencode provider redaction", () => {
   });
 
   test("redacts the api key from provider error messages", async () => {
-    const { fetchFn } = captureFetch([
-      jsonResponse({ error: "bad key dummy-key rejected" }, 400),
-    ]);
+    const { fetchFn } = captureFetch([jsonResponse({ error: "bad key dummy-key rejected" }, 400)]);
     const provider = new OpenCodeProvider({ env: GATE, version: "0.1.0", fetchFn });
     const err = await codeOf(provider.complete(REQUEST));
     expect(err.message).not.toContain("dummy-key");

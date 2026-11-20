@@ -79,16 +79,8 @@ describe("modified TypeScript file", () => {
   test("maps lines, positions, commentable lines, and module symbol", async () => {
     const { dir, cleanup } = await makeRepo();
     try {
-      const base = await writeAndCommit(
-        dir,
-        { "src/app.ts": "one\ntwo\nthree\nfour\nfive\nsix\n" },
-        "base",
-      );
-      const head = await writeAndCommit(
-        dir,
-        { "src/app.ts": "one\ntwo\nTHREE\nfour\nfive\nsix\nseven\n" },
-        "head",
-      );
+      const base = await writeAndCommit(dir, { "src/app.ts": "one\ntwo\nthree\nfour\nfive\nsix\n" }, "base");
+      const head = await writeAndCommit(dir, { "src/app.ts": "one\ntwo\nTHREE\nfour\nfive\nsix\nseven\n" }, "head");
       const { result, calls } = await runEngine(dir, base, head);
       expect(result.baseSha).toBe(base.toLowerCase());
       expect(result.headSha).toBe(head.toLowerCase());
@@ -250,11 +242,7 @@ describe("renames", () => {
   test("rename with changes keeps oldPath and a new-path symbol", async () => {
     const { dir, cleanup } = await makeRepo();
     try {
-      const base = await writeAndCommit(
-        dir,
-        { "src/old.ts": "export const a = 1;\nexport const b = 2;\n" },
-        "base",
-      );
+      const base = await writeAndCommit(dir, { "src/old.ts": "export const a = 1;\nexport const b = 2;\n" }, "base");
       await git(dir, ["mv", "src/old.ts", "src/new.ts"]);
       await writeFile(join(dir, "src/new.ts"), "export const a = 1;\nexport const b = 3;\n");
       await git(dir, ["add", "-A"]);
@@ -399,11 +387,7 @@ describe("deletion-only edits", () => {
   test("file surviving at head keeps a module symbol with empty changedLines", async () => {
     const { dir, cleanup } = await makeRepo();
     try {
-      const base = await writeAndCommit(
-        dir,
-        { "src/shrink.ts": "one\ntwo\nthree\nfour\n" },
-        "base",
-      );
+      const base = await writeAndCommit(dir, { "src/shrink.ts": "one\ntwo\nthree\nfour\n" }, "base");
       const head = await writeAndCommit(dir, { "src/shrink.ts": "one\nfour\n" }, "head");
       const { result } = await runEngine(dir, base, head);
       expect(result.files[0]?.skipReason).toBeUndefined();
@@ -531,11 +515,7 @@ describe("worktree and config determinism", () => {
     const { dir, cleanup } = await makeRepo();
     try {
       const body = Array.from({ length: 12 }, (_, index) => `line${index + 1}`).join("\n");
-      const base = await writeAndCommit(
-        dir,
-        { "src/app.ts": `${body}\n`, "src/copy.ts": `${body}\n` },
-        "base",
-      );
+      const base = await writeAndCommit(dir, { "src/app.ts": `${body}\n`, "src/copy.ts": `${body}\n` }, "base");
       const changed = body.split("\n");
       changed[1] = "CHANGED";
       changed[6] = "CHANGED";

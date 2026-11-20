@@ -101,7 +101,9 @@ function hasSensitiveSegment(key: string): boolean {
   // HTTP|Auth|Token) so leading-acronym keys classify without broad DB/API rules.
   // Single-token all-caps concatenations (DBPASSWORD) have no boundary and stay
   // non-sensitive by design.
-  const segments = key.split(/[_\-.]+/).flatMap((part) => part.split(/(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/));
+  const segments = key
+    .split(/[_\-.]+/)
+    .flatMap((part) => part.split(/(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/));
   return segments.some((segment) => {
     const normalized = segment.toLowerCase();
     if (SENSITIVE_SEGMENTS.has(normalized)) return true;
@@ -244,15 +246,10 @@ export function redact(text: string, extraSecrets: string[] = []): string {
       offset: number,
       input: string,
     ) => {
-      const openValue = dqValue !== undefined ? (dqOpen as string) : sqValue !== undefined ? (sqOpen as string) : uqOpen;
-      const value =
-        dqValue !== undefined ? dqValue : sqValue !== undefined ? (sqValue as string) : uqValue;
-      const closeValue =
-        dqValue !== undefined
-          ? (dqClose as string)
-          : sqValue !== undefined
-            ? (sqClose as string)
-            : "";
+      const openValue =
+        dqValue !== undefined ? (dqOpen as string) : sqValue !== undefined ? (sqOpen as string) : uqOpen;
+      const value = dqValue !== undefined ? dqValue : sqValue !== undefined ? (sqValue as string) : uqValue;
+      const closeValue = dqValue !== undefined ? (dqClose as string) : sqValue !== undefined ? (sqClose as string) : "";
       if (value === REDACTED || !isSensitiveAssignmentKey(key)) return match;
       // Fragments are opaque to generic assignments too: skip pairs inside
       // the current URL's `#` scope. Outside any fragment this is a no-op,

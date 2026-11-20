@@ -122,10 +122,7 @@ export async function runProcess(options: RunProcessOptions): Promise<RunProcess
   try {
     // Piped stdin only for callers that supply stdinData (batch-check);
     // otherwise preserve the previous ignore behavior. No shell involved.
-    const stdinBody =
-      options.stdinData === undefined
-        ? undefined
-        : new Response(options.stdinData).body ?? undefined;
+    const stdinBody = options.stdinData === undefined ? undefined : (new Response(options.stdinData).body ?? undefined);
     proc = Bun.spawn([...argv], {
       ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
       env: childEnv(options.env),

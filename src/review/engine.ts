@@ -74,9 +74,7 @@ function skipOutcome(unit: ReviewUnit, reason: "cancelled" | "deadline"): UnitOu
 // `incomplete_details.reason`. Message text never affects classification.
 function isIncompleteCapError(error: unknown): boolean {
   return (
-    error instanceof ReviewerError &&
-    error.code === "PROVIDER_FAILED" &&
-    error.incompleteReason === "max_output_tokens"
+    error instanceof ReviewerError && error.code === "PROVIDER_FAILED" && error.incompleteReason === "max_output_tokens"
   );
 }
 
@@ -200,14 +198,7 @@ export class ReviewEngineImpl implements ReviewEngine {
             continue;
           }
           try {
-            const outcome = await this.reviewUnit(
-              unit,
-              config,
-              stage.signal,
-              stopped,
-              headSha,
-              throwIfFatal,
-            );
+            const outcome = await this.reviewUnit(unit, config, stage.signal, stopped, headSha, throwIfFatal);
             // A sibling's fatal discards even a successful late outcome.
             if (hasFatal()) return;
             out[index] = outcome;
@@ -309,8 +300,7 @@ export class ReviewEngineImpl implements ReviewEngine {
       if (!isIncompleteCapError(error)) return this.unitFailure(unit, error, usage);
       // Escalation stays inside both the output ceiling and the context
       // window (output counts against context); otherwise the unit is partial.
-      const capByContext =
-        MODEL_CONTEXT_TOKENS - built.estimatedInputTokens - CONTEXT_SAFETY_MARGIN_TOKENS;
+      const capByContext = MODEL_CONTEXT_TOKENS - built.estimatedInputTokens - CONTEXT_SAFETY_MARGIN_TOKENS;
       const escalated = Math.min(MODEL_MAX_OUTPUT_TOKENS, firstMax * 2, capByContext);
       if (escalated <= firstMax) return this.unitFailure(unit, error, usage, "REVIEW_OUTPUT_INCOMPLETE");
       usage.incompleteRetries += 1;
@@ -332,18 +322,12 @@ export class ReviewEngineImpl implements ReviewEngine {
     }
   }
 
-  private unitFailure(
-    unit: ReviewUnit,
-    error: unknown,
-    usage: ReviewUsage,
-    code?: string,
-  ): UnitOutcome {
+  private unitFailure(unit: ReviewUnit, error: unknown, usage: ReviewUsage, code?: string): UnitOutcome {
     const reviewer = error instanceof ReviewerError ? error : null;
     const failureCode = code ?? reviewer?.code ?? "INTERNAL";
     // Malformed model output is a parse-stage outcome, not a transport failure.
     const stage = reviewer === null ? "unit" : failureCode === "PROVIDER_BAD_OUTPUT" ? "parse" : "provider";
-    const rawMessage =
-      reviewer?.message ?? (error instanceof Error ? error.message : String(error));
+    const rawMessage = reviewer?.message ?? (error instanceof Error ? error.message : String(error));
     this.logger.warn("review unit failed", {
       unitId: unit.id,
       code: failureCode,

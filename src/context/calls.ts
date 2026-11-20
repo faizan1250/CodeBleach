@@ -187,10 +187,7 @@ export type MemberResolution =
   | { status: "cancelled" }
   | { status: "depth-exceeded" };
 
-function directInModule(
-  module: LoadedModule,
-  wanted: string,
-): { definition: Definition | TypeDefinition } | null {
+function directInModule(module: LoadedModule, wanted: string): { definition: Definition | TypeDefinition } | null {
   if (wanted === "default") {
     for (const definition of module.definitions) {
       if (definition.exported && definition.exportKind === "default") return { definition };
@@ -214,10 +211,7 @@ function directInModule(
   return null;
 }
 
-function aliasedInModule(
-  module: LoadedModule,
-  name: string,
-): { definition: Definition | TypeDefinition } | null {
+function aliasedInModule(module: LoadedModule, name: string): { definition: Definition | TypeDefinition } | null {
   for (const definition of module.definitions) {
     if (definition.name === name) return { definition };
   }
@@ -273,7 +267,9 @@ export async function resolveExportedMember(
     const outcome = await resolveExportedMember(next, nested, context, depth + 1, visited);
     if (outcome.status === "found") {
       const duplicate = hits.some(
-        (hit) => hit.targetPath === outcome.targetPath && targetIdentity(hit.targetPath, hit.definition) === targetIdentity(outcome.targetPath, outcome.definition),
+        (hit) =>
+          hit.targetPath === outcome.targetPath &&
+          targetIdentity(hit.targetPath, hit.definition) === targetIdentity(outcome.targetPath, outcome.definition),
       );
       if (!duplicate) hits.push({ definition: outcome.definition, targetPath: outcome.targetPath });
     } else if (outcome.status === "ambiguous") {
@@ -342,10 +338,7 @@ function toTarget(
   };
 }
 
-function findSymbolDefinition(
-  symbol: ChangedSymbol,
-  definitions: readonly Definition[],
-): Definition | null {
+function findSymbolDefinition(symbol: ChangedSymbol, definitions: readonly Definition[]): Definition | null {
   const same = definitions.filter(
     (definition) =>
       definition.name === symbol.name &&
@@ -517,8 +510,7 @@ async function resolveDeferred(calls: readonly CallReference[], context: Deferre
       context.diagnostics.push({ filePath, symbol: symbol.name, callee: call.callee, reason: "unresolved" });
       continue;
     }
-    const namespaceLike =
-      entry.kind === "namespace" || (entry.kind === "type-only" && entry.importedName === null);
+    const namespaceLike = entry.kind === "namespace" || (entry.kind === "type-only" && entry.importedName === null);
     if (namespaceLike) {
       if (call.member === null) {
         context.diagnostics.push({ filePath, symbol: symbol.name, callee: call.callee, reason: "unresolved" });
@@ -527,7 +519,14 @@ async function resolveDeferred(calls: readonly CallReference[], context: Deferre
       const outcome = await resolveExportedMember(entry.targetPath, call.member, { load, probe });
       if (outcome.status === "found") {
         context.targets.push(
-          toTarget(outcome.definition, outcome.targetPath, importReason("namespace", outcome.reexported), call, context.scope, filePath),
+          toTarget(
+            outcome.definition,
+            outcome.targetPath,
+            importReason("namespace", outcome.reexported),
+            call,
+            context.scope,
+            filePath,
+          ),
         );
       } else if (outcome.status === "ambiguous") {
         context.diagnostics.push({ filePath, symbol: symbol.name, callee: call.callee, reason: "ambiguous" });

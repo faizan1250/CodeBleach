@@ -190,11 +190,7 @@ export class ParseCache {
  * extractCalls for callees: tree-sitter child spans nest inside their parent,
  * and the caller-owned range fallback already uses this containment.
  */
-export function callsInRange(
-  calls: readonly CallReference[],
-  startIndex: number,
-  endIndex: number,
-): CallReference[] {
+export function callsInRange(calls: readonly CallReference[], startIndex: number, endIndex: number): CallReference[] {
   return calls.filter((call) => call.range.startIndex >= startIndex && call.range.endIndex <= endIndex);
 }
 

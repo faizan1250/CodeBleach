@@ -7,22 +7,13 @@ import {
   resolveExportedMember,
   sortCalleeTargets,
 } from "../../src/context/calls.ts";
-import type {
-  CalleeTarget,
-  LoadedModule,
-  MemberResolutionContext,
-} from "../../src/context/calls.ts";
+import type { CalleeTarget, LoadedModule, MemberResolutionContext } from "../../src/context/calls.ts";
 import { getAdapter } from "../../src/context/language.ts";
 import type { CallReference, Definition, ExportReference, TypeDefinition } from "../../src/context/language.ts";
 import { parseSource } from "../../src/context/parser.ts";
 import type { SupportedLanguage } from "../../src/context/runtime.ts";
 
-function def(
-  name: string,
-  kind: Definition["kind"] = "function",
-  container?: string,
-  startLine = 1,
-): Definition {
+function def(name: string, kind: Definition["kind"] = "function", container?: string, startLine = 1): Definition {
   return {
     name,
     kind,
@@ -37,11 +28,7 @@ function def(
   };
 }
 
-function callRef(
-  root: string | null,
-  member: string | null = null,
-  extra: Partial<CallReference> = {},
-): CallReference {
+function callRef(root: string | null, member: string | null = null, extra: Partial<CallReference> = {}): CallReference {
   return {
     callee: `${root ?? "expr"}()`,
     root,
@@ -53,12 +40,7 @@ function callRef(
   };
 }
 
-function target(
-  name: string,
-  path: string,
-  startLine = 1,
-  extra: Partial<CalleeTarget> = {},
-): CalleeTarget {
+function target(name: string, path: string, startLine = 1, extra: Partial<CalleeTarget> = {}): CalleeTarget {
   return {
     name,
     kind: "function",
@@ -335,10 +317,12 @@ describe("resolveExportedMember", () => {
   test("reports ambiguous star re-exports without guessing", async () => {
     const context = stubContext(
       {
-        "src/barrel.ts": moduleOf("src/barrel.ts", [], [], [
-          exportRef(null, null, "./left", "star"),
-          exportRef(null, null, "./right", "star"),
-        ]),
+        "src/barrel.ts": moduleOf(
+          "src/barrel.ts",
+          [],
+          [],
+          [exportRef(null, null, "./left", "star"), exportRef(null, null, "./right", "star")],
+        ),
         "src/left.ts": moduleOf("src/left.ts", [def("clash")]),
         "src/right.ts": moduleOf("src/right.ts", [def("clash")]),
       },
@@ -369,9 +353,12 @@ describe("resolveExportedMember", () => {
       probes[`src/l${index}`] = path;
     }
     for (let index = 0; index < links; index += 1) {
-      modules[`src/l${index}.ts`] = moduleOf(`src/l${index}.ts`, [], [], [
-        exportRef("x", "x", `./l${index + 1}`, "named"),
-      ]);
+      modules[`src/l${index}.ts`] = moduleOf(
+        `src/l${index}.ts`,
+        [],
+        [],
+        [exportRef("x", "x", `./l${index + 1}`, "named")],
+      );
     }
     modules[`src/l${links}.ts`] = moduleOf(`src/l${links}.ts`, [def("x")]);
     const context = stubContext(modules, probes);

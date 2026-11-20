@@ -5,11 +5,7 @@ import {
   MAX_LLM_MAX_RETRIES,
 } from "../config/defaults.ts";
 import { ReviewerError, type IncompleteReason } from "../core/errors.ts";
-import {
-  API_KEY_ENV,
-  OPENCODE_RESPONSES_ENDPOINT,
-  resolveModelId,
-} from "../llm/constants.ts";
+import { API_KEY_ENV, OPENCODE_RESPONSES_ENDPOINT, resolveModelId } from "../llm/constants.ts";
 import {
   CONTEXT_SAFETY_MARGIN_TOKENS,
   MODEL_CONTEXT_TOKENS,
@@ -106,9 +102,7 @@ function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-type AttemptOutcome =
-  | { kind: "ok"; response: LlmResponse }
-  | { kind: "error"; error: ReviewerError; waitMs: number };
+type AttemptOutcome = { kind: "ok"; response: LlmResponse } | { kind: "error"; error: ReviewerError; waitMs: number };
 
 /** Fixed-model Responses adapter; transport only, no prompt or review logic. */
 export class OpenCodeProvider implements LlmProvider {
@@ -300,12 +294,7 @@ export class OpenCodeProvider implements LlmProvider {
     }
   }
 
-  private async readResponse(
-    res: Response,
-    attempt: number,
-    modelId: string,
-    key: string,
-  ): Promise<AttemptOutcome> {
+  private async readResponse(res: Response, attempt: number, modelId: string, key: string): Promise<AttemptOutcome> {
     const fail = (
       message: string,
       retryable: boolean,
@@ -324,9 +313,10 @@ export class OpenCodeProvider implements LlmProvider {
     });
     if (!res.ok) {
       // Best-effort detail: an unreadable body still yields a classified HTTP error.
-      const snippet = await res
-        .text()
-        .then((bodyText) => redact(bodyText, [key]).slice(0, ERROR_SNIPPET_CHARS), () => "");
+      const snippet = await res.text().then(
+        (bodyText) => redact(bodyText, [key]).slice(0, ERROR_SNIPPET_CHARS),
+        () => "",
+      );
       const suffix = snippet.length > 0 ? `: ${snippet}` : "";
       switch (res.status) {
         case 408:
@@ -395,9 +385,7 @@ export class OpenCodeProvider implements LlmProvider {
       );
     }
     if (status === "failed") {
-      const detail = isRecord(envelope["error"])
-        ? asNonEmptyString(envelope["error"]["message"])
-        : undefined;
+      const detail = isRecord(envelope["error"]) ? asNonEmptyString(envelope["error"]["message"]) : undefined;
       return fail(
         `provider reported failure${detail !== undefined ? `: ${redact(detail, [key]).slice(0, ERROR_SNIPPET_CHARS)}` : ""}`,
         false,
@@ -470,9 +458,9 @@ function extractText(envelope: Record<string, unknown>): string | undefined {
 
 // Unknown when absent; never zero-filled. Reasoning stays separate from the
 // output total (it is already included in output_tokens by the API).
-function extractUsage(usage: unknown):
-  | { inputTokens: number; outputTokens: number; reasoningTokens?: number | undefined }
-  | undefined {
+function extractUsage(
+  usage: unknown,
+): { inputTokens: number; outputTokens: number; reasoningTokens?: number | undefined } | undefined {
   if (!isRecord(usage)) return undefined;
   const inputTokens = asFiniteNumber(usage["input_tokens"]);
   const outputTokens = asFiniteNumber(usage["output_tokens"]);

@@ -10,7 +10,7 @@ describe("types barrel isolation", () => {
       const text = await Bun.file(file).text();
       expect(text).not.toContain("../");
       expect(text).not.toContain("@/");
-      expect(text).not.toContain("from \"src/");
+      expect(text).not.toContain('from "src/');
     }
   });
 

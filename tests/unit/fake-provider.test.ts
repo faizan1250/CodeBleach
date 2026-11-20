@@ -36,8 +36,6 @@ describe("FakeProvider", () => {
 
   test("unmatched scripts fail loudly", async () => {
     const provider = new FakeProvider([{ match: () => false, respond: "never" }]);
-    await expect(provider.complete({ system: "s", user: "u" })).rejects.toThrow(
-      "no scripted step matched",
-    );
+    await expect(provider.complete({ system: "s", user: "u" })).rejects.toThrow("no scripted step matched");
   });
 });

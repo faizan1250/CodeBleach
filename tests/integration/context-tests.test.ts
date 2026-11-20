@@ -44,7 +44,7 @@ function symbolFor(name: string, kind: SymbolKind, startLine: number, endLine: n
   return { name, kind, startLine, endLine, changedLines: [startLine] };
 }
 
-const GREET = "export function greet(): string {\n  return \"hi\";\n}\n";
+const GREET = 'export function greet(): string {\n  return "hi";\n}\n';
 
 describe("context test discovery from commit snapshots", () => {
   test("test importing the changed module ranks first", async () => {
@@ -85,8 +85,7 @@ describe("context test discovery from commit snapshots", () => {
     const { dir, cleanup, commit } = await setupRepo({
       "src/real.ts": GREET,
       "src/barrel.ts": 'export { greet } from "./real";\n',
-      "src/app.test.ts":
-        'import { greet } from "./barrel";\nexport function run(): string {\n  return greet();\n}\n',
+      "src/app.test.ts": 'import { greet } from "./barrel";\nexport function run(): string {\n  return greet();\n}\n',
     });
     try {
       const { tests } = await resolveTestsForSymbol({
@@ -191,8 +190,7 @@ describe("context test discovery from commit snapshots", () => {
       "src/util.ts": GREET,
       "src/a.test.ts":
         'import { greet } from "./util";\nexport function check(): boolean {\n  return greet() === "hi";\n}\n',
-      "src/z.test.ts":
-        "// greet is covered elsewhere\nexport function notes(): string {\n  return \"greet\";\n}\n",
+      "src/z.test.ts": '// greet is covered elsewhere\nexport function notes(): string {\n  return "greet";\n}\n',
     });
     try {
       const { tests } = await resolveTestsForSymbol({
@@ -216,8 +214,7 @@ describe("context test discovery from commit snapshots", () => {
       "src/util.ts": GREET,
       "src/a.test.ts":
         'import { greet } from "./util";\nexport function check(): boolean {\n  return greet() === "hi";\n}\n',
-      "src/z.test.ts":
-        "// greet is covered elsewhere\nexport function notes(): string {\n  return \"greet\";\n}\n",
+      "src/z.test.ts": '// greet is covered elsewhere\nexport function notes(): string {\n  return "greet";\n}\n',
     });
     try {
       const { tests, diagnostics } = await resolveTestsForSymbol({
@@ -243,8 +240,7 @@ describe("context test discovery from commit snapshots", () => {
       "src/util.ts": GREET,
       "src/a.test.ts":
         'import { greet } from "./util";\nexport function check(): boolean {\n  return greet() === "hi";\n}\n',
-      "src/z.test.ts":
-        "// greet is covered elsewhere\nexport function notes(): string {\n  return \"greet\";\n}\n",
+      "src/z.test.ts": '// greet is covered elsewhere\nexport function notes(): string {\n  return "greet";\n}\n',
     });
     try {
       const options = {
@@ -334,7 +330,7 @@ describe("context test discovery from commit snapshots", () => {
       const headSha = await writeAndCommit(
         dir,
         {
-          "src/util.ts": "export function greet(): string {\n  return \"hello\";\n}\n",
+          "src/util.ts": 'export function greet(): string {\n  return "hello";\n}\n',
           "src/app.test.ts":
             'import { greet } from "./util";\nexport function check(): boolean {\n  return greet() === "hi";\n}\n',
         },
@@ -349,7 +345,10 @@ describe("context test discovery from commit snapshots", () => {
       expect(kinds).toContain("definition");
       expect(kinds).toContain("test");
       const testItem = result.units[0]?.context.find((item) => item.kind === "test");
-      expect(testItem).toMatchObject({ file: "src/app.test.ts", reason: "test imports changed module (relative import)" });
+      expect(testItem).toMatchObject({
+        file: "src/app.test.ts",
+        reason: "test imports changed module (relative import)",
+      });
       expect(testItem?.score).toBeGreaterThan(0);
     } finally {
       await cleanup();

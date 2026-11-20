@@ -23,9 +23,7 @@ function formatIssues(
   path: string,
   issues: Array<{ path: ReadonlyArray<PropertyKey>; message: string }>,
 ): ReviewerError {
-  const details = issues
-    .map((issue) => `${issue.path.map(String).join(".") || "(root)"}: ${issue.message}`)
-    .join("; ");
+  const details = issues.map((issue) => `${issue.path.map(String).join(".") || "(root)"}: ${issue.message}`).join("; ");
   return invalid(path, details);
 }
 

@@ -162,7 +162,15 @@ describe("p4-09 review wiring", () => {
           },
           logger: nullLogger(),
         },
-        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: false, outDir: base, runId: "wiring-real", env: { CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING: "true", OPENCODE_API_KEY: "dummy-key" } },
+        {
+          repoDir: ".",
+          baseSha: "base",
+          headSha: "head",
+          dryRun: false,
+          outDir: base,
+          runId: "wiring-real",
+          env: { CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING: "true", OPENCODE_API_KEY: "dummy-key" },
+        },
       );
       const error = await promise.then(
         () => null,
@@ -207,7 +215,15 @@ describe("p4-09 review wiring", () => {
           },
           logger: nullLogger(),
         },
-        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: base, runId: "wiring-dryrun", env: { CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING: "true", OPENCODE_API_KEY: "dummy-key" } },
+        {
+          repoDir: ".",
+          baseSha: "base",
+          headSha: "head",
+          dryRun: true,
+          outDir: base,
+          runId: "wiring-dryrun",
+          env: { CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING: "true", OPENCODE_API_KEY: "dummy-key" },
+        },
       );
       expect(summary.status).toBe("completed");
       expect(summary.stages.map((stage) => [stage.name, stage.status, stage.reason])).toEqual([
@@ -308,7 +324,13 @@ describe("p4-09 review wiring", () => {
       const artifact = JSON.parse(await readFile(join(base, "run.json"), "utf8"));
       expect(artifact.reviewStatus).toBe("skipped");
       expect(artifact.reviewUsage.requests).toBe(0);
-      expect(artifact.stages.map((stage: { name: string; status: string; reason?: string }) => [stage.name, stage.status, stage.reason])).toEqual([
+      expect(
+        artifact.stages.map((stage: { name: string; status: string; reason?: string }) => [
+          stage.name,
+          stage.status,
+          stage.reason,
+        ]),
+      ).toEqual([
         ["config", "completed", undefined],
         ["diff", "completed", undefined],
         ["context", "completed", undefined],

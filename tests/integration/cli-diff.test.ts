@@ -47,11 +47,7 @@ async function makeRepo(): Promise<{ dir: string; cleanup: () => Promise<void> }
   }
 }
 
-async function writeAndCommit(
-  dir: string,
-  files: Record<string, string>,
-  message: string,
-): Promise<string> {
+async function writeAndCommit(dir: string, files: Record<string, string>, message: string): Promise<string> {
   for (const [name, content] of Object.entries(files)) {
     const full = join(dir, name);
     await mkdir(dirname(full), { recursive: true });
@@ -127,11 +123,10 @@ describe("cli diff", () => {
       const head = await writeAndCommit(dir, { "src/a.ts": "const a = 2;\n" }, "head");
       const out = join(dir, "out");
       // Scrub ambient live credentials: normal tests never touch the network.
-      const result = await runCli(
-        ["review", "--base", base, "--head", head, "--repo", dir, "--out", out],
-        dir,
-        { OPENCODE_API_KEY: "", CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING: "" },
-      );
+      const result = await runCli(["review", "--base", base, "--head", head, "--repo", dir, "--out", out], dir, {
+        OPENCODE_API_KEY: "",
+        CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING: "",
+      });
       expect(result.code).toBe(2);
       expect(result.stderr).toContain("CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING");
       const artifact = JSON.parse(await readFile(join(out, "run.json"), "utf8")) as {

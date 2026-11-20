@@ -24,9 +24,7 @@ const FIXED_ENV: Record<string, string> = {
 
 async function git(dir: string, args: string[], env?: Record<string, string>): Promise<string> {
   const result = await runProcess(
-    env === undefined
-      ? { cmd: ["git", ...args], cwd: dir }
-      : { cmd: ["git", ...args], cwd: dir, env },
+    env === undefined ? { cmd: ["git", ...args], cwd: dir } : { cmd: ["git", ...args], cwd: dir, env },
   );
   return decode(result.stdout).trim();
 }

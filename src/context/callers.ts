@@ -114,9 +114,7 @@ export function findTargetDeclaration(
       if (sameTypes.length === 1) return sameTypes[0] ?? null;
       return sameTypes.find((type) => type.range.startLine === symbol.startLine) ?? sameTypes[0] ?? null;
     }
-    const sameDefs = definitions.filter(
-      (definition) => definition.kind === "type" && definition.name === symbol.name,
-    );
+    const sameDefs = definitions.filter((definition) => definition.kind === "type" && definition.name === symbol.name);
     if (sameDefs.length === 0) return null;
     if (sameDefs.length === 1) return sameDefs[0] ?? null;
     return sameDefs.find((definition) => definition.fullRange.startLine === symbol.startLine) ?? sameDefs[0] ?? null;
@@ -156,16 +154,20 @@ export function callerReason(binding: CallerBinding | null): string {
 }
 
 /** Smallest definition containing the call range; null at module scope. */
-export function enclosingCaller(
-  definitions: readonly Definition[],
-  call: CallReference,
-): Definition | null {
+export function enclosingCaller(definitions: readonly Definition[], call: CallReference): Definition | null {
   let best: Definition | null = null;
   for (const definition of definitions) {
-    if (call.range.startIndex < definition.fullRange.startIndex || call.range.endIndex > definition.fullRange.endIndex) {
+    if (
+      call.range.startIndex < definition.fullRange.startIndex ||
+      call.range.endIndex > definition.fullRange.endIndex
+    ) {
       continue;
     }
-    if (best === null || definition.fullRange.endIndex - definition.fullRange.startIndex < best.fullRange.endIndex - best.fullRange.startIndex) {
+    if (
+      best === null ||
+      definition.fullRange.endIndex - definition.fullRange.startIndex <
+        best.fullRange.endIndex - best.fullRange.startIndex
+    ) {
       best = definition;
     }
   }
@@ -365,11 +367,26 @@ async function discoverBarrelBindings(
           bindings.push({ barrelPath, publicName: name });
         }
       } else if (outcome.status === "ambiguous") {
-        diagnostics.push({ filePath: targetPath, symbol: symbolName, candidate: `${barrelPath}:${name}`, reason: "ambiguous" });
+        diagnostics.push({
+          filePath: targetPath,
+          symbol: symbolName,
+          candidate: `${barrelPath}:${name}`,
+          reason: "ambiguous",
+        });
       } else if (outcome.status === "depth-exceeded") {
-        diagnostics.push({ filePath: targetPath, symbol: symbolName, candidate: `${barrelPath}:${name}`, reason: "depth-exceeded" });
+        diagnostics.push({
+          filePath: targetPath,
+          symbol: symbolName,
+          candidate: `${barrelPath}:${name}`,
+          reason: "depth-exceeded",
+        });
       } else if (outcome.status === "cancelled") {
-        diagnostics.push({ filePath: targetPath, symbol: symbolName, candidate: `${barrelPath}:${name}`, reason: "parse-cancelled" });
+        diagnostics.push({
+          filePath: targetPath,
+          symbol: symbolName,
+          candidate: `${barrelPath}:${name}`,
+          reason: "parse-cancelled",
+        });
       }
     }
   }
@@ -380,7 +397,12 @@ async function discoverBarrelBindings(
   });
   const kept = bindings.slice(0, Math.max(0, MAX_CALLER_ALIASES));
   for (const dropped of bindings.slice(Math.max(0, MAX_CALLER_ALIASES))) {
-    diagnostics.push({ filePath: targetPath, symbol: symbolName, candidate: `${dropped.barrelPath}:${dropped.publicName}`, reason: "cap-reached" });
+    diagnostics.push({
+      filePath: targetPath,
+      symbol: symbolName,
+      candidate: `${dropped.barrelPath}:${dropped.publicName}`,
+      reason: "cap-reached",
+    });
   }
   return { bindings: kept, diagnostics };
 }
@@ -413,14 +435,22 @@ async function buildBindings(
     if (pick.path !== target.filePath && !target.barrelPaths.has(pick.path)) continue;
     if (ref.kind === "namespace") {
       if (!bindings.has(ref.localName)) {
-        bindings.set(ref.localName, { kind: "namespace", modulePath: pick.path, viaBarrel: pick.path !== target.filePath, alias: false });
+        bindings.set(ref.localName, {
+          kind: "namespace",
+          modulePath: pick.path,
+          viaBarrel: pick.path !== target.filePath,
+          alias: false,
+        });
       }
       continue;
     }
     const wanted = ref.kind === "default" ? "default" : (ref.importedName ?? ref.localName);
     const outcome = await resolveExportedMember(pick.path, wanted, memberContext);
     if (outcome.status === "found") {
-      if (outcome.targetPath === target.filePath && targetIdentity(outcome.targetPath, outcome.definition) === target.targetId) {
+      if (
+        outcome.targetPath === target.filePath &&
+        targetIdentity(outcome.targetPath, outcome.definition) === target.targetId
+      ) {
         if (!bindings.has(ref.localName)) {
           bindings.set(ref.localName, {
             kind: ref.kind,
@@ -431,11 +461,26 @@ async function buildBindings(
         }
       }
     } else if (outcome.status === "ambiguous") {
-      diagnostics.push({ filePath: target.filePath, symbol: target.symbolName, candidate: `${candidate}:${ref.localName}`, reason: "ambiguous" });
+      diagnostics.push({
+        filePath: target.filePath,
+        symbol: target.symbolName,
+        candidate: `${candidate}:${ref.localName}`,
+        reason: "ambiguous",
+      });
     } else if (outcome.status === "depth-exceeded") {
-      diagnostics.push({ filePath: target.filePath, symbol: target.symbolName, candidate: `${candidate}:${ref.localName}`, reason: "depth-exceeded" });
+      diagnostics.push({
+        filePath: target.filePath,
+        symbol: target.symbolName,
+        candidate: `${candidate}:${ref.localName}`,
+        reason: "depth-exceeded",
+      });
     } else if (outcome.status === "cancelled") {
-      diagnostics.push({ filePath: target.filePath, symbol: target.symbolName, candidate: `${candidate}:${ref.localName}`, reason: "parse-cancelled" });
+      diagnostics.push({
+        filePath: target.filePath,
+        symbol: target.symbolName,
+        candidate: `${candidate}:${ref.localName}`,
+        reason: "parse-cancelled",
+      });
     }
   }
   return { bindings, diagnostics };
@@ -471,12 +516,7 @@ async function verifyCandidate(
   }
   {
     const snapshot = cached.snapshot;
-    const { bindings, diagnostics } = await buildBindings(
-      snapshot.imports,
-      candidate,
-      target,
-      context,
-    );
+    const { bindings, diagnostics } = await buildBindings(snapshot.imports, candidate, target, context);
     if (bindings.size === 0) return { sites: [], diagnostics };
     const definitions = snapshot.definitions;
     const memberContext = toMemberContext(context);
@@ -497,15 +537,35 @@ async function verifyCandidate(
       if (binding.kind !== "namespace") continue;
       const outcome = await resolveExportedMember(binding.modulePath, call.member, memberContext);
       if (outcome.status === "found") {
-        if (outcome.targetPath === target.filePath && targetIdentity(outcome.targetPath, outcome.definition) === target.targetId) {
-          sites.push(toSite(candidate, enclosingCaller(definitions, call), snapshot.source, call, callerReason(binding)));
+        if (
+          outcome.targetPath === target.filePath &&
+          targetIdentity(outcome.targetPath, outcome.definition) === target.targetId
+        ) {
+          sites.push(
+            toSite(candidate, enclosingCaller(definitions, call), snapshot.source, call, callerReason(binding)),
+          );
         }
       } else if (outcome.status === "ambiguous") {
-        callDiagnostics.push({ filePath: target.filePath, symbol: target.symbolName, candidate: `${candidate}:${call.root}.${call.member}`, reason: "ambiguous" });
+        callDiagnostics.push({
+          filePath: target.filePath,
+          symbol: target.symbolName,
+          candidate: `${candidate}:${call.root}.${call.member}`,
+          reason: "ambiguous",
+        });
       } else if (outcome.status === "depth-exceeded") {
-        callDiagnostics.push({ filePath: target.filePath, symbol: target.symbolName, candidate: `${candidate}:${call.root}.${call.member}`, reason: "depth-exceeded" });
+        callDiagnostics.push({
+          filePath: target.filePath,
+          symbol: target.symbolName,
+          candidate: `${candidate}:${call.root}.${call.member}`,
+          reason: "depth-exceeded",
+        });
       } else if (outcome.status === "cancelled") {
-        callDiagnostics.push({ filePath: target.filePath, symbol: target.symbolName, candidate: `${candidate}:${call.root}.${call.member}`, reason: "parse-cancelled" });
+        callDiagnostics.push({
+          filePath: target.filePath,
+          symbol: target.symbolName,
+          candidate: `${candidate}:${call.root}.${call.member}`,
+          reason: "parse-cancelled",
+        });
       }
     }
     return { sites, diagnostics: callDiagnostics };
@@ -540,7 +600,12 @@ export async function resolveCallersForSymbol(options: ResolveCallersOptions): P
     const sourceText = cached.snapshot.source;
     const rootCalls = cached.snapshot.calls;
     const declaration = findTargetDeclaration(targetModule.definitions, targetModule.types, symbol);
-    if (declaration === null || !("identityKey" in declaration) || declaration.kind === "type" || symbol.kind === "module") {
+    if (
+      declaration === null ||
+      !("identityKey" in declaration) ||
+      declaration.kind === "type" ||
+      symbol.kind === "module"
+    ) {
       return { callers: [], diagnostics: [] };
     }
     const context: CallerContext = {
@@ -562,17 +627,21 @@ export async function resolveCallersForSymbol(options: ResolveCallersOptions): P
     const sites: CallerSite[] = [];
     const diagnostics: CallerDiagnostic[] = [];
     for (const call of rootCalls) {
-      if (call.range.startIndex >= declaration.fullRange.startIndex && call.range.endIndex <= declaration.fullRange.endIndex) {
+      if (
+        call.range.startIndex >= declaration.fullRange.startIndex &&
+        call.range.endIndex <= declaration.fullRange.endIndex
+      ) {
         continue;
       }
       const scopeDef = enclosingCaller(targetModule.definitions, call);
-      const scope: LocalScope = scopeDef === null
-        ? { name: "<module>", kind: "module" }
-        : {
-          name: scopeDef.name,
-          kind: scopeDef.kind,
-          ...(scopeDef.container === undefined ? {} : { container: scopeDef.container }),
-        };
+      const scope: LocalScope =
+        scopeDef === null
+          ? { name: "<module>", kind: "module" }
+          : {
+              name: scopeDef.name,
+              kind: scopeDef.kind,
+              ...(scopeDef.container === undefined ? {} : { container: scopeDef.container }),
+            };
       if (matchLocalCall(call, [declaration], scope).status !== "found") continue;
       sites.push(toSite(filePath, scopeDef, sourceText, call, callerReason(null)));
     }
@@ -632,7 +701,12 @@ export async function resolveCallersForSymbol(options: ResolveCallersOptions): P
     const ranked = sortCallerSites(dedupeCallerSites(sites));
     const kept = ranked.slice(0, Math.max(0, maxCallers));
     for (const dropped of ranked.slice(Math.max(0, maxCallers))) {
-      diagnostics.push({ filePath, symbol: symbol.name, candidate: `${dropped.path}:${dropped.caller ?? "<module>"}`, reason: "cap-reached" });
+      diagnostics.push({
+        filePath,
+        symbol: symbol.name,
+        candidate: `${dropped.path}:${dropped.caller ?? "<module>"}`,
+        reason: "cap-reached",
+      });
     }
     return { callers: kept, diagnostics: dedupeDiagnostics(diagnostics) };
   }

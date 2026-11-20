@@ -3,12 +3,7 @@ import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ReviewerError } from "../../src/core/errors.ts";
-import {
-  resolveCommitSha,
-  resolveMergeBase,
-  resolveRepoAndCommits,
-  resolveRepoRoot,
-} from "../../src/diff/git.ts";
+import { resolveCommitSha, resolveMergeBase, resolveRepoAndCommits, resolveRepoRoot } from "../../src/diff/git.ts";
 import { runProcess } from "../../src/utils/spawn.ts";
 
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);

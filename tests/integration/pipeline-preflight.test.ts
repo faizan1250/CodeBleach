@@ -153,7 +153,8 @@ describe("pipeline llm preflight", () => {
           ...fixture,
           review: llmReview(fixture),
           logger: testLogger(),
-          loadConfig: ((_repoDir: string) => Promise.resolve(ok({ config, source: "defaults" as const }))) as typeof fixture.loadConfig,
+          loadConfig: ((_repoDir: string) =>
+            Promise.resolve(ok({ config, source: "defaults" as const }))) as typeof fixture.loadConfig,
         },
         {
           repoDir: ".",

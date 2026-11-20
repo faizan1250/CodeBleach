@@ -39,10 +39,7 @@ describe("completeJson", () => {
   });
 
   test("schema-invalid json triggers repair with validation error", async () => {
-    const provider = new FakeProvider([
-      { respond: '{"findings":"oops"}' },
-      { respond: '{"findings":[]}' },
-    ]);
+    const provider = new FakeProvider([{ respond: '{"findings":"oops"}' }, { respond: '{"findings":[]}' }]);
     await expect(completeJson(provider, request, Schema)).resolves.toEqual({ findings: [] });
     const repairCall = provider.calls[1];
     expect(repairCall?.user).toContain('{"findings":"oops"}');
@@ -51,9 +48,7 @@ describe("completeJson", () => {
 
   test("second failure yields PROVIDER_BAD_OUTPUT", async () => {
     const provider = new FakeProvider([{ respond: "garbage" }, { respond: "still garbage" }]);
-    await expect(codeOf(completeJson(provider, request, Schema))).resolves.toBe(
-      "PROVIDER_BAD_OUTPUT",
-    );
+    await expect(codeOf(completeJson(provider, request, Schema))).resolves.toBe("PROVIDER_BAD_OUTPUT");
     expect(provider.calls).toHaveLength(2);
   });
 
@@ -66,10 +61,7 @@ describe("completeJson", () => {
 
   test("truncates an oversized invalid response in the repair request", async () => {
     const tail = "TAIL-MARKER-9f3c";
-    const provider = new FakeProvider([
-      { respond: `${"x".repeat(20000)}${tail}` },
-      { respond: '{"findings":[]}' },
-    ]);
+    const provider = new FakeProvider([{ respond: `${"x".repeat(20000)}${tail}` }, { respond: '{"findings":[]}' }]);
     await expect(completeJson(provider, request, Schema)).resolves.toEqual({ findings: [] });
     expect(provider.calls).toHaveLength(2);
     const repairUser = provider.calls[1]?.user ?? "";

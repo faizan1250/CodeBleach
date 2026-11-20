@@ -8,11 +8,7 @@ import {
   TRAINING_OPT_IN_ENV,
   resolveModelId,
 } from "../../src/llm/constants.ts";
-import {
-  collectLlmSecrets,
-  isTrainingOptIn,
-  requireTrainingOptIn,
-} from "../../src/llm/training-gate.ts";
+import { collectLlmSecrets, isTrainingOptIn, requireTrainingOptIn } from "../../src/llm/training-gate.ts";
 import { ReviewerError } from "../../src/core/errors.ts";
 
 describe("fixed model contract", () => {
@@ -24,9 +20,7 @@ describe("fixed model contract", () => {
 
   test("pins endpoint derived from the authenticated catalog base url", () => {
     expect(OPENCODE_CATALOG_BASE_URL).toBe("https://opencode.ai/inference/go/openai/v1");
-    expect(OPENCODE_RESPONSES_ENDPOINT).toBe(
-      "https://opencode.ai/inference/go/openai/v1/responses",
-    );
+    expect(OPENCODE_RESPONSES_ENDPOINT).toBe("https://opencode.ai/inference/go/openai/v1/responses");
   });
 
   test("uses fixed env names only", () => {

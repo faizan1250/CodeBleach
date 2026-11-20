@@ -27,10 +27,7 @@ describe("runDiff usage", () => {
     const dir = await mkdtemp(join(tmpdir(), "codebleach-diff-unit-"));
     try {
       const full = "0123456789abcdef0123456789abcdef01234567";
-      const error = await runDiff(
-        { base: full, head: full, repo: dir, logLevel: "nope", runId: "r1" },
-        logger(),
-      ).then(
+      const error = await runDiff({ base: full, head: full, repo: dir, logLevel: "nope", runId: "r1" }, logger()).then(
         () => null,
         (caught: unknown) => caught,
       );

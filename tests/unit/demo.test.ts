@@ -38,11 +38,13 @@ describe("demo engines", () => {
     expect(validated.filter((v) => v.status === "accepted")).toHaveLength(1);
     expect(validated[0]?.finding).toBe(findings[0]);
 
-    const result = await demoPublisher.publish(
-      validated,
-      diff,
-      { owner: "o", repo: "r", number: 1, baseSha: DEMO_BASE_SHA, headSha: DEMO_HEAD_SHA },
-    );
+    const result = await demoPublisher.publish(validated, diff, {
+      owner: "o",
+      repo: "r",
+      number: 1,
+      baseSha: DEMO_BASE_SHA,
+      headSha: DEMO_HEAD_SHA,
+    });
     expect(result.published).toBe(1);
     expect(result.failures).toEqual([]);
   });
@@ -106,17 +108,11 @@ describe("demo engines", () => {
     const addedByFile = new Map(
       diff.files.map((file) => [
         file.path,
-        new Set(
-          file.hunks.flatMap((hunk) =>
-            hunk.lines.filter((l) => l.kind === "add").map((l) => l.newLine)
-          ),
-        ),
+        new Set(file.hunks.flatMap((hunk) => hunk.lines.filter((l) => l.kind === "add").map((l) => l.newLine))),
       ]),
     );
     const addTexts = diff.files.flatMap((file) =>
-      file.hunks.flatMap((hunk) =>
-        hunk.lines.filter((l) => l.kind === "add").map((l) => l.text)
-      )
+      file.hunks.flatMap((hunk) => hunk.lines.filter((l) => l.kind === "add").map((l) => l.text)),
     );
     for (const v of validated.filter((item) => item.status === "accepted")) {
       expect(v.finding.introducedByPr).toBe(true);

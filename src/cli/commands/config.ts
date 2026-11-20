@@ -10,9 +10,7 @@ export async function runConfigValidate(repoDir: string, logger: Logger): Promis
     return exitCodeForError(result.error);
   }
   console.log(
-    result.value.source === "file"
-      ? `config valid: ${result.value.path}`
-      : "no config file found; using defaults",
+    result.value.source === "file" ? `config valid: ${result.value.path}` : "no config file found; using defaults",
   );
   return 0;
 }

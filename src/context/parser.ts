@@ -126,8 +126,7 @@ export async function parseSource(input: ParseInput): Promise<ParseResult> {
   const runBudget = input.runBudget;
   const allowance = runBudget?.effectiveParseMs(input.perFileMs) ?? input.perFileMs;
   if (allowance <= 0) {
-    const reason: ParseSkipReason =
-      (runBudget?.remainingRunMs() ?? 1) <= 0 ? "run-deadline" : "cumulative-budget";
+    const reason: ParseSkipReason = (runBudget?.remainingRunMs() ?? 1) <= 0 ? "run-deadline" : "cumulative-budget";
     return skipped(input, source, reason);
   }
 

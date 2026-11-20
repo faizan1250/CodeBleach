@@ -145,7 +145,12 @@ describe("p3-f04 parsed snapshot cache", () => {
     const result = await cache.getOrParse(input(COMMIT_A, "src/a.ts", SOURCE_A));
     expect(result.status).toBe("parsed");
     if (result.status !== "parsed") return;
-    const parsed = await parseSource({ source: SOURCE_A, language: "typescript", filePath: "src/a.ts", perFileMs: 2000 });
+    const parsed = await parseSource({
+      source: SOURCE_A,
+      language: "typescript",
+      filePath: "src/a.ts",
+      perFileMs: 2000,
+    });
     expect(parsed.tree).not.toBeNull();
     try {
       if (parsed.tree === null) return;
@@ -167,7 +172,12 @@ describe("p3-f04 parsed snapshot cache", () => {
     const result = await cache.getOrParse(input(COMMIT_A, "src/a.ts", SOURCE_A));
     expect(result.status).toBe("parsed");
     if (result.status !== "parsed") return;
-    const parsed = await parseSource({ source: SOURCE_A, language: "typescript", filePath: "src/a.ts", perFileMs: 2000 });
+    const parsed = await parseSource({
+      source: SOURCE_A,
+      language: "typescript",
+      filePath: "src/a.ts",
+      perFileMs: 2000,
+    });
     expect(parsed.tree).not.toBeNull();
     try {
       if (parsed.tree === null) return;
@@ -183,7 +193,12 @@ describe("p3-f04 parsed snapshot cache", () => {
     const result = await cache.getOrParse(input(COMMIT_A, "src/a.ts", SOURCE_A));
     expect(result.status).toBe("parsed");
     if (result.status !== "parsed") return;
-    const parsed = await parseSource({ source: SOURCE_A, language: "typescript", filePath: "src/a.ts", perFileMs: 2000 });
+    const parsed = await parseSource({
+      source: SOURCE_A,
+      language: "typescript",
+      filePath: "src/a.ts",
+      perFileMs: 2000,
+    });
     expect(parsed.tree).not.toBeNull();
     try {
       if (parsed.tree === null) return;
@@ -191,14 +206,16 @@ describe("p3-f04 parsed snapshot cache", () => {
       const definition = result.snapshot.definitions.find((d) => d.name === "f");
       expect(definition).toBeDefined();
       if (definition === undefined) return;
-      const scoped = adapter.extractCalls(parsed.tree.rootNode, parsed.source).filter(
-        (call) =>
-          call.range.startIndex >= definition.fullRange.startIndex &&
-          call.range.endIndex <= definition.fullRange.endIndex,
-      );
-      expect(callsInRange(result.snapshot.calls, definition.fullRange.startIndex, definition.fullRange.endIndex)).toEqual(
-        scoped,
-      );
+      const scoped = adapter
+        .extractCalls(parsed.tree.rootNode, parsed.source)
+        .filter(
+          (call) =>
+            call.range.startIndex >= definition.fullRange.startIndex &&
+            call.range.endIndex <= definition.fullRange.endIndex,
+        );
+      expect(
+        callsInRange(result.snapshot.calls, definition.fullRange.startIndex, definition.fullRange.endIndex),
+      ).toEqual(scoped);
     } finally {
       parsed.tree?.delete();
     }

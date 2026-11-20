@@ -339,7 +339,6 @@ function parseFileSection(section: readonly string[], meta: FileChangeMetadata, 
       // Binary payloads are opaque; never interpret them as text hunks.
       binary = true;
     } else if (isFileHeaderLine(line)) {
-      continue;
     } else {
       throw parseFailed(`${where}: unexpected line outside hunk ${excerptLine(line)}`);
     }

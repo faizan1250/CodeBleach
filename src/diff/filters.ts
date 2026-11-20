@@ -31,11 +31,7 @@ export function isLockfile(path: string): boolean {
 // first 20 lines, whichever comes first), so ordinary source comments that
 // mention generated files do not trigger a skip.
 export function isGeneratedContent(content: string): boolean {
-  const head = content
-    .slice(0, GENERATED_HEADER_BYTES)
-    .split("\n", GENERATED_HEADER_LINES)
-    .join("\n")
-    .toLowerCase();
+  const head = content.slice(0, GENERATED_HEADER_BYTES).split("\n", GENERATED_HEADER_LINES).join("\n").toLowerCase();
   return GENERATED_MARKERS.some((marker) => head.includes(marker));
 }
 
@@ -53,10 +49,7 @@ export function countChangedLines(hunks: readonly DiffHunk[]): number {
   return count;
 }
 
-export function exceedsChangedLineLimit(
-  hunks: readonly DiffHunk[],
-  maxChangedLinesPerFile: number,
-): boolean {
+export function exceedsChangedLineLimit(hunks: readonly DiffHunk[], maxChangedLinesPerFile: number): boolean {
   return countChangedLines(hunks) > maxChangedLinesPerFile;
 }
 
@@ -85,10 +78,7 @@ export function selectSkipReason(input: SkipDecisionInput): DiffSkipReason | und
   for (const pattern of input.ignorePaths) {
     if (matchGlob(input.path, pattern)) return "ignored";
   }
-  if (
-    input.headBlobBytes !== null &&
-    exceedsFileSizeLimit(input.headBlobBytes, input.maxFileSizeKb)
-  ) {
+  if (input.headBlobBytes !== null && exceedsFileSizeLimit(input.headBlobBytes, input.maxFileSizeKb)) {
     return "too-large";
   }
   if (input.changedLines > input.maxChangedLinesPerFile) return "too-large";

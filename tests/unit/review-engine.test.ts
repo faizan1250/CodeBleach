@@ -98,10 +98,7 @@ function configWith(llm: Record<string, number> = {}): ResolvedConfig {
   return ConfigFileSchema.parse({ llm });
 }
 
-function engineFor(
-  provider: LlmProvider,
-  env: Record<string, string | undefined> = { ...OPT_IN },
-): ReviewEngineImpl {
+function engineFor(provider: LlmProvider, env: Record<string, string | undefined> = { ...OPT_IN }): ReviewEngineImpl {
   return new ReviewEngineImpl({ provider, logger: nullLogger(), env, headSha: "head-abc" });
 }
 
@@ -183,9 +180,7 @@ describe("review engine orchestration", () => {
   });
 
   test("keeps stable unit order when concurrent requests finish out of order", async () => {
-    const texts = [1, 2, 3].map((n) =>
-      JSON.stringify({ findings: [rawFinding({ title: `finding-${n}` })] }),
-    );
+    const texts = [1, 2, 3].map((n) => JSON.stringify({ findings: [rawFinding({ title: `finding-${n}` })] }));
     const provider = new DeferredProvider(texts);
     const pending = engineFor(provider).review(
       [unit({ id: "u-1" }), unit({ id: "u-2" }), unit({ id: "u-3" })],
@@ -320,10 +315,7 @@ describe("review engine orchestration", () => {
     const engine = engineFor(provider);
     let code: string | undefined;
     try {
-      await engine.review(
-        [unit({ id: "u-1" }), unit({ id: "u-2" })],
-        configWith({ max_concurrent_requests: 1 }),
-      );
+      await engine.review([unit({ id: "u-1" }), unit({ id: "u-2" })], configWith({ max_concurrent_requests: 1 }));
     } catch (error) {
       expect(error).toBeInstanceOf(ReviewerError);
       code = (error as ReviewerError).code;

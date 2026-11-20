@@ -35,9 +35,7 @@ describe("context time limits", () => {
     expect(() => ConfigFileSchema.parse({ context: { max_parse_time_ms: 99 } })).toThrow();
     expect(() => ConfigFileSchema.parse({ context: { max_parse_time_ms: 30001 } })).toThrow();
     expect(() => ConfigFileSchema.parse({ context: { max_total_parse_time_ms: 999 } })).toThrow();
-    expect(() =>
-      ConfigFileSchema.parse({ context: { max_total_parse_time_ms: 180001 } }),
-    ).toThrow();
+    expect(() => ConfigFileSchema.parse({ context: { max_total_parse_time_ms: 180001 } })).toThrow();
   });
 
   test("rejects unknown context keys", () => {
@@ -45,12 +43,8 @@ describe("context time limits", () => {
   });
 
   test("accepts custom token budget within bounds", () => {
-    expect(ConfigFileSchema.parse({ context: { max_tokens_per_unit: 1000 } }).context.max_tokens_per_unit).toBe(
-      1000,
-    );
-    expect(ConfigFileSchema.parse({ context: { max_tokens_per_unit: 24000 } }).context.max_tokens_per_unit).toBe(
-      24000,
-    );
+    expect(ConfigFileSchema.parse({ context: { max_tokens_per_unit: 1000 } }).context.max_tokens_per_unit).toBe(1000);
+    expect(ConfigFileSchema.parse({ context: { max_tokens_per_unit: 24000 } }).context.max_tokens_per_unit).toBe(24000);
   });
 
   test("rejects out-of-bounds token budget", () => {

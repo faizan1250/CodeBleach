@@ -91,9 +91,10 @@ describe("context consolidation from commit snapshots", () => {
     try {
       const reader = readerFor(dir, commit);
       const moduleSymbol = symbolFor("<module>", "module", 1, 3);
-      await expect(
-        resolveImportsForFile({ importerPath: "data/notes.json", reader }),
-      ).resolves.toEqual({ resolved: [], diagnostics: [] });
+      await expect(resolveImportsForFile({ importerPath: "data/notes.json", reader })).resolves.toEqual({
+        resolved: [],
+        diagnostics: [],
+      });
       await expect(
         resolveCalleesForSymbol({ filePath: "data/notes.json", symbol: moduleSymbol, reader }),
       ).resolves.toEqual({ callees: [], diagnostics: [] });
@@ -108,7 +109,8 @@ describe("context consolidation from commit snapshots", () => {
   test("type symbol yields no callers", async () => {
     const { dir, cleanup, commit } = await setupRepo({
       "src/types.ts": "export interface Options {\n  verbose: boolean;\n}\n",
-      "src/app.ts": 'import type { Options } from "./types";\nexport function run(opts: Options): boolean {\n  return opts.verbose;\n}\n',
+      "src/app.ts":
+        'import type { Options } from "./types";\nexport function run(opts: Options): boolean {\n  return opts.verbose;\n}\n',
     });
     try {
       const { callers } = await resolveCallersForSymbol({

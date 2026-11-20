@@ -207,12 +207,7 @@ describe("selectSkipReason", () => {
 
   test("minified bundles skip as ignored at root and at depth", () => {
     const ignorePaths = ["**/*.min.*"];
-    for (const path of [
-      "bundle.min.js",
-      "app.min.css",
-      "src/generated/bundle.min.js",
-      "public/assets/app.min.css",
-    ]) {
+    for (const path of ["bundle.min.js", "app.min.css", "src/generated/bundle.min.js", "public/assets/app.min.css"]) {
       expect(selectSkipReason(base({ path, ignorePaths }))).toBe("ignored");
     }
     expect(selectSkipReason(base({ path: "src/app.js", ignorePaths }))).toBeUndefined();
@@ -220,12 +215,8 @@ describe("selectSkipReason", () => {
   });
 
   test("too-large beats generated for both byte and line caps", () => {
-    expect(
-      selectSkipReason(base({ headBlobBytes: 500 * 1024 + 1, headSample: "// @generated\n" })),
-    ).toBe("too-large");
-    expect(
-      selectSkipReason(base({ changedLines: 1501, headSample: "// @generated\n" })),
-    ).toBe("too-large");
+    expect(selectSkipReason(base({ headBlobBytes: 500 * 1024 + 1, headSample: "// @generated\n" }))).toBe("too-large");
+    expect(selectSkipReason(base({ changedLines: 1501, headSample: "// @generated\n" }))).toBe("too-large");
   });
 
   test("generated applies only with an inspectable head sample", () => {

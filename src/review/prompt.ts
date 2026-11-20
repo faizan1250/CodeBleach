@@ -28,14 +28,7 @@ const CATEGORY_ORDER: Category[] = [
 ];
 
 const CATEGORY_FAMILIES = {
-  bugs: new Set<Category>([
-    "bug",
-    "null-handling",
-    "error-handling",
-    "breaking-change",
-    "resource-leak",
-    "api-usage",
-  ]),
+  bugs: new Set<Category>(["bug", "null-handling", "error-handling", "breaking-change", "resource-leak", "api-usage"]),
   security: new Set<Category>(["security"]),
   performance: new Set<Category>(["performance"]),
   concurrency: new Set<Category>(["concurrency"]),

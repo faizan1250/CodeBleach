@@ -86,11 +86,7 @@ export async function resolveRepoRoot(repoDir: string): Promise<string> {
 }
 
 // Verifies the SHA names a commit object; caller validates shape first via normalizeCommitSha.
-export async function resolveCommitSha(
-  repoRoot: string,
-  sha: string,
-  label: CommitShaLabel,
-): Promise<string> {
+export async function resolveCommitSha(repoRoot: string, sha: string, label: CommitShaLabel): Promise<string> {
   const normalized = normalizeCommitSha(sha, label);
   let resolved: string;
   try {
@@ -118,11 +114,7 @@ export async function resolveCommitSha(
 // verifies the object is a commit; ambiguous/unknown/malformed revs are
 // INVALID_INPUT (exit 2); well-formed-but-missing commits are GIT_FAILED
 // with a fetch hint (exit 1). Engine stays full-SHA-only.
-export async function resolveRevision(
-  repoRoot: string,
-  rev: string,
-  label: CommitShaLabel,
-): Promise<string> {
+export async function resolveRevision(repoRoot: string, rev: string, label: CommitShaLabel): Promise<string> {
   if (typeof rev !== "string" || rev.length === 0) {
     throw invalidInput(`${label} must be a non-empty revision`);
   }
@@ -150,18 +142,14 @@ export async function resolveRevision(
         exists = false;
       }
       if (exists) {
-        throw invalidInput(
-          `${label} "${lowered}" names a non-commit object; expected a commit (INVALID_INPUT)`,
-        );
+        throw invalidInput(`${label} "${lowered}" names a non-commit object; expected a commit (INVALID_INPUT)`);
       }
       throw gitFailed(
         `${label} "${lowered}" does not resolve to a commit; fetch sufficient history locally (no fetch is performed automatically)`,
         cause,
       );
     }
-    throw invalidInput(
-      `${label} revision ${JSON.stringify(rev)} does not resolve to a commit (INVALID_INPUT)`,
-    );
+    throw invalidInput(`${label} revision ${JSON.stringify(rev)} does not resolve to a commit (INVALID_INPUT)`);
   }
   if (!isFullCommitSha(resolved)) {
     throw gitFailed(`${label} resolved to an unexpected non-SHA value`);
@@ -169,11 +157,7 @@ export async function resolveRevision(
   return resolved;
 }
 
-export async function resolveMergeBase(
-  repoRoot: string,
-  baseSha: string,
-  headSha: string,
-): Promise<string> {
+export async function resolveMergeBase(repoRoot: string, baseSha: string, headSha: string): Promise<string> {
   let mergeBase: string;
   try {
     const result = await runProcess({ cmd: ["git", "merge-base", baseSha, headSha], cwd: repoRoot });
@@ -229,12 +213,7 @@ export const PINNED_DIFF_FLAGS: readonly string[] = [
 // 120000 symlink, 160000 gitlink, either side including transitions.
 // 100644<->100755 chmod stays supported.
 function isUnsupportedMode(oldMode: string, newMode: string): boolean {
-  return (
-    oldMode === "120000" ||
-    newMode === "120000" ||
-    oldMode === "160000" ||
-    newMode === "160000"
-  );
+  return oldMode === "120000" || newMode === "120000" || oldMode === "160000" || newMode === "160000";
 }
 
 function invalidConfig(message: string): ReviewerError {
@@ -257,10 +236,7 @@ async function gitDiffBytes(
     ).stdout;
   } catch (cause) {
     if (cause instanceof ReviewerError && cause.code === "INTERNAL") throw cause;
-    throw gitFailed(
-      `${what} failed: ${cause instanceof Error ? cause.message : String(cause)}`,
-      cause,
-    );
+    throw gitFailed(`${what} failed: ${cause instanceof Error ? cause.message : String(cause)}`, cause);
   }
 }
 
@@ -414,12 +390,7 @@ export class GitDiffEngine implements DiffEngine {
     this.patchMaxStdoutBytes = deps?.patchMaxStdoutBytes ?? DEFAULT_MAX_STDOUT_BYTES;
   }
 
-  async run(input: {
-    repoDir: string;
-    baseSha: string;
-    headSha: string;
-    config: ResolvedConfig;
-  }): Promise<DiffResult> {
+  async run(input: { repoDir: string; baseSha: string; headSha: string; config: ResolvedConfig }): Promise<DiffResult> {
     if (input === null || input === undefined || typeof input !== "object") {
       throw invalidConfig("GitDiffEngine.run requires an input object");
     }
@@ -609,7 +580,9 @@ export class GitDiffEngine implements DiffEngine {
 
     const filesByOrder: ChangedFile[] = [];
     const candidateIndexToSized = new Map<Candidate, number>();
-    sizedCandidates.forEach((c, si) => candidateIndexToSized.set(c, si));
+    sizedCandidates.forEach((c, si) => {
+      candidateIndexToSized.set(c, si);
+    });
     for (const slot of order) {
       if (slot.kind === "skipped") {
         filesByOrder.push(slot.file);
@@ -670,10 +643,7 @@ export class GitDiffEngine implements DiffEngine {
         skipReason: undefined,
         hunks: patch.hunks,
         commentableLines: getCommentableLines(patch.hunks),
-        symbols:
-          language !== null && patch.hunks.length > 0
-            ? [moduleSymbol(countBlobLines(content), patch)]
-            : [],
+        symbols: language !== null && patch.hunks.length > 0 ? [moduleSymbol(countBlobLines(content), patch)] : [],
       });
     }
     const result: DiffResult = {

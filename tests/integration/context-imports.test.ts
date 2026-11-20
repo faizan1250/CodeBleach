@@ -247,9 +247,7 @@ describe("context relative imports from commit snapshots", () => {
         maxResolved: 1,
       });
       expect(resolved.map((entry) => entry.specifier)).toEqual(["./a"]);
-      expect(diagnostics).toEqual([
-        { importerPath: "src/app.ts", specifier: "./b", reason: "cap-reached" },
-      ]);
+      expect(diagnostics).toEqual([{ importerPath: "src/app.ts", specifier: "./b", reason: "cap-reached" }]);
     } finally {
       await cleanup();
     }
@@ -333,9 +331,7 @@ describe("context relative imports from commit snapshots", () => {
         reader: readerFor(dir, commit),
       });
       expect(resolved).toEqual([]);
-      expect(diagnostics).toEqual([
-        { importerPath: "src/app.ts", specifier: "./l0", reason: "depth-exceeded" },
-      ]);
+      expect(diagnostics).toEqual([{ importerPath: "src/app.ts", specifier: "./l0", reason: "depth-exceeded" }]);
     } finally {
       await cleanup();
     }
@@ -353,9 +349,7 @@ describe("context relative imports from commit snapshots", () => {
         reader: readerFor(dir, commit),
       });
       expect(resolved).toEqual([]);
-      expect(diagnostics).toEqual([
-        { importerPath: "src/app.ts", specifier: "./a", reason: "export-not-found" },
-      ]);
+      expect(diagnostics).toEqual([{ importerPath: "src/app.ts", specifier: "./a", reason: "export-not-found" }]);
     } finally {
       await cleanup();
     }
@@ -383,9 +377,7 @@ describe("context relative imports from commit snapshots", () => {
         runBudget: budgetThatFreezesAfter(2),
       });
       expect(resolved).toEqual([]);
-      expect(diagnostics).toEqual([
-        { importerPath: "src/app.ts", specifier: "./big", reason: "parse-cancelled" },
-      ]);
+      expect(diagnostics).toEqual([{ importerPath: "src/app.ts", specifier: "./big", reason: "parse-cancelled" }]);
     } finally {
       await cleanup();
     }
@@ -404,9 +396,7 @@ describe("context relative imports from commit snapshots", () => {
         runBudget: budgetThatFreezesAfter(3),
       });
       expect(resolved).toEqual([]);
-      expect(diagnostics).toEqual([
-        { importerPath: "src/app.ts", specifier: "./barrel", reason: "parse-cancelled" },
-      ]);
+      expect(diagnostics).toEqual([{ importerPath: "src/app.ts", specifier: "./barrel", reason: "parse-cancelled" }]);
     } finally {
       await cleanup();
     }

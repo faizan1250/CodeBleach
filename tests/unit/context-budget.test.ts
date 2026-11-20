@@ -110,8 +110,7 @@ describe("unit budget", () => {
     const outcome = fitUnitToBudget(input({ rules }));
     expect(outcome.status).toBe("emit");
     if (outcome.status !== "emit") return;
-    const expectedMin =
-      FRAMING_RESERVE_TOKENS + tokensForRule(rules[0]!) + estimateTokens("function greet() {");
+    const expectedMin = FRAMING_RESERVE_TOKENS + tokensForRule(rules[0]!) + estimateTokens("function greet() {");
     expect(outcome.totalTokens).toBeGreaterThanOrEqual(expectedMin);
     expect(outcome.totalTokens).toBeLessThanOrEqual(12000);
   });
@@ -143,9 +142,7 @@ describe("unit budget", () => {
     const hunks = [hunk(1, ["a"]), hunk(50, ["b".repeat(5000)])];
     const firstSize = estimateTokens(serializeHunk(hunks[0]!));
     const sigSize = estimateTokens("function greet() {");
-    const outcome = fitUnitToBudget(
-      input({ hunks, maxTokens: FRAMING_RESERVE_TOKENS + sigSize + firstSize + 50 }),
-    );
+    const outcome = fitUnitToBudget(input({ hunks, maxTokens: FRAMING_RESERVE_TOKENS + sigSize + firstSize + 50 }));
     expect(outcome.status).toBe("emit");
     if (outcome.status !== "emit") return;
     expect(outcome.diffTruncated).toBe(true);
@@ -184,8 +181,7 @@ describe("unit budget", () => {
     const sigSize = estimateTokens("function greet() {");
     const bodySize = estimateTokens("  return 1;\n}");
     const highSize = estimateTokens("small");
-    const identitySize =
-      tokensForDiffIdentity("src/a.ts", 1) + tokensForSymbolIdentity("src/a.ts", "greet");
+    const identitySize = tokensForDiffIdentity("src/a.ts", 1) + tokensForSymbolIdentity("src/a.ts", "greet");
     const outcome = fitUnitToBudget(
       input({
         hunks,

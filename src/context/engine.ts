@@ -4,13 +4,7 @@ import type { ResolvedConfig } from "../config/schema.ts";
 import type { ContextEngine } from "../core/contracts.ts";
 import { ReviewerError } from "../core/errors.ts";
 import type { Logger } from "../core/logger.ts";
-import type {
-  ChangedFile,
-  ChangedSymbol,
-  DiffHunk,
-  DiffResult,
-  SymbolKind,
-} from "../types/diff.ts";
+import type { ChangedFile, ChangedSymbol, DiffHunk, DiffResult, SymbolKind } from "../types/diff.ts";
 import type {
   ContextBuildDiagnostics,
   ContextBuildResult,
@@ -209,9 +203,7 @@ function findDefinitionText(
         ? sameTypes[0]
         : (sameTypes.find((type) => type.range.startLine === symbol.startLine) ?? sameTypes[0]);
     if (picked !== undefined) return typeSignatureBody(picked.text);
-    const sameDefs = definitions.filter(
-      (definition) => definition.kind === "type" && definition.name === symbol.name,
-    );
+    const sameDefs = definitions.filter((definition) => definition.kind === "type" && definition.name === symbol.name);
     const pickedDef =
       sameDefs.length === 1
         ? sameDefs[0]
@@ -264,11 +256,7 @@ export class ContextEngineImpl implements ContextEngine {
     this.importsResolver = resolvers.resolveImportsForFile ?? resolveImportsForFile;
   }
 
-  async build(
-    diff: DiffResult,
-    config: ResolvedConfig,
-    repoDir: string,
-  ): Promise<ContextBuildResult> {
+  async build(diff: DiffResult, config: ResolvedConfig, repoDir: string): Promise<ContextBuildResult> {
     const started = performance.now();
     const perFileMs = config.context.max_parse_time_ms ?? DEFAULT_MAX_PARSE_TIME_MS;
     const runBudget = new RunBudget({
@@ -636,7 +624,13 @@ export class ContextEngineImpl implements ContextEngine {
     parseCache: ParseCache;
     noteGitTimeout: () => void;
   }): Promise<
-    | { status: "emit"; unit: ReviewUnit; definitionTruncated: boolean; capSkipped: number; diagnostics: ContextDiagnostic[] }
+    | {
+        status: "emit";
+        unit: ReviewUnit;
+        definitionTruncated: boolean;
+        capSkipped: number;
+        diagnostics: ContextDiagnostic[];
+      }
     | { status: "skip"; reason: UnitSkip["reason"]; requiredTokens: number }
   > {
     const { diff, file, symbol } = input;
@@ -677,7 +671,14 @@ export class ContextEngineImpl implements ContextEngine {
       const endLine = isType ? target.range.endLine : target.fullRange.endLine;
       const text = isType ? target.text : target.fullText;
       const tokens = estimateTokens(text);
-      const unitIdPreview = stableUnitId(diff.headSha, file.path, symbol.kind, symbol.container, symbol.name, symbol.startLine);
+      const unitIdPreview = stableUnitId(
+        diff.headSha,
+        file.path,
+        symbol.kind,
+        symbol.container,
+        symbol.name,
+        symbol.startLine,
+      );
       pushCandidate(
         {
           id: stableItemId(unitIdPreview, kind, resolved.targetPath, startLine),
@@ -707,7 +708,14 @@ export class ContextEngineImpl implements ContextEngine {
       });
       for (const callee of callees.callees) {
         const tokens = estimateTokens(callee.text);
-        const unitIdPreview = stableUnitId(diff.headSha, file.path, symbol.kind, symbol.container, symbol.name, symbol.startLine);
+        const unitIdPreview = stableUnitId(
+          diff.headSha,
+          file.path,
+          symbol.kind,
+          symbol.container,
+          symbol.name,
+          symbol.startLine,
+        );
         const proximity: RankProximity =
           callee.path === file.path ? "same-file" : callee.reason.includes("import") ? "direct-import" : "other";
         pushCandidate(
@@ -728,9 +736,21 @@ export class ContextEngineImpl implements ContextEngine {
       capSkipped += callees.diagnostics.filter((diagnostic) => diagnostic.reason === "cap-reached").length;
       for (const diagnostic of callees.diagnostics) {
         if (diagnostic.reason === "parse-cancelled") {
-          unitDiagnostics.push({ stage: "callee", path: file.path, symbol: symbol.name, code: "parse-cancelled", reason: "callee parse cancelled" });
+          unitDiagnostics.push({
+            stage: "callee",
+            path: file.path,
+            symbol: symbol.name,
+            code: "parse-cancelled",
+            reason: "callee parse cancelled",
+          });
         } else if (diagnostic.reason === "cap-reached") {
-          unitDiagnostics.push({ stage: "callee", path: file.path, symbol: symbol.name, code: "cap-reached", reason: "callee cap reached" });
+          unitDiagnostics.push({
+            stage: "callee",
+            path: file.path,
+            symbol: symbol.name,
+            code: "cap-reached",
+            reason: "callee cap reached",
+          });
         }
       }
     } catch (error) {
@@ -756,7 +776,14 @@ export class ContextEngineImpl implements ContextEngine {
       });
       for (const caller of callers.callers) {
         const tokens = estimateTokens(caller.callerText);
-        const unitIdPreview = stableUnitId(diff.headSha, file.path, symbol.kind, symbol.container, symbol.name, symbol.startLine);
+        const unitIdPreview = stableUnitId(
+          diff.headSha,
+          file.path,
+          symbol.kind,
+          symbol.container,
+          symbol.name,
+          symbol.startLine,
+        );
         pushCandidate(
           {
             id: stableItemId(unitIdPreview, "caller", caller.path, caller.callerStartLine),
@@ -775,9 +802,21 @@ export class ContextEngineImpl implements ContextEngine {
       capSkipped += callers.diagnostics.filter((diagnostic) => diagnostic.reason === "cap-reached").length;
       for (const diagnostic of callers.diagnostics) {
         if (diagnostic.reason === "parse-cancelled") {
-          unitDiagnostics.push({ stage: "caller", path: file.path, symbol: symbol.name, code: "parse-cancelled", reason: "caller parse cancelled" });
+          unitDiagnostics.push({
+            stage: "caller",
+            path: file.path,
+            symbol: symbol.name,
+            code: "parse-cancelled",
+            reason: "caller parse cancelled",
+          });
         } else if (diagnostic.reason === "cap-reached") {
-          unitDiagnostics.push({ stage: "caller", path: file.path, symbol: symbol.name, code: "cap-reached", reason: "caller cap reached" });
+          unitDiagnostics.push({
+            stage: "caller",
+            path: file.path,
+            symbol: symbol.name,
+            code: "cap-reached",
+            reason: "caller cap reached",
+          });
         }
       }
     } catch (error) {
@@ -803,7 +842,14 @@ export class ContextEngineImpl implements ContextEngine {
       });
       for (const testSite of tests.tests) {
         const tokens = estimateTokens(testSite.text);
-        const unitIdPreview = stableUnitId(diff.headSha, file.path, symbol.kind, symbol.container, symbol.name, symbol.startLine);
+        const unitIdPreview = stableUnitId(
+          diff.headSha,
+          file.path,
+          symbol.kind,
+          symbol.container,
+          symbol.name,
+          symbol.startLine,
+        );
         pushCandidate(
           {
             id: stableItemId(unitIdPreview, "test", testSite.path, testSite.startLine),
@@ -822,9 +868,21 @@ export class ContextEngineImpl implements ContextEngine {
       capSkipped += tests.diagnostics.filter((diagnostic) => diagnostic.reason === "cap-reached").length;
       for (const diagnostic of tests.diagnostics) {
         if (diagnostic.reason === "parse-cancelled") {
-          unitDiagnostics.push({ stage: "test", path: file.path, symbol: symbol.name, code: "parse-cancelled", reason: "test parse cancelled" });
+          unitDiagnostics.push({
+            stage: "test",
+            path: file.path,
+            symbol: symbol.name,
+            code: "parse-cancelled",
+            reason: "test parse cancelled",
+          });
         } else if (diagnostic.reason === "cap-reached") {
-          unitDiagnostics.push({ stage: "test", path: file.path, symbol: symbol.name, code: "cap-reached", reason: "test cap reached" });
+          unitDiagnostics.push({
+            stage: "test",
+            path: file.path,
+            symbol: symbol.name,
+            code: "cap-reached",
+            reason: "test cap reached",
+          });
         }
       }
     } catch (error) {
@@ -881,6 +939,12 @@ export class ContextEngineImpl implements ContextEngine {
       context: [definitionItem, ...outcome.includedItems],
       rules: outcome.keptRules,
     };
-    return { status: "emit", unit, definitionTruncated: outcome.definitionTruncated, capSkipped, diagnostics: unitDiagnostics };
+    return {
+      status: "emit",
+      unit,
+      definitionTruncated: outcome.definitionTruncated,
+      capSkipped,
+      diagnostics: unitDiagnostics,
+    };
   }
 }

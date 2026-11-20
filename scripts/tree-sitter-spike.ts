@@ -1,12 +1,8 @@
 import { Language, Parser } from "web-tree-sitter";
 import runtimeWasmPath from "web-tree-sitter/tree-sitter.wasm" with { type: "file" };
-import typescriptWasmPath from "@vscode/tree-sitter-wasm/wasm/tree-sitter-typescript.wasm" with {
-  type: "file",
-};
+import typescriptWasmPath from "@vscode/tree-sitter-wasm/wasm/tree-sitter-typescript.wasm" with { type: "file" };
 import tsxWasmPath from "@vscode/tree-sitter-wasm/wasm/tree-sitter-tsx.wasm" with { type: "file" };
-import javascriptWasmPath from "@vscode/tree-sitter-wasm/wasm/tree-sitter-javascript.wasm" with {
-  type: "file",
-};
+import javascriptWasmPath from "@vscode/tree-sitter-wasm/wasm/tree-sitter-javascript.wasm" with { type: "file" };
 
 export interface SpikeGrammarResult {
   language: "typescript" | "tsx" | "javascript";
@@ -80,5 +76,11 @@ export async function runTreeSitterSpike(): Promise<SpikeResult> {
 
 if (import.meta.main) {
   const result = await runTreeSitterSpike();
-  console.log(JSON.stringify({ ok: true, ...result, grammars: result.grammars.map((g) => ({ ...g, sexpr: g.sexpr.slice(0, 120) })) }));
+  console.log(
+    JSON.stringify({
+      ok: true,
+      ...result,
+      grammars: result.grammars.map((g) => ({ ...g, sexpr: g.sexpr.slice(0, 120) })),
+    }),
+  );
 }

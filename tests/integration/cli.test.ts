@@ -94,9 +94,10 @@ describe("cli", () => {
       const result = await runCli(["review", "--base", "b", "--head", "h"], dir);
       expect(result.code).toBe(1);
       expect(result.stderr).toContain("GIT_FAILED");
-      const artifact = JSON.parse(
-        await readFile(join(dir, ".reviewer-out", "run.json"), "utf8"),
-      ) as { status: string; error: { code: string } };
+      const artifact = JSON.parse(await readFile(join(dir, ".reviewer-out", "run.json"), "utf8")) as {
+        status: string;
+        error: { code: string };
+      };
       expect(artifact.status).toBe("failed");
       expect(artifact.error.code).toBe("GIT_FAILED");
     } finally {
@@ -109,9 +110,7 @@ describe("cli", () => {
     try {
       const result = await runCli(["review", "--demo", "--dry-run"], dir);
       expect(result.code).toBe(0);
-      const artifact = JSON.parse(
-        await readFile(join(dir, ".reviewer-out", "run.json"), "utf8"),
-      ) as {
+      const artifact = JSON.parse(await readFile(join(dir, ".reviewer-out", "run.json"), "utf8")) as {
         status: string;
         schemaVersion: number;
         stages: Array<{ name: string; status: string; count?: number }>;
@@ -186,9 +185,9 @@ describe("cli", () => {
       const readRunId = async (): Promise<string> => {
         const result = await runCli(["review", "--demo", "--dry-run"], dir);
         expect(result.code).toBe(0);
-        const artifact = JSON.parse(
-          await readFile(join(dir, ".reviewer-out", "run.json"), "utf8"),
-        ) as { runId: string };
+        const artifact = JSON.parse(await readFile(join(dir, ".reviewer-out", "run.json"), "utf8")) as {
+          runId: string;
+        };
         return artifact.runId;
       };
       expect(await readRunId()).not.toBe(await readRunId());

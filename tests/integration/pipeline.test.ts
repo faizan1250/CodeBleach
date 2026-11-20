@@ -167,7 +167,15 @@ describe("runPipeline", () => {
       const fixture = createFixtureEngines({ secret });
       await runPipeline(
         { ...fixture, logger: testLogger() },
-        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir, runId: "run-test", secrets: [secret] },
+        {
+          repoDir: ".",
+          baseSha: "base",
+          headSha: "head",
+          dryRun: true,
+          outDir: dir,
+          runId: "run-test",
+          secrets: [secret],
+        },
       );
       const text = await readFile(join(dir, "run.json"), "utf8");
       expect(text).not.toContain(secret);
@@ -198,7 +206,7 @@ describe("runPipeline", () => {
       const fixture = createFixtureEngines();
       let configPersistedBeforeDiff = false;
       const origDiffRun = fixture.diff.run;
-      fixture.diff.run = (async (input) => {
+      fixture.diff.run = async (input) => {
         try {
           const artifact = await readArtifact(dir);
           configPersistedBeforeDiff =
@@ -212,7 +220,7 @@ describe("runPipeline", () => {
           configPersistedBeforeDiff = false;
         }
         return origDiffRun(input);
-      });
+      };
       await runPipeline(
         { ...fixture, logger: testLogger() },
         { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: dir, runId: "run-test" },

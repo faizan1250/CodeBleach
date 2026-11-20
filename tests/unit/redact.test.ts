@@ -3,9 +3,7 @@ import { redact, sanitizePayload } from "../../src/utils/redact.ts";
 
 describe("redact", () => {
   test("replaces exact secrets longest-first", () => {
-    expect(redact("abcdefgh abcdefghi", ["abcdefgh", "abcdefghi"])).toBe(
-      "[REDACTED] [REDACTED]",
-    );
+    expect(redact("abcdefgh abcdefghi", ["abcdefgh", "abcdefghi"])).toBe("[REDACTED] [REDACTED]");
   });
 
   test("ignores empty secrets", () => {
@@ -28,18 +26,14 @@ describe("redact", () => {
 
   test("redacts long keys blindly across occurrences", () => {
     const key = "opaque-live-key-9f8e7d6c5b4a";
-    expect(redact(`using ${key} twice: ${key} end`, [key])).toBe(
-      "using [REDACTED] twice: [REDACTED] end",
-    );
+    expect(redact(`using ${key} twice: ${key} end`, [key])).toBe("using [REDACTED] twice: [REDACTED] end");
   });
 
   test("sensitive assignments redact regardless of value length", () => {
     expect(redact("OPENCODE_API_KEY=x", ["x"])).toBe("OPENCODE_API_KEY=[REDACTED]");
     expect(redact("PASSWORD=x", ["x"])).toBe("PASSWORD=[REDACTED]");
     expect(redact('{"api_key": "x"}', ["x"])).toBe('{"api_key":"[REDACTED]"}');
-    expect(redact("https://x.test/cb?api_key=x&b=1", ["x"])).toBe(
-      "https://x.test/cb?api_key=[REDACTED]&b=1",
-    );
+    expect(redact("https://x.test/cb?api_key=x&b=1", ["x"])).toBe("https://x.test/cb?api_key=[REDACTED]&b=1");
   });
 
   test("auth headers stay protected for short values", () => {
@@ -92,8 +86,7 @@ describe("redact pre-send canaries", () => {
   });
 
   test("redacts jwts", () => {
-    const jwt =
-      "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+    const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
     expect(redact(`auth ${jwt} end`)).toBe("auth [REDACTED] end");
   });
 
@@ -102,27 +95,19 @@ describe("redact pre-send canaries", () => {
   });
 
   test("redacts database connection strings with credentials", () => {
-    expect(redact("connect postgres://app:hunter2@db.internal:5432/appdb now")).toBe(
-      "connect [REDACTED] now",
-    );
+    expect(redact("connect postgres://app:hunter2@db.internal:5432/appdb now")).toBe("connect [REDACTED] now");
     expect(redact("u mysql://app:hunter2@db:3306/app end")).toBe("u [REDACTED] end");
     expect(redact("u mongodb+srv://app:hunter2@cluster0.x/app end")).toBe("u [REDACTED] end");
   });
 
   test("leaves credential-less database urls in prose alone", () => {
-    expect(redact("uses postgres://localhost/mydb locally")).toBe(
-      "uses postgres://localhost/mydb locally",
-    );
+    expect(redact("uses postgres://localhost/mydb locally")).toBe("uses postgres://localhost/mydb locally");
   });
 
   test("redacts database-url and phase-4 assignment keys", () => {
-    expect(redact("DATABASE_URL=postgres://app:hunter2@db:5432/app")).toBe(
-      "DATABASE_URL=[REDACTED]",
-    );
+    expect(redact("DATABASE_URL=postgres://app:hunter2@db:5432/app")).toBe("DATABASE_URL=[REDACTED]");
     expect(redact("DATABASE_URL=postgres://localhost/mydb")).toBe("DATABASE_URL=[REDACTED]");
-    expect(redact("PROD_DATABASE_URL=postgres://localhost/mydb")).toBe(
-      "PROD_DATABASE_URL=[REDACTED]",
-    );
+    expect(redact("PROD_DATABASE_URL=postgres://localhost/mydb")).toBe("PROD_DATABASE_URL=[REDACTED]");
     expect(redact("access_key=hunter2")).toBe("access_key=[REDACTED]");
     expect(redact("access_key=12345678")).toBe("access_key=[REDACTED]");
     expect(redact("credential: hunter2")).toBe("credential:[REDACTED]");
@@ -133,12 +118,8 @@ describe("redact pre-send canaries", () => {
   });
 
   test("redacts secrets in url query strings", () => {
-    expect(redact("https://x.test/cb?api_key=SECRET123&b=1")).toBe(
-      "https://x.test/cb?api_key=[REDACTED]&b=1",
-    );
-    expect(redact("https://x.test/cb?a=1&token=SECRET123")).toBe(
-      "https://x.test/cb?a=1&token=[REDACTED]",
-    );
+    expect(redact("https://x.test/cb?api_key=SECRET123&b=1")).toBe("https://x.test/cb?api_key=[REDACTED]&b=1");
+    expect(redact("https://x.test/cb?a=1&token=SECRET123")).toBe("https://x.test/cb?a=1&token=[REDACTED]");
   });
 
   test("redacts generic sensitive assignments in env/yaml/json forms", () => {
@@ -156,9 +137,7 @@ describe("redact pre-send canaries", () => {
 
   test("leaves exact-key telemetry numerics alone", () => {
     expect(redact("tokenCount: 12345")).toBe("tokenCount: 12345");
-    expect(redact("usage inputTokens: 10 outputTokens: 5")).toBe(
-      "usage inputTokens: 10 outputTokens: 5",
-    );
+    expect(redact("usage inputTokens: 10 outputTokens: 5")).toBe("usage inputTokens: 10 outputTokens: 5");
     expect(redact("MY_SECRET=hunter2")).toBe("MY_SECRET=[REDACTED]");
   });
 
@@ -181,12 +160,8 @@ describe("redact pre-send canaries", () => {
   test("redacts numeric secrets across json/yaml/query forms", () => {
     expect(redact('{"db_password": "123456"}')).toBe('{"db_password":"[REDACTED]"}');
     expect(redact("db_password: 123456")).toBe("db_password:[REDACTED]");
-    expect(redact("https://x.test/cb?db_password=123456&b=1")).toBe(
-      "https://x.test/cb?db_password=[REDACTED]&b=1",
-    );
-    expect(redact("https://x.test/cb?a=1&password=true")).toBe(
-      "https://x.test/cb?a=1&password=[REDACTED]",
-    );
+    expect(redact("https://x.test/cb?db_password=123456&b=1")).toBe("https://x.test/cb?db_password=[REDACTED]&b=1");
+    expect(redact("https://x.test/cb?a=1&password=true")).toBe("https://x.test/cb?a=1&password=[REDACTED]");
   });
 
   test("redacts multi-line mixed assignments, preserves ordinary numerics", () => {
@@ -226,17 +201,11 @@ describe("redact pre-send canaries", () => {
   });
 
   test("leaves telemetry and unrelated syntax alone", () => {
-    expect(redact("usage inputTokens: 10 outputTokens: 5")).toBe(
-      "usage inputTokens: 10 outputTokens: 5",
-    );
+    expect(redact("usage inputTokens: 10 outputTokens: 5")).toBe("usage inputTokens: 10 outputTokens: 5");
     expect(redact("database: myapp")).toBe("database: myapp");
     expect(redact("url=https://example.com/x")).toBe("url=https://example.com/x");
-    expect(redact("max_tokens: 50 max_tokens_per_unit: 12000")).toBe(
-      "max_tokens: 50 max_tokens_per_unit: 12000",
-    );
-    expect(redact('{"a":1,"password":"hunter2","b":2}')).toBe(
-      '{"a":1,"password":"[REDACTED]","b":2}',
-    );
+    expect(redact("max_tokens: 50 max_tokens_per_unit: 12000")).toBe("max_tokens: 50 max_tokens_per_unit: 12000");
+    expect(redact('{"a":1,"password":"hunter2","b":2}')).toBe('{"a":1,"password":"[REDACTED]","b":2}');
   });
 });
 
@@ -251,71 +220,41 @@ describe("redact percent-encoded query names", () => {
       "db%2dpassword",
       "MONGODB%5FURI",
     ]) {
-      expect(redact(`https://x.test/cb?${key}=SECRET123&b=1`)).toBe(
-        `https://x.test/cb?${key}=[REDACTED]&b=1`,
-      );
+      expect(redact(`https://x.test/cb?${key}=SECRET123&b=1`)).toBe(`https://x.test/cb?${key}=[REDACTED]&b=1`);
     }
   });
 
   test("preserves unrelated params, separators, and fragments", () => {
-    expect(redact("https://x.test/cb?a=1&api%5Fkey=S3CR3T&b=2")).toBe(
-      "https://x.test/cb?a=1&api%5Fkey=[REDACTED]&b=2",
-    );
-    expect(redact("https://x.test/cb?c%61che=v&b=1")).toBe(
-      "https://x.test/cb?c%61che=v&b=1",
-    );
+    expect(redact("https://x.test/cb?a=1&api%5Fkey=S3CR3T&b=2")).toBe("https://x.test/cb?a=1&api%5Fkey=[REDACTED]&b=2");
+    expect(redact("https://x.test/cb?c%61che=v&b=1")).toBe("https://x.test/cb?c%61che=v&b=1");
     // Fragment survives: value stops at literal `#`, fragment opaque.
-    expect(redact("https://x.test/cb?api%5Fkey=S3CR3T#frag")).toBe(
-      "https://x.test/cb?api%5Fkey=[REDACTED]#frag",
-    );
+    expect(redact("https://x.test/cb?api%5Fkey=S3CR3T#frag")).toBe("https://x.test/cb?api%5Fkey=[REDACTED]#frag");
     // Empty values never tokenize, encoded or plain.
-    expect(redact("https://x.test/cb?api%5Fkey=&b=1")).toBe(
-      "https://x.test/cb?api%5Fkey=&b=1",
-    );
+    expect(redact("https://x.test/cb?api%5Fkey=&b=1")).toBe("https://x.test/cb?api%5Fkey=&b=1");
   });
 
   test("keeps fragments opaque, redacts only pre-fragment pairs", () => {
-    expect(redact("https://x.test/cb?api_key=SECRET#section")).toBe(
-      "https://x.test/cb?api_key=[REDACTED]#section",
-    );
-    expect(redact("https://x.test/cb?api%5Fkey=S3CR3T#frag")).toBe(
-      "https://x.test/cb?api%5Fkey=[REDACTED]#frag",
-    );
+    expect(redact("https://x.test/cb?api_key=SECRET#section")).toBe("https://x.test/cb?api_key=[REDACTED]#section");
+    expect(redact("https://x.test/cb?api%5Fkey=S3CR3T#frag")).toBe("https://x.test/cb?api%5Fkey=[REDACTED]#frag");
     expect(redact("https://x.test/cb?x=1#section&api_key=fragment-value")).toBe(
       "https://x.test/cb?x=1#section&api_key=fragment-value",
     );
-    expect(redact("https://x.test/cb?x=1#section?api_key=v")).toBe(
-      "https://x.test/cb?x=1#section?api_key=v",
-    );
+    expect(redact("https://x.test/cb?x=1#section?api_key=v")).toBe("https://x.test/cb?x=1#section?api_key=v");
     expect(redact("#fragment?api_key=v")).toBe("#fragment?api_key=v");
-    expect(redact("https://x.test/cb?api_key=SECRET#frag&b=2")).toBe(
-      "https://x.test/cb?api_key=[REDACTED]#frag&b=2",
-    );
+    expect(redact("https://x.test/cb?api_key=SECRET#frag&b=2")).toBe("https://x.test/cb?api_key=[REDACTED]#frag&b=2");
     expect(redact("https://x.test/cb?a=1&api_key=SECRET&b=2#frag&token=abc")).toBe(
       "https://x.test/cb?a=1&api_key=[REDACTED]&b=2#frag&token=abc",
     );
-    expect(redact("https://x.test/cb?api_key=SECRET%23more")).toBe(
-      "https://x.test/cb?api_key=[REDACTED]",
-    );
-    expect(redact("https://x.test/cb?message=hello%23world")).toBe(
-      "https://x.test/cb?message=hello%23world",
-    );
-    expect(redact("https://x.test/cb?api_key=SECRET#")).toBe(
-      "https://x.test/cb?api_key=[REDACTED]#",
-    );
+    expect(redact("https://x.test/cb?api_key=SECRET%23more")).toBe("https://x.test/cb?api_key=[REDACTED]");
+    expect(redact("https://x.test/cb?message=hello%23world")).toBe("https://x.test/cb?message=hello%23world");
+    expect(redact("https://x.test/cb?api_key=SECRET#")).toBe("https://x.test/cb?api_key=[REDACTED]#");
     expect(redact("https://x.test/cb?x=1#")).toBe("https://x.test/cb?x=1#");
-    expect(redact("https://x.test/cb?a=1#x=1&y=2#z=3")).toBe(
-      "https://x.test/cb?a=1#x=1&y=2#z=3",
-    );
-    expect(redact("https://x.test/cb?api_key=S#a=b#c=d")).toBe(
-      "https://x.test/cb?api_key=[REDACTED]#a=b#c=d",
-    );
+    expect(redact("https://x.test/cb?a=1#x=1&y=2#z=3")).toBe("https://x.test/cb?a=1#x=1&y=2#z=3");
+    expect(redact("https://x.test/cb?api_key=S#a=b#c=d")).toBe("https://x.test/cb?api_key=[REDACTED]#a=b#c=d");
     expect(redact("https://a.test/cb?api_key=ONE#f1 https://b.test/cb?api_key=TWO#f2")).toBe(
       "https://a.test/cb?api_key=[REDACTED]#f1 https://b.test/cb?api_key=[REDACTED]#f2",
     );
-    expect(redact("https://x.test/cb?api%ZZkey=S3CR3T#frag")).toBe(
-      "https://x.test/cb?api%ZZkey=S3CR3T#frag",
-    );
+    expect(redact("https://x.test/cb?api%ZZkey=S3CR3T#frag")).toBe("https://x.test/cb?api%ZZkey=S3CR3T#frag");
     expect(redact("issue #123: see https://x.test/cb?api_key=SECRET#frag")).toBe(
       "issue #123: see https://x.test/cb?api_key=[REDACTED]#frag",
     );
@@ -339,38 +278,24 @@ describe("redact percent-encoded query names", () => {
 
   test("never decodes values", () => {
     expect(redact("https://x.test/cb?b=%41%42")).toBe("https://x.test/cb?b=%41%42");
-    expect(redact("https://x.test/cb?api_key=%53ECRET")).toBe(
-      "https://x.test/cb?api_key=[REDACTED]",
-    );
+    expect(redact("https://x.test/cb?api_key=%53ECRET")).toBe("https://x.test/cb?api_key=[REDACTED]");
   });
 
   test("decodes exactly once", () => {
-    expect(redact("https://x.test/cb?api%255Fkey=S3CR3T&b=1")).toBe(
-      "https://x.test/cb?api%255Fkey=S3CR3T&b=1",
-    );
+    expect(redact("https://x.test/cb?api%255Fkey=S3CR3T&b=1")).toBe("https://x.test/cb?api%255Fkey=S3CR3T&b=1");
   });
 
   test("passes encoded telemetry through", () => {
-    expect(redact("https://x.test/cb?token%43ount=10&b=1")).toBe(
-      "https://x.test/cb?token%43ount=10&b=1",
-    );
-    expect(redact("https://x.test/cb?tokenCount=10&b=1")).toBe(
-      "https://x.test/cb?tokenCount=10&b=1",
-    );
+    expect(redact("https://x.test/cb?token%43ount=10&b=1")).toBe("https://x.test/cb?token%43ount=10&b=1");
+    expect(redact("https://x.test/cb?tokenCount=10&b=1")).toBe("https://x.test/cb?tokenCount=10&b=1");
   });
 
   test("malformed sequences never throw, fall back to raw key", () => {
-    expect(redact("https://x.test/cb?api%ZZkey=S3CR3T&b=1")).toBe(
-      "https://x.test/cb?api%ZZkey=S3CR3T&b=1",
-    );
-    expect(redact("https://x.test/cb?api%5Fkey%=S3CR3T&b=1")).toBe(
-      "https://x.test/cb?api%5Fkey%=S3CR3T&b=1",
-    );
+    expect(redact("https://x.test/cb?api%ZZkey=S3CR3T&b=1")).toBe("https://x.test/cb?api%ZZkey=S3CR3T&b=1");
+    expect(redact("https://x.test/cb?api%5Fkey%=S3CR3T&b=1")).toBe("https://x.test/cb?api%5Fkey%=S3CR3T&b=1");
     // Undecodable bytes classify as the raw key: the `2->P` boundary still
     // exposes the `Password` segment, so this shape redacts, as before.
-    expect(redact("https://x.test/cb?DB%2Password=S3CR3T&b=1")).toBe(
-      "https://x.test/cb?DB%2Password=[REDACTED]&b=1",
-    );
+    expect(redact("https://x.test/cb?DB%2Password=S3CR3T&b=1")).toBe("https://x.test/cb?DB%2Password=[REDACTED]&b=1");
   });
 
   test("encoded redaction is idempotent and leak-free", () => {
@@ -446,9 +371,7 @@ describe("redact multi-url and fragment assignments", () => {
       const once = redact(sample);
       expect(redact(once)).toBe(once);
     }
-    expect(redact("https://a.test/cb?x=1#frag,https://b.test/cb?api_key=SECRET")).not.toContain(
-      "SECRET",
-    );
+    expect(redact("https://a.test/cb?x=1#frag,https://b.test/cb?api_key=SECRET")).not.toContain("SECRET");
     expect(redact("https://x.test/cb?x=1#frag;api_key=fragment-value")).toBe(
       "https://x.test/cb?x=1#frag;api_key=fragment-value",
     );
@@ -465,9 +388,7 @@ describe("redact spaced and escaped quoted values", () => {
   });
 
   test("redacts quoted values across env/json/yaml/ts forms", () => {
-    expect(redact('{"password": "a b c", "user": "bob"}')).toBe(
-      '{"password":"[REDACTED]", "user": "bob"}',
-    );
+    expect(redact('{"password": "a b c", "user": "bob"}')).toBe('{"password":"[REDACTED]", "user": "bob"}');
     expect(redact('password: "hunter two"')).toBe('password:"[REDACTED]"');
     expect(redact('const password = "hunter two"')).toBe('const password="[REDACTED]"');
     expect(redact('USER=bob PASSWORD="correct horse battery staple" TOKEN=abc123')).toBe(
@@ -497,9 +418,7 @@ describe("redact uri and cloud key coverage", () => {
   test("redacts mongodb/redis/db urls even without embedded credentials", () => {
     expect(redact("MONGODB_URI=mongodb://app:hunter2@host/db")).toBe("MONGODB_URI=[REDACTED]");
     expect(redact("MONGODB_URI=mongodb://localhost:27017/app")).toBe("MONGODB_URI=[REDACTED]");
-    expect(redact("PROD_MONGODB_URI=mongodb://localhost:27017/app")).toBe(
-      "PROD_MONGODB_URI=[REDACTED]",
-    );
+    expect(redact("PROD_MONGODB_URI=mongodb://localhost:27017/app")).toBe("PROD_MONGODB_URI=[REDACTED]");
     expect(redact("REDIS_URL=redis://localhost:6379")).toBe("REDIS_URL=[REDACTED]");
     expect(redact("DB_URL=postgres://app:hunter2@db:5432/app")).toBe("DB_URL=[REDACTED]");
   });
@@ -507,9 +426,7 @@ describe("redact uri and cloud key coverage", () => {
   test("redacts azure account keys bare and in connection strings", () => {
     expect(redact("AccountKey=c2VjcmV0a2V5dm9ybGQ=")).toBe("AccountKey=[REDACTED]");
     expect(redact("accountKey=c2VjcmV0a2V5dm9ybGQ=")).toBe("accountKey=[REDACTED]");
-    const conn = redact(
-      "DefaultEndpointsProtocol=https;AccountName=x;AccountKey=s3cr3t-value",
-    );
+    const conn = redact("DefaultEndpointsProtocol=https;AccountName=x;AccountKey=s3cr3t-value");
     expect(conn).toBe("DefaultEndpointsProtocol=https;AccountName=x;AccountKey=[REDACTED]");
     expect(conn).not.toContain("s3cr3t-value");
   });
@@ -523,10 +440,7 @@ describe("redact uri and cloud key coverage", () => {
 
 describe("sanitizePayload", () => {
   test("redacts nested strings and arrays", () => {
-    const out = sanitizePayload(
-      { a: ["x ghp_secret123", { b: "ok" }], c: 1 },
-      ["ghp_secret123"],
-    );
+    const out = sanitizePayload({ a: ["x ghp_secret123", { b: "ok" }], c: 1 }, ["ghp_secret123"]);
     expect(out).toEqual({ a: ["x [REDACTED]", { b: "ok" }], c: 1 });
   });
 
@@ -600,10 +514,7 @@ describe("sanitizePayload", () => {
 
   test("preserves shared references instead of flagging circular", () => {
     const shared = { path: "src/a.ts", secret: "ghp_abc123" };
-    const out = sanitizePayload({ first: shared, second: shared, list: [shared] }) as Record<
-      string,
-      unknown
-    >;
+    const out = sanitizePayload({ first: shared, second: shared, list: [shared] }) as Record<string, unknown>;
     expect(out["first"]).toEqual({ path: "src/a.ts", secret: "[REDACTED]" });
     expect(out["second"]).toEqual({ path: "src/a.ts", secret: "[REDACTED]" });
     expect(out["list"]).toEqual([{ path: "src/a.ts", secret: "[REDACTED]" }]);
@@ -679,9 +590,7 @@ describe("sanitizePayload", () => {
     const mySecret = "556789123";
     const request = {
       system: "prompt",
-      user: redact(
-        `diff line DB_PASSWORD=${dbPass} plus POSTGRES_PASSWORD=${pgPass} and MY_SECRET=${mySecret}`,
-      ),
+      user: redact(`diff line DB_PASSWORD=${dbPass} plus POSTGRES_PASSWORD=${pgPass} and MY_SECRET=${mySecret}`),
     };
     const err = sanitizePayload({
       err: new Error(`boom DB_PASSWORD=${dbPass} at PASSWORD=true`),
@@ -711,9 +620,11 @@ describe("sanitizePayload", () => {
     expect(redact("inputTokens=123456")).toBe("inputTokens=123456");
     expect(redact("outputTokens=987654")).toBe("outputTokens=987654");
     expect(redact("tokenCount=100")).toBe("tokenCount=100");
-    expect(sanitizePayload({ inputTokens: 123456, outputTokens: 987654, tokenCount: 100 })).toEqual(
-      { inputTokens: 123456, outputTokens: 987654, tokenCount: 100 },
-    );
+    expect(sanitizePayload({ inputTokens: 123456, outputTokens: 987654, tokenCount: 100 })).toEqual({
+      inputTokens: 123456,
+      outputTokens: 987654,
+      tokenCount: 100,
+    });
   });
   test("keeps synthetic secrets out of request/error/diagnostic/artifact shapes", () => {
     const spaced = "correct horse battery staple";
@@ -793,9 +704,9 @@ describe("sanitizePayload", () => {
     expect(sanitizePayload({ MY_SECRET: { value: "a", data: "b" } })).toEqual({
       MY_SECRET: "[REDACTED]",
     });
-    expect(sanitizePayload({ DB_PASSWORD: ["hunter2", "benign", 123, { v: "x" }, true] })).toEqual(
-      { DB_PASSWORD: "[REDACTED]" },
-    );
+    expect(sanitizePayload({ DB_PASSWORD: ["hunter2", "benign", 123, { v: "x" }, true] })).toEqual({
+      DB_PASSWORD: "[REDACTED]",
+    });
   });
 
   test("drops numeric/boolean containers under segment keys, keeps benign recursion", () => {
@@ -806,9 +717,9 @@ describe("sanitizePayload", () => {
     expect(sanitizePayload({ MY_SECRET: { count: 42, flag: false } })).toEqual({
       MY_SECRET: "[REDACTED]",
     });
-    expect(
-      sanitizePayload({ config: { port: 5432, nested: { MY_SECRET: "x", keep: "yes" } } }),
-    ).toEqual({ config: { port: 5432, nested: { MY_SECRET: "[REDACTED]", keep: "yes" } } });
+    expect(sanitizePayload({ config: { port: 5432, nested: { MY_SECRET: "x", keep: "yes" } } })).toEqual({
+      config: { port: 5432, nested: { MY_SECRET: "[REDACTED]", keep: "yes" } },
+    });
   });
 
   test("container redaction is idempotent and leak-free serialized", () => {
@@ -848,9 +759,7 @@ describe("sanitizePayload", () => {
       "OAuthClientSecret",
     ]) {
       expect(redact(`${key}=hunter2`)).toBe(`${key}=[REDACTED]`);
-      expect(redact(`https://x.test/cb?${key}=hunter2&b=1`)).toBe(
-        `https://x.test/cb?${key}=[REDACTED]&b=1`,
-      );
+      expect(redact(`https://x.test/cb?${key}=hunter2&b=1`)).toBe(`https://x.test/cb?${key}=[REDACTED]&b=1`);
     }
   });
 

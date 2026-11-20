@@ -31,11 +31,7 @@ describe("explicit rule selection", () => {
   });
 
   test("preserves configuration order", () => {
-    const rules = [
-      rule({ id: "b", paths: ["src/**"] }),
-      rule({ id: "a" }),
-      rule({ id: "c", paths: ["src/**"] }),
-    ];
+    const rules = [rule({ id: "b", paths: ["src/**"] }), rule({ id: "a" }), rule({ id: "c", paths: ["src/**"] })];
     expect(selectRulesForFile(rules, "src/x.ts").map((r) => r.id)).toEqual(["b", "a", "c"]);
   });
 

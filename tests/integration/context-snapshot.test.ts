@@ -128,11 +128,7 @@ describe("head and merge-base snapshots", () => {
   test("blob-size cap is enforced before reading", async () => {
     const { dir, cleanup } = await makeRepo();
     try {
-      const base = await writeAndCommit(
-        dir,
-        { "src/big.ts": `${"x".repeat(100)}\n`, "src/small.ts": "ok\n" },
-        "base",
-      );
+      const base = await writeAndCommit(dir, { "src/big.ts": `${"x".repeat(100)}\n`, "src/small.ts": "ok\n" }, "base");
       const reader = readerFor(dir, base, base, { maxBlobBytes: 10 });
       expect(await codeOf(reader.readHeadText("src/big.ts"))).toBe("GIT_FAILED");
       expect(await reader.readHeadText("src/small.ts")).toBe("ok\n");

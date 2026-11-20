@@ -1,17 +1,5 @@
-import type {
-  ContextEngine,
-  DiffEngine,
-  Publisher,
-  ReviewEngine,
-  ValidationEngine,
-} from "./contracts.ts";
-import type {
-  ChangedFile,
-  ContextBuildResult,
-  Finding,
-  ReviewUnit,
-  ValidatedFinding,
-} from "../types/index.ts";
+import type { ContextEngine, DiffEngine, Publisher, ReviewEngine, ValidationEngine } from "./contracts.ts";
+import type { ChangedFile, ContextBuildResult, Finding, ReviewUnit, ValidatedFinding } from "../types/index.ts";
 
 export const DEMO_BASE_SHA = "demo-base";
 export const DEMO_HEAD_SHA = "demo-head";

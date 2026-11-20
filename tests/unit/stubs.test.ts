@@ -24,17 +24,11 @@ describe("stub engines", () => {
     await expect(
       codeOf(stubDiffEngine.run({ repoDir: ".", baseSha: "b", headSha: "h", config: {} as never })),
     ).resolves.toBe("NOT_IMPLEMENTED");
-    await expect(codeOf(stubContextEngine.build(empty, {} as never, "."))).resolves.toBe(
-      "NOT_IMPLEMENTED",
-    );
+    await expect(codeOf(stubContextEngine.build(empty, {} as never, "."))).resolves.toBe("NOT_IMPLEMENTED");
     await expect(codeOf(stubReviewEngine.review([], {} as never))).resolves.toBe("NOT_IMPLEMENTED");
+    await expect(codeOf(stubValidationEngine.validate([], empty, [], {} as never))).resolves.toBe("NOT_IMPLEMENTED");
     await expect(
-      codeOf(stubValidationEngine.validate([], empty, [], {} as never)),
-    ).resolves.toBe("NOT_IMPLEMENTED");
-    await expect(
-      codeOf(
-        stubPublisher.publish([], empty, { owner: "o", repo: "r", number: 1, baseSha: "b", headSha: "h" }),
-      ),
+      codeOf(stubPublisher.publish([], empty, { owner: "o", repo: "r", number: 1, baseSha: "b", headSha: "h" })),
     ).resolves.toBe("NOT_IMPLEMENTED");
   });
 });

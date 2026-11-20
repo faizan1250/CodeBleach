@@ -22,7 +22,7 @@ function failureOf(error: unknown): { code: string; details: ProcessFailureDetai
 
 describe("runProcess argv", () => {
   test("passes values with spaces and metacharacters as single args", async () => {
-    const args = ["a b", "$HOME", "--flag=x y", "semi;colon", "`backtick`", "quote\"q"];
+    const args = ["a b", "$HOME", "--flag=x y", "semi;colon", "`backtick`", 'quote"q'];
     const result = await runProcess({
       cmd: [BUN, "-e", "process.stdout.write(JSON.stringify(process.argv.slice(1)))", ...args],
     });

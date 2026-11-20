@@ -181,9 +181,7 @@ export function parseGrepZ(buffer: Uint8Array, treePrefix: string): GrepMatch[] 
     if (textEnd < 0) textEnd = buffer.length;
     const rawPath = decodeText(buffer.subarray(cursor, pathEnd));
     if (!rawPath.startsWith(treePrefix)) {
-      throw parseFailed(
-        `grep pathname ${JSON.stringify(rawPath.slice(0, 80))} does not start with the searched tree`,
-      );
+      throw parseFailed(`grep pathname ${JSON.stringify(rawPath.slice(0, 80))} does not start with the searched tree`);
     }
     const lineText = decodeText(buffer.subarray(pathEnd + 1, lineEnd));
     if (!/^[0-9]+$/.test(lineText)) throw parseFailed("grep record has a non-numeric line number");
@@ -228,7 +226,9 @@ export function parseBatchCheckLine(line: string): BatchCheckEntry {
   return { oid: oid.toLowerCase(), type: kind, size };
 }
 
-export type BatchContentFrame = { oid: string; status: "missing" } | { oid: string; status: "blob"; size: number; bytes: Uint8Array };
+export type BatchContentFrame =
+  | { oid: string; status: "missing" }
+  | { oid: string; status: "blob"; size: number; bytes: Uint8Array };
 
 /**
  * Parse one-shot `git cat-file --batch` stdout for the requested OIDs, in
@@ -399,7 +399,9 @@ export class SnapshotReader {
       throw gitFailed(`blob ${normalized} is missing`);
     }
     if (frame.size > this.maxBlobBytes) {
-      throw gitFailed(`blob ${normalized} is ${frame.size} bytes, above the ${this.maxBlobBytes}-byte per-blob snapshot cap`);
+      throw gitFailed(
+        `blob ${normalized} is ${frame.size} bytes, above the ${this.maxBlobBytes}-byte per-blob snapshot cap`,
+      );
     }
     if (this.cachedTotalBytes + frame.size > this.maxTotalBytes) {
       throw gitFailed(
@@ -533,7 +535,9 @@ export class SnapshotReader {
       throw gitFailed(`blob ${normalized} is missing`);
     }
     if (entry.size > this.maxBlobBytes) {
-      throw gitFailed(`blob ${normalized} is ${entry.size} bytes, above the ${this.maxBlobBytes}-byte per-blob snapshot cap`);
+      throw gitFailed(
+        `blob ${normalized} is ${entry.size} bytes, above the ${this.maxBlobBytes}-byte per-blob snapshot cap`,
+      );
     }
     if (this.cachedTotalBytes + entry.size > this.maxTotalBytes) {
       throw gitFailed(

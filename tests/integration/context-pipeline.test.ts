@@ -33,7 +33,11 @@ describe("p3-11 pipeline wiring", () => {
     const { dir, cleanup } = await makeRepo();
     const outDir = join(dir, "out");
     try {
-      const baseSha = await writeAndCommit(dir, { "src/a.ts": "export function f(): number {\n  return 1;\n}\n" }, "base");
+      const baseSha = await writeAndCommit(
+        dir,
+        { "src/a.ts": "export function f(): number {\n  return 1;\n}\n" },
+        "base",
+      );
       const headSha = await writeAndCommit(
         dir,
         { "src/a.ts": "export function f(): number {\n  return 2;\n}\n" },
@@ -99,12 +103,16 @@ describe("p3-11 pipeline wiring", () => {
     try {
       const baseSha = await writeAndCommit(
         dir,
-        { "src/a.ts": "export function f(): number {\n  return 1;\n}\nexport function g(): number {\n  return 1;\n}\n" },
+        {
+          "src/a.ts": "export function f(): number {\n  return 1;\n}\nexport function g(): number {\n  return 1;\n}\n",
+        },
         "base",
       );
       const headSha = await writeAndCommit(
         dir,
-        { "src/a.ts": "export function f(): number {\n  return 2;\n}\nexport function g(): number {\n  return 3;\n}\n" },
+        {
+          "src/a.ts": "export function f(): number {\n  return 2;\n}\nexport function g(): number {\n  return 3;\n}\n",
+        },
         "head",
       );
       const config = ConfigFileSchema.parse({});
@@ -130,8 +138,7 @@ describe("p3-11 pipeline wiring", () => {
     try {
       const util = "export function helper(x: number): number {\n  return x + 1;\n}\n";
       const baseLib =
-        'import { helper } from "./util.ts";\n' +
-        "export function f(x: number): number {\n  return helper(x);\n}\n";
+        'import { helper } from "./util.ts";\n' + "export function f(x: number): number {\n  return helper(x);\n}\n";
       const headLib =
         'import { helper } from "./util.ts";\n' +
         "export function f(x: number): number {\n  return helper(x + 1);\n}\n";
@@ -162,9 +169,14 @@ describe("p3-11 pipeline wiring", () => {
     }
   });
 
-  test("empty diff produces no units but stays complete", async () => {    const { dir, cleanup } = await makeRepo();
+  test("empty diff produces no units but stays complete", async () => {
+    const { dir, cleanup } = await makeRepo();
     try {
-      const baseSha = await writeAndCommit(dir, { "src/a.ts": "export function f(): number {\n  return 1;\n}\n" }, "base");
+      const baseSha = await writeAndCommit(
+        dir,
+        { "src/a.ts": "export function f(): number {\n  return 1;\n}\n" },
+        "base",
+      );
       const config = ConfigFileSchema.parse({});
       const context = new ContextEngineImpl({ logger: logger() });
       const diffEngine = new GitDiffEngine({ logger: logger() });
@@ -230,7 +242,11 @@ describe("p3-11 pipeline wiring", () => {
   test("explicit rules attach verbatim and worktree edits do not change output", async () => {
     const { dir, cleanup } = await makeRepo();
     try {
-      const baseSha = await writeAndCommit(dir, { "src/a.ts": "export function f(): number {\n  return 1;\n}\n" }, "base");
+      const baseSha = await writeAndCommit(
+        dir,
+        { "src/a.ts": "export function f(): number {\n  return 1;\n}\n" },
+        "base",
+      );
       const headSha = await writeAndCommit(
         dir,
         { "src/a.ts": "export function f(): number {\n  return 2;\n}\n" },
@@ -256,7 +272,11 @@ describe("p3-11 pipeline wiring", () => {
   test("rule-heavy unit skips with mandatory-budget-exceeded under a tiny cap", async () => {
     const { dir, cleanup } = await makeRepo();
     try {
-      const baseSha = await writeAndCommit(dir, { "src/a.ts": "export function f(): number {\n  return 1;\n}\n" }, "base");
+      const baseSha = await writeAndCommit(
+        dir,
+        { "src/a.ts": "export function f(): number {\n  return 1;\n}\n" },
+        "base",
+      );
       const headSha = await writeAndCommit(
         dir,
         { "src/a.ts": "export function f(): number {\n  return 2;\n}\n" },
@@ -282,12 +302,16 @@ describe("p3-11 pipeline wiring", () => {
     try {
       const baseSha = await writeAndCommit(
         dir,
-        { "src/a.ts": "export function f(): number {\n  return 1;\n}\nexport function g(): number {\n  return 1;\n}\n" },
+        {
+          "src/a.ts": "export function f(): number {\n  return 1;\n}\nexport function g(): number {\n  return 1;\n}\n",
+        },
         "base",
       );
       const headSha = await writeAndCommit(
         dir,
-        { "src/a.ts": "export function f(): number {\n  return 2;\n}\nexport function g(): number {\n  return 3;\n}\n" },
+        {
+          "src/a.ts": "export function f(): number {\n  return 2;\n}\nexport function g(): number {\n  return 3;\n}\n",
+        },
         "head",
       );
       const defaults = ConfigFileSchema.parse({});

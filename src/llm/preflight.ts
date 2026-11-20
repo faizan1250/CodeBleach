@@ -26,10 +26,7 @@ export function requireLlmPreflight(input: LlmPreflightInput): void {
   // before any prompt is built or any provider call is made.
   resolveModelId(FIXED_MODEL_ID);
   const { max_review_unit_input_tokens, max_output_tokens } = input.config.llm;
-  if (
-    max_review_unit_input_tokens + max_output_tokens + CONTEXT_SAFETY_MARGIN_TOKENS >
-    MODEL_CONTEXT_TOKENS
-  ) {
+  if (max_review_unit_input_tokens + max_output_tokens + CONTEXT_SAFETY_MARGIN_TOKENS > MODEL_CONTEXT_TOKENS) {
     throw new ReviewerError({
       code: "CONFIG_INVALID",
       message:

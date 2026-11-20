@@ -14,12 +14,7 @@ import type { CallReference, Definition, TypeDefinition } from "../../src/contex
 import { parseSource } from "../../src/context/parser.ts";
 import type { ChangedSymbol } from "../../src/types/diff.ts";
 
-function def(
-  name: string,
-  kind: Definition["kind"] = "function",
-  container?: string,
-  startLine = 1,
-): Definition {
+function def(name: string, kind: Definition["kind"] = "function", container?: string, startLine = 1): Definition {
   return {
     name,
     kind,
@@ -71,7 +66,12 @@ function site(
     callerStartLine,
     callerEndLine: callerStartLine + 2,
     callerText: `${caller ?? "<module>"} {}`,
-    callRange: { startLine: callerStartLine, endLine: callerStartLine, startIndex: callStartIndex, endIndex: callStartIndex + 5 },
+    callRange: {
+      startLine: callerStartLine,
+      endLine: callerStartLine,
+      startIndex: callStartIndex,
+      endIndex: callStartIndex + 5,
+    },
     reason: "same-file direct call",
     ...extra,
   };
@@ -115,7 +115,7 @@ async function partsFor(source: string): Promise<{
 
 describe("targetPublicNames", () => {
   test("named export exposes its own name", async () => {
-    const parts = await partsFor("export function greet(): string {\n  return \"hi\";\n}\n");
+    const parts = await partsFor('export function greet(): string {\n  return "hi";\n}\n');
     const declaration = parts.definitions.find((entry) => entry.name === "greet");
     if (declaration === undefined) throw new Error("expected a greet definition");
     expect(targetPublicNames(parts.localExports, declaration)).toEqual(["greet"]);
@@ -172,8 +172,14 @@ describe("findTargetDeclaration", () => {
 
 describe("enclosingCaller", () => {
   test("picks the most specific containing definition", () => {
-    const outer = { ...def("outer", "function", undefined, 1), fullRange: { startLine: 1, endLine: 10, startIndex: 0, endIndex: 200 } };
-    const inner = { ...def("inner", "function", "outer", 3), fullRange: { startLine: 3, endLine: 6, startIndex: 50, endIndex: 120 } };
+    const outer = {
+      ...def("outer", "function", undefined, 1),
+      fullRange: { startLine: 1, endLine: 10, startIndex: 0, endIndex: 200 },
+    };
+    const inner = {
+      ...def("inner", "function", "outer", 3),
+      fullRange: { startLine: 3, endLine: 6, startIndex: 50, endIndex: 120 },
+    };
     expect(enclosingCaller([outer, inner], callAt(60, 70))).toBe(inner);
   });
 

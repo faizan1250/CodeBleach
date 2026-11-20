@@ -81,16 +81,13 @@ describe("extract definitions", () => {
   });
 
   test("default exports use default export kind", async () => {
-    await withTree(
-      "export default function main(): void {}\nexport function named(): void {}\n",
-      (tree, source) => {
-        const defs = getAdapter("typescript").extractDefinitions(tree, source);
-        expect(defs.map((d) => [d.name, d.exportKind])).toEqual([
-          ["main", "default"],
-          ["named", "named"],
-        ]);
-      },
-    );
+    await withTree("export default function main(): void {}\nexport function named(): void {}\n", (tree, source) => {
+      const defs = getAdapter("typescript").extractDefinitions(tree, source);
+      expect(defs.map((d) => [d.name, d.exportKind])).toEqual([
+        ["main", "default"],
+        ["named", "named"],
+      ]);
+    });
   });
 
   test("anonymous default function falls back to default name", async () => {
@@ -153,9 +150,7 @@ describe("extract definitions", () => {
       "const api = {\n  fetch(id: string): string {\n    return id;\n  },\n  version: 1,\n};\n",
       (tree, source) => {
         const defs = getAdapter("typescript").extractDefinitions(tree, source);
-        expect(defs.map((d) => [d.name, d.kind, d.container ?? null])).toEqual([
-          ["fetch", "method", "api"],
-        ]);
+        expect(defs.map((d) => [d.name, d.kind, d.container ?? null])).toEqual([["fetch", "method", "api"]]);
         expect(defs[0]?.fullRange).toMatchObject({ startLine: 2, endLine: 4 });
       },
     );
@@ -189,7 +184,7 @@ describe("extract definitions", () => {
   });
 
   test("namespace members record the namespace container", async () => {
-    await withTree('namespace N {\n  export function g(): void {}\n}\n', (tree, source) => {
+    await withTree("namespace N {\n  export function g(): void {}\n}\n", (tree, source) => {
       const defs = getAdapter("typescript").extractDefinitions(tree, source);
       expect(defs.map((d) => [d.name, d.container ?? null])).toEqual([["g", "N"]]);
     });
@@ -225,14 +220,62 @@ describe("extract imports", () => {
       (tree, source) => {
         const imports = getAdapter("typescript").extractImports(tree, source);
         expect(imports).toEqual([
-          { sourceSpecifier: "./mod", kind: "default", localName: "def", importedName: "default", range: { startLine: 1, endLine: 1 } },
-          { sourceSpecifier: "./other", kind: "named", localName: "local", importedName: "original", range: { startLine: 2, endLine: 2 } },
-          { sourceSpecifier: "./other", kind: "named", localName: "other", importedName: "other", range: { startLine: 2, endLine: 2 } },
-          { sourceSpecifier: "./ns", kind: "namespace", localName: "ns", importedName: null, range: { startLine: 3, endLine: 3 } },
-          { sourceSpecifier: "./side-effect", kind: "side-effect", localName: null, importedName: null, range: { startLine: 4, endLine: 4 } },
-          { sourceSpecifier: "./types", kind: "type-only", localName: "T", importedName: "T", range: { startLine: 5, endLine: 5 } },
-          { sourceSpecifier: "./inline", kind: "type-only", localName: "Inline", importedName: "Inline", range: { startLine: 6, endLine: 6 } },
-          { sourceSpecifier: "./inline", kind: "named", localName: "value", importedName: "value", range: { startLine: 6, endLine: 6 } },
+          {
+            sourceSpecifier: "./mod",
+            kind: "default",
+            localName: "def",
+            importedName: "default",
+            range: { startLine: 1, endLine: 1 },
+          },
+          {
+            sourceSpecifier: "./other",
+            kind: "named",
+            localName: "local",
+            importedName: "original",
+            range: { startLine: 2, endLine: 2 },
+          },
+          {
+            sourceSpecifier: "./other",
+            kind: "named",
+            localName: "other",
+            importedName: "other",
+            range: { startLine: 2, endLine: 2 },
+          },
+          {
+            sourceSpecifier: "./ns",
+            kind: "namespace",
+            localName: "ns",
+            importedName: null,
+            range: { startLine: 3, endLine: 3 },
+          },
+          {
+            sourceSpecifier: "./side-effect",
+            kind: "side-effect",
+            localName: null,
+            importedName: null,
+            range: { startLine: 4, endLine: 4 },
+          },
+          {
+            sourceSpecifier: "./types",
+            kind: "type-only",
+            localName: "T",
+            importedName: "T",
+            range: { startLine: 5, endLine: 5 },
+          },
+          {
+            sourceSpecifier: "./inline",
+            kind: "type-only",
+            localName: "Inline",
+            importedName: "Inline",
+            range: { startLine: 6, endLine: 6 },
+          },
+          {
+            sourceSpecifier: "./inline",
+            kind: "named",
+            localName: "value",
+            importedName: "value",
+            range: { startLine: 6, endLine: 6 },
+          },
         ]);
       },
     );
@@ -246,12 +289,48 @@ describe("extract exports", () => {
       (tree, source) => {
         const exports = getAdapter("typescript").extractExports(tree, source);
         expect(exports).toEqual([
-          { exportedName: "local", localName: "local", sourceSpecifier: null, kind: "named", range: { startLine: 2, endLine: 2 } },
-          { exportedName: "renamed", localName: "local", sourceSpecifier: null, kind: "named", range: { startLine: 3, endLine: 3 } },
-          { exportedName: "a", localName: "a", sourceSpecifier: "./m", kind: "named", range: { startLine: 4, endLine: 4 } },
-          { exportedName: null, localName: null, sourceSpecifier: "./star", kind: "star", range: { startLine: 5, endLine: 5 } },
-          { exportedName: "ns", localName: null, sourceSpecifier: "./ns", kind: "namespace", range: { startLine: 6, endLine: 6 } },
-          { exportedName: "default", localName: null, sourceSpecifier: null, kind: "default", range: { startLine: 7, endLine: 7 } },
+          {
+            exportedName: "local",
+            localName: "local",
+            sourceSpecifier: null,
+            kind: "named",
+            range: { startLine: 2, endLine: 2 },
+          },
+          {
+            exportedName: "renamed",
+            localName: "local",
+            sourceSpecifier: null,
+            kind: "named",
+            range: { startLine: 3, endLine: 3 },
+          },
+          {
+            exportedName: "a",
+            localName: "a",
+            sourceSpecifier: "./m",
+            kind: "named",
+            range: { startLine: 4, endLine: 4 },
+          },
+          {
+            exportedName: null,
+            localName: null,
+            sourceSpecifier: "./star",
+            kind: "star",
+            range: { startLine: 5, endLine: 5 },
+          },
+          {
+            exportedName: "ns",
+            localName: null,
+            sourceSpecifier: "./ns",
+            kind: "namespace",
+            range: { startLine: 6, endLine: 6 },
+          },
+          {
+            exportedName: "default",
+            localName: null,
+            sourceSpecifier: null,
+            kind: "default",
+            range: { startLine: 7, endLine: 7 },
+          },
         ]);
       },
     );
@@ -327,7 +406,8 @@ describe("extract call sites", () => {
   });
 });
 
-describe("test file score and symbol names", () => {  test("ranks test paths above source paths", () => {
+describe("test file score and symbol names", () => {
+  test("ranks test paths above source paths", () => {
     const adapter = getAdapter("typescript");
     expect(adapter.getTestFileScore("src/greet.test.ts")).toBe(1);
     expect(adapter.getTestFileScore("src/greet.spec.tsx")).toBe(1);
@@ -340,22 +420,19 @@ describe("test file score and symbol names", () => {  test("ranks test paths abo
   });
 
   test("returns declared names or null", async () => {
-    await withTree(
-      "function named(): void {}\nconst v = 1;\nconst { d } = source;\n",
-      (tree, source) => {
-        const adapter = getAdapter("typescript");
-        const fn = findAll(tree.rootNode, "function_declaration")[0];
-        expect(fn && adapter.getSymbolName(fn, source)).toBe("named");
-        const declarators = findAll(tree.rootNode, "variable_declarator");
-        expect(declarators).toHaveLength(2);
-        expect(adapter.getSymbolName(declarators[0] as Node, source)).toBe("v");
-        expect(adapter.getSymbolName(declarators[1] as Node, source)).toBeNull();
-        const params = findAll(tree.rootNode, "formal_parameters");
-        expect(params.length).toBeGreaterThan(0);
-        expect(adapter.getSymbolName(params[0] as Node, source)).toBeNull();
-        expect(adapter.getSymbolName(tree.rootNode, source)).toBeNull();
-      },
-    );
+    await withTree("function named(): void {}\nconst v = 1;\nconst { d } = source;\n", (tree, source) => {
+      const adapter = getAdapter("typescript");
+      const fn = findAll(tree.rootNode, "function_declaration")[0];
+      expect(fn && adapter.getSymbolName(fn, source)).toBe("named");
+      const declarators = findAll(tree.rootNode, "variable_declarator");
+      expect(declarators).toHaveLength(2);
+      expect(adapter.getSymbolName(declarators[0] as Node, source)).toBe("v");
+      expect(adapter.getSymbolName(declarators[1] as Node, source)).toBeNull();
+      const params = findAll(tree.rootNode, "formal_parameters");
+      expect(params.length).toBeGreaterThan(0);
+      expect(adapter.getSymbolName(params[0] as Node, source)).toBeNull();
+      expect(adapter.getSymbolName(tree.rootNode, source)).toBeNull();
+    });
   });
 });
 
@@ -410,9 +487,9 @@ describe("adapter edge cases", () => {
         expect(defs[0]?.name).toBe("target");
         expect(defs[0]?.fullRange).toMatchObject({ startLine: 3, endLine: 3 });
         expect(defs[0]?.fullText).toBe("function target(): number { return 1; }");
-        expect(
-          source.slice(defs[0]?.fullRange.startIndex ?? 0, defs[0]?.fullRange.endIndex ?? 0),
-        ).toBe("function target(): number { return 1; }");
+        expect(source.slice(defs[0]?.fullRange.startIndex ?? 0, defs[0]?.fullRange.endIndex ?? 0)).toBe(
+          "function target(): number { return 1; }",
+        );
       },
     );
   });
@@ -466,7 +543,13 @@ describe("adapter edge cases", () => {
     await withTree("function foo(): void {}\nexport = foo;\n", (tree, source) => {
       const exports = getAdapter("typescript").extractExports(tree, source);
       expect(exports).toEqual([
-        { exportedName: "default", localName: "foo", sourceSpecifier: null, kind: "default", range: { startLine: 2, endLine: 2 } },
+        {
+          exportedName: "default",
+          localName: "foo",
+          sourceSpecifier: null,
+          kind: "default",
+          range: { startLine: 2, endLine: 2 },
+        },
       ]);
     });
   });

@@ -272,8 +272,9 @@ describe("context caller discovery from commit snapshots", () => {
 
   test("comments and strings do not count as callers", async () => {
     const { dir, cleanup, commit } = await setupRepo({
-      "src/app.ts": 'const label = "helper()";\n// helper();\n/* helper(); */\nexport function run(): string {\n  return label;\n}\n',
-      "src/util.ts": "export function helper(): string {\n  return \"hi\";\n}\n",
+      "src/app.ts":
+        'const label = "helper()";\n// helper();\n/* helper(); */\nexport function run(): string {\n  return label;\n}\n',
+      "src/util.ts": 'export function helper(): string {\n  return "hi";\n}\n',
     });
     try {
       const { callers } = await resolveCallersForSymbol({
@@ -306,7 +307,7 @@ describe("context caller discovery from commit snapshots", () => {
 
   test("same-name unrelated function without import evidence is not selected", async () => {
     const { dir, cleanup, commit } = await setupRepo({
-      "src/a.ts": 'export function helper(): number {\n  return 1;\n}\n',
+      "src/a.ts": "export function helper(): number {\n  return 1;\n}\n",
       "src/b.ts": "export function helper(): number {\n  return helper();\n}\n",
     });
     try {
@@ -323,7 +324,8 @@ describe("context caller discovery from commit snapshots", () => {
 
   test("constructor call counts as a caller of the class", async () => {
     const { dir, cleanup, commit } = await setupRepo({
-      "src/app.ts": 'import { Client } from "./client";\nexport function connect(): number {\n  return new Client().fetch();\n}\n',
+      "src/app.ts":
+        'import { Client } from "./client";\nexport function connect(): number {\n  return new Client().fetch();\n}\n',
       "src/client.ts": "export class Client {\n  fetch(): number {\n    return 1;\n  }\n}\n",
     });
     try {
