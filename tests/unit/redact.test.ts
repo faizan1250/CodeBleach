@@ -201,6 +201,98 @@ describe("redact pre-send canaries", () => {
   });
 });
 
+describe("redact percent-encoded query names", () => {
+  test("redacts encoded sensitive names, keeps original bytes", () => {
+    for (const key of [
+      "api%5Fkey",
+      "DB%2DPassword",
+      "API%5FSECRET",
+      "%41PI%5FKEY",
+      "AWS%5FSecret",
+      "db%2dpassword",
+      "MONGODB%5FURI",
+    ]) {
+      expect(redact(`https://x.test/cb?${key}=SECRET123&b=1`)).toBe(
+        `https://x.test/cb?${key}=[REDACTED]&b=1`,
+      );
+    }
+  });
+
+  test("preserves unrelated params, separators, and fragments", () => {
+    expect(redact("https://x.test/cb?a=1&api%5Fkey=S3CR3T&b=2")).toBe(
+      "https://x.test/cb?a=1&api%5Fkey=[REDACTED]&b=2",
+    );
+    expect(redact("https://x.test/cb?c%61che=v&b=1")).toBe(
+      "https://x.test/cb?c%61che=v&b=1",
+    );
+    // Fragment handling matches the plain-name path (value runs to delimiter).
+    expect(redact("https://x.test/cb?api%5Fkey=S3CR3T#frag")).toBe(
+      redact("https://x.test/cb?api_key=S3CR3T#frag").replace("api_key=", "api%5Fkey="),
+    );
+    // Empty values never tokenize, encoded or plain.
+    expect(redact("https://x.test/cb?api%5Fkey=&b=1")).toBe(
+      redact("https://x.test/cb?api_key=&b=1").replace("api_key=", "api%5Fkey="),
+    );
+  });
+
+  test("never decodes values", () => {
+    expect(redact("https://x.test/cb?b=%41%42")).toBe("https://x.test/cb?b=%41%42");
+    expect(redact("https://x.test/cb?api_key=%53ECRET")).toBe(
+      "https://x.test/cb?api_key=[REDACTED]",
+    );
+  });
+
+  test("decodes exactly once", () => {
+    expect(redact("https://x.test/cb?api%255Fkey=S3CR3T&b=1")).toBe(
+      "https://x.test/cb?api%255Fkey=S3CR3T&b=1",
+    );
+  });
+
+  test("passes encoded telemetry through", () => {
+    expect(redact("https://x.test/cb?token%43ount=10&b=1")).toBe(
+      "https://x.test/cb?token%43ount=10&b=1",
+    );
+    expect(redact("https://x.test/cb?tokenCount=10&b=1")).toBe(
+      "https://x.test/cb?tokenCount=10&b=1",
+    );
+  });
+
+  test("malformed sequences never throw, fall back to raw key", () => {
+    expect(redact("https://x.test/cb?api%ZZkey=S3CR3T&b=1")).toBe(
+      "https://x.test/cb?api%ZZkey=S3CR3T&b=1",
+    );
+    expect(redact("https://x.test/cb?api%5Fkey%=S3CR3T&b=1")).toBe(
+      "https://x.test/cb?api%5Fkey%=S3CR3T&b=1",
+    );
+    // Undecodable bytes classify as the raw key: the `2->P` boundary still
+    // exposes the `Password` segment, so this shape redacts, as before.
+    expect(redact("https://x.test/cb?DB%2Password=S3CR3T&b=1")).toBe(
+      "https://x.test/cb?DB%2Password=[REDACTED]&b=1",
+    );
+  });
+
+  test("encoded redaction is idempotent and leak-free", () => {
+    const samples = [
+      "https://x.test/cb?api%5Fkey=S3CR3T&b=1",
+      "https://x.test/cb?DB%2DPassword=S3CR3T",
+      "https://x.test/cb?%41PI%5FKEY=S3CR3T&b=1",
+    ];
+    for (const sample of samples) {
+      const once = redact(sample);
+      expect(once).toContain("[REDACTED]");
+      expect(redact(once)).toBe(once);
+      expect(JSON.stringify(once)).not.toContain("S3CR3T");
+    }
+  });
+
+  test("leaves object keys, text paths, and plus-names alone", () => {
+    expect(sanitizePayload({ "api%5Fkey": "v" })).toEqual({ "api%5Fkey": "v" });
+    expect(redact("api%5Fkey=hunter2")).toBe("api%5Fkey=hunter2");
+    // No form-urlencoded `+`-means-space semantics in the query parser.
+    expect(redact("https://x.test/cb?api+key=v")).toBe("https://x.test/cb?api+key=v");
+  });
+});
+
 describe("redact spaced and escaped quoted values", () => {
   test("redacts spaced double-quoted values with balanced quotes", () => {
     expect(redact('PASSWORD="correct horse battery staple"')).toBe('PASSWORD="[REDACTED]"');
