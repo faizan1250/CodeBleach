@@ -29,6 +29,8 @@ export interface ReviewEngineOptions {
 export interface ReviewCallOptions {
   /** Caller cancellation; aborts in-flight requests and skips queued units. */
   signal?: AbortSignal | undefined;
+  /** DiffResult.headSha for code-owned attribution; falls back to constructor headSha. */
+  headSha?: string | undefined;
 }
 
 // P4-08 stop reasons: caller cancellation wins over the stage deadline.
@@ -124,6 +126,7 @@ export class ReviewEngineImpl implements ReviewEngine {
     }
     requireTrainingOptIn(this.env);
     const callerSignal = options?.signal;
+    const headSha = options?.headSha ?? this.headSha;
     // Stage deadline (P4-08): one wall-clock ceiling over every per-unit
     // request, transport retry, repair, and cap escalation. Zero means the
     // deadline is already expired: no unit starts. Expired callers abort via
@@ -169,7 +172,7 @@ export class ReviewEngineImpl implements ReviewEngine {
             continue;
           }
           try {
-            out[index] = await this.reviewUnit(unit, config, stage.signal, stopped);
+            out[index] = await this.reviewUnit(unit, config, stage.signal, stopped, headSha);
           } catch (error) {
             // Policy errors abort the whole run; per-unit failures stay partial.
             if (error instanceof ReviewerError && error.code === "CONFIG_INVALID") throw error;
@@ -203,6 +206,7 @@ export class ReviewEngineImpl implements ReviewEngine {
     config: ResolvedConfig,
     signal: AbortSignal,
     stopped: () => StopReason,
+    headSha: string,
   ): Promise<UnitOutcome> {
     const built = buildReviewPrompt(unit, config);
     if (!isPromptWithinBudget(built, config.llm.max_review_unit_input_tokens)) {
@@ -225,7 +229,7 @@ export class ReviewEngineImpl implements ReviewEngine {
     const usage = emptyReviewUsage();
     const firstMax = config.llm.max_output_tokens;
     try {
-      const first = await this.completeUnit(unit, built, config, firstMax, usage, signal);
+      const first = await this.completeUnit(unit, built, config, firstMax, usage, signal, headSha);
       return { ok: true, findings: first.findings, diagnostics: first.diagnostics, usage };
     } catch (error) {
       if (error instanceof ReviewerError && error.code === "CONFIG_INVALID") throw error;
@@ -241,7 +245,7 @@ export class ReviewEngineImpl implements ReviewEngine {
       if (escalated <= firstMax) return this.unitFailure(unit, error, usage, "REVIEW_OUTPUT_INCOMPLETE");
       usage.incompleteRetries += 1;
       try {
-        const second = await this.completeUnit(unit, built, config, escalated, usage, signal);
+        const second = await this.completeUnit(unit, built, config, escalated, usage, signal, headSha);
         return { ok: true, findings: second.findings, diagnostics: second.diagnostics, usage };
       } catch (escalatedError) {
         if (escalatedError instanceof ReviewerError && escalatedError.code === "CONFIG_INVALID") {
@@ -296,6 +300,7 @@ export class ReviewEngineImpl implements ReviewEngine {
     maxTokens: number,
     usage: ReviewUsage,
     signal: AbortSignal,
+    headSha: string,
   ): Promise<{ findings: Finding[]; diagnostics: ReviewDiagnostic[] }> {
     const stats = newJsonCallStats();
     try {
@@ -316,7 +321,7 @@ export class ReviewEngineImpl implements ReviewEngine {
       for (const raw of output.findings) {
         const finding = normalizeFinding(raw, {
           unit,
-          headSha: this.headSha,
+          headSha,
           pass: CODE_REVIEW_PROMPT_VERSION,
         });
         // Rejected findings carry no diagnostics with model text (P4-07 keeps
