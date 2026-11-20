@@ -115,9 +115,58 @@ describe("redact pre-send canaries", () => {
     expect(redact('{"token": "987654"}')).toBe('{"token":"[REDACTED]"}');
   });
 
-  test("leaves segment-only numeric values alone", () => {
+  test("leaves exact-key telemetry numerics alone", () => {
     expect(redact("tokenCount: 12345")).toBe("tokenCount: 12345");
+    expect(redact("usage inputTokens: 10 outputTokens: 5")).toBe(
+      "usage inputTokens: 10 outputTokens: 5",
+    );
     expect(redact("MY_SECRET=hunter2")).toBe("MY_SECRET=[REDACTED]");
+  });
+
+  test("redacts numeric-only values under compound sensitive keys", () => {
+    expect(redact("DB_PASSWORD=123456")).toBe("DB_PASSWORD=[REDACTED]");
+    expect(redact("POSTGRES_PASSWORD=987654321")).toBe("POSTGRES_PASSWORD=[REDACTED]");
+    expect(redact("MY_SECRET=123456789")).toBe("MY_SECRET=[REDACTED]");
+    expect(redact("DB_TOKEN=123456")).toBe("DB_TOKEN=[REDACTED]");
+    expect(redact('SERVICE_PASSWORD="123456"')).toBe('SERVICE_PASSWORD="[REDACTED]"');
+    expect(redact('SECRET_KEY="false"')).toBe('SECRET_KEY="[REDACTED]"');
+    expect(redact("MY_SECRET=123456")).toBe("MY_SECRET=[REDACTED]");
+  });
+
+  test("redacts boolean-like values under whole-sensitive keys", () => {
+    expect(redact("PASSWORD=true")).toBe("PASSWORD=[REDACTED]");
+    expect(redact("API_SECRET=false")).toBe("API_SECRET=[REDACTED]");
+    expect(redact("password: null")).toBe("password:[REDACTED]");
+  });
+
+  test("redacts numeric secrets across json/yaml/query forms", () => {
+    expect(redact('{"db_password": "123456"}')).toBe('{"db_password":"[REDACTED]"}');
+    expect(redact("db_password: 123456")).toBe("db_password:[REDACTED]");
+    expect(redact("https://x.test/cb?db_password=123456&b=1")).toBe(
+      "https://x.test/cb?db_password=[REDACTED]&b=1",
+    );
+    expect(redact("https://x.test/cb?a=1&password=true")).toBe(
+      "https://x.test/cb?a=1&password=[REDACTED]",
+    );
+  });
+
+  test("redacts multi-line mixed assignments, preserves ordinary numerics", () => {
+    const input = "DB_PASSWORD=123456\nretries=3\nport=5432\ntokenCount=42";
+    expect(redact(input)).toBe("DB_PASSWORD=[REDACTED]\nretries=3\nport=5432\ntokenCount=42");
+  });
+
+  test("numeric redaction is idempotent and keeps surrounding syntax", () => {
+    for (const sample of [
+      "DB_PASSWORD=123456",
+      'SERVICE_PASSWORD="123456"',
+      "PASSWORD=true",
+      "db_password: 123456",
+      "https://x.test/cb?db_password=123456&b=1",
+    ]) {
+      const once = redact(sample);
+      expect(once).toContain("[REDACTED]");
+      expect(redact(once)).toBe(once);
+    }
   });
 
   test("redaction is idempotent", () => {
@@ -179,11 +228,9 @@ describe("redact spaced and escaped quoted values", () => {
     expect(spaced).not.toContain("correct");
   });
 
-  test("leaves quoted prose and guarded values alone", () => {
+  test("leaves quoted prose alone", () => {
     expect(redact('cache key="some prose with spaces"')).toBe('cache key="some prose with spaces"');
     expect(redact('message: "hello world"')).toBe('message: "hello world"');
-    expect(redact('MY_SECRET="12345"')).toBe('MY_SECRET="12345"');
-    expect(redact('password="true"')).toBe('password="true"');
   });
 
   test("spaced redaction is idempotent", () => {
@@ -250,10 +297,29 @@ describe("sanitizePayload", () => {
 
   test("drops string values under segment-sensitive keys, keeps telemetry numerics", () => {
     expect(sanitizePayload({ MY_SECRET: "hunter2" })).toEqual({ MY_SECRET: "[REDACTED]" });
+    expect(sanitizePayload({ MY_SECRET: "123456789" })).toEqual({ MY_SECRET: "[REDACTED]" });
     expect(sanitizePayload({ tokenCount: 3, nested: { MY_SECRET: "x" } })).toEqual({
       tokenCount: 3,
       nested: { MY_SECRET: "[REDACTED]" },
     });
+  });
+
+  test("drops numeric and boolean values under sensitive keys in objects", () => {
+    expect(sanitizePayload({ DB_PASSWORD: 123456 })).toEqual({ DB_PASSWORD: "[REDACTED]" });
+    expect(sanitizePayload({ DB_PASSWORD: "123456" })).toEqual({ DB_PASSWORD: "[REDACTED]" });
+    expect(sanitizePayload({ PASSWORD: true })).toEqual({ PASSWORD: "[REDACTED]" });
+    expect(sanitizePayload({ API_SECRET: false })).toEqual({ API_SECRET: "[REDACTED]" });
+    expect(sanitizePayload({ nested: { SERVICE_PASSWORD: "123456" } })).toEqual({
+      nested: { SERVICE_PASSWORD: "[REDACTED]" },
+    });
+  });
+
+  test("string, object, and query paths agree on numeric secrets", () => {
+    expect(redact("DB_PASSWORD=123456")).toContain("[REDACTED]");
+    expect(sanitizePayload({ DB_PASSWORD: "123456" })).toEqual({ DB_PASSWORD: "[REDACTED]" });
+    expect(redact("https://x.test/cb?db_password=123456")).toContain("db_password=[REDACTED]");
+    expect(redact("tokenCount: 12345")).toBe("tokenCount: 12345");
+    expect(sanitizePayload({ tokenCount: 12345 })).toEqual({ tokenCount: 12345 });
   });
 
   test("drops database-url and credential keys", () => {
@@ -353,6 +419,48 @@ describe("sanitizePayload", () => {
     });
   });
 
+  test("keeps numeric secrets out of request/error/diagnostic/artifact shapes", () => {
+    const dbPass = "771234";
+    const pgPass = "987654321";
+    const mySecret = "556789123";
+    const request = {
+      system: "prompt",
+      user: redact(
+        `diff line DB_PASSWORD=${dbPass} plus POSTGRES_PASSWORD=${pgPass} and MY_SECRET=${mySecret}`,
+      ),
+    };
+    const err = sanitizePayload({
+      err: new Error(`boom DB_PASSWORD=${dbPass} at PASSWORD=true`),
+    });
+    const diagnostics = sanitizePayload({ DB_PASSWORD: dbPass, PASSWORD: true, note: "plain" });
+    const query = redact(`https://x.test/cb?db_password=${dbPass}&b=1`);
+    const artifact = sanitizePayload({
+      units: [{ file: "a.ts", diff: `MY_SECRET=${mySecret}` }],
+      config: { POSTGRES_PASSWORD: pgPass },
+      usage: { inputTokens: 10, outputTokens: 5, tokenCount: 100 },
+    });
+    for (const surface of [request, err, diagnostics, query, artifact]) {
+      const serialized = JSON.stringify(surface);
+      expect(serialized).not.toContain(dbPass);
+      expect(serialized).not.toContain(pgPass);
+      expect(serialized).not.toContain(mySecret);
+      expect(serialized).not.toContain("PASSWORD=true");
+    }
+    expect(JSON.stringify(request)).toContain("[REDACTED]");
+    expect(JSON.stringify(artifact)).toContain("[REDACTED]");
+    // Telemetry survives the same pipeline untouched.
+    const usage = (artifact as { usage: unknown }).usage;
+    expect(usage).toEqual({ inputTokens: 10, outputTokens: 5, tokenCount: 100 });
+  });
+
+  test("preserves briefing telemetry values verbatim", () => {
+    expect(redact("inputTokens=123456")).toBe("inputTokens=123456");
+    expect(redact("outputTokens=987654")).toBe("outputTokens=987654");
+    expect(redact("tokenCount=100")).toBe("tokenCount=100");
+    expect(sanitizePayload({ inputTokens: 123456, outputTokens: 987654, tokenCount: 100 })).toEqual(
+      { inputTokens: 123456, outputTokens: 987654, tokenCount: 100 },
+    );
+  });
   test("keeps synthetic secrets out of request/error/diagnostic/artifact shapes", () => {
     const spaced = "correct horse battery staple";
     const connSecret = "s3cr3t-value";

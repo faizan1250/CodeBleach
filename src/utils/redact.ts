@@ -109,7 +109,21 @@ function isSensitiveAssignmentKey(key: string): boolean {
   return isSensitiveKey(key) || hasSensitiveSegment(key);
 }
 
-const NON_SECRET_VALUES = /^(?:true|false|null|undefined)$/i;
+// Exact telemetry counters that share a segment with secrets ("token" in
+// tokenCount) but carry counts, not secrets. Key-based, never value-based:
+// only these normalized keys pass, and only on segment-only hits —
+// whole-key classification always wins.
+const TELEMETRY_KEYS: ReadonlySet<string> = new Set([
+  "tokencount",
+  "inputtokens",
+  "outputtokens",
+  "totaltokens",
+  "maxtokens",
+]);
+
+function isTelemetryKey(key: string): boolean {
+  return TELEMETRY_KEYS.has(normalizeKey(key));
+}
 
 // `?key=value` / `&key=value` in free text; value replaced, key kept for context.
 const URL_QUERY_SECRET_RE = /([?&])([A-Za-z0-9_.\-~%]+)=([^&\s"'<>]+)/g;
@@ -147,6 +161,7 @@ export function redact(text: string, extraSecrets: string[] = []): string {
     URL_QUERY_SECRET_RE,
     (match: string, mark: string, key: string, value: string) => {
       if (value === REDACTED || !isSensitiveAssignmentKey(key)) return match;
+      if (!isSensitiveKey(key) && isTelemetryKey(key)) return match;
       return `${mark}${key}=[REDACTED]`;
     },
   );
@@ -179,11 +194,11 @@ export function redact(text: string, extraSecrets: string[] = []): string {
             ? (sqClose as string)
             : "";
       if (value === REDACTED || !isSensitiveAssignmentKey(key)) return match;
-      if (NON_SECRET_VALUES.test(value)) return match;
-      // Whole-key hits (password, api_key, ...) always redact, even for
-      // numeric-only values; the alpha guard stays for segment-only hits
-      // (MY_SECRET, tokenCount) to preserve numeric telemetry.
-      if (!isSensitiveKey(key) && !/[A-Za-z]/.test(value)) return match;
+      // Sensitive classification first: numerics and boolean-like values
+      // never bypass password/secret/token/api-key/credential keys. The only
+      // pass-through is exact-key telemetry on segment-only hits
+      // (tokenCount); whole-key hits always redact.
+      if (!isSensitiveKey(key) && isTelemetryKey(key)) return match;
       return `${pre}${openKey}${key}${closeKey}${sep}${openValue}[REDACTED]${closeValue}`;
     },
   );
@@ -227,10 +242,24 @@ function sanitizeValue(value: unknown, extraSecrets: string[], seen: WeakSet<obj
   } else {
     const out: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value)) {
-      // Whole-key hits drop any value; segment-only hits (MY_SECRET) drop
-      // string values to match redact(), keeping non-strings for telemetry.
-      if (isSensitiveKey(key) || (typeof entry === "string" && hasSensitiveSegment(key))) {
+      // Whole-key hits drop any value type (strings, numerics, booleans);
+      // segment-only hits drop primitives except exact-key telemetry
+      // (tokenCount) and recurse into containers. Mirrors redact().
+      if (isSensitiveKey(key)) {
         out[key] = REDACTED;
+      } else if (hasSensitiveSegment(key)) {
+        if (isTelemetryKey(key)) {
+          out[key] = sanitizeValue(entry, extraSecrets, seen);
+        } else if (
+          typeof entry === "string" ||
+          typeof entry === "number" ||
+          typeof entry === "boolean" ||
+          entry === null
+        ) {
+          out[key] = REDACTED;
+        } else {
+          out[key] = sanitizeValue(entry, extraSecrets, seen);
+        }
       } else {
         out[key] = sanitizeValue(entry, extraSecrets, seen);
       }
