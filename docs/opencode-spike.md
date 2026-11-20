@@ -125,6 +125,19 @@ Spike harness is Bun-native `fetch` + `AbortSignal.timeout`; pure helpers covere
 `tests/unit/opencode-spike.test.ts` (10 tests, offline, no secrets). Live smoke
 result: **succeeds** (endpoint accepted; output incomplete-due-to-cap as above).
 
+## P4-10 close-out (2026-11-20, no live calls)
+
+Phase 4 is frozen (ADR 0020). The endpoint above is pinned in
+`src/llm/constants.ts`; structured-output-off text path, response-text
+extraction, usage/cost/allowance capture, timeout/abort/`Retry-After`, and the
+400/401/403/404/429/5xx mapping are covered by mock-transport provider tests
+(`tests/unit/opencode-provider.test.ts`), so no further live probing was done.
+The recorded quality signal is the deterministic mock seeded-bug smoke
+(`tests/integration/review-seeded-smoke.test.ts`): seeded defect found at its
+line with verbatim evidence, clean control silent, fingerprint stable. No live
+seeded-bug smoke was run; no secrets or raw prompts/responses were committed.
+The P4-00 record above is unchanged.
+
 ## Remaining blockers (for P4-02+, not for pinning)
 
 Phase 4 may proceed to provider code against the pinned endpoint. Still open:

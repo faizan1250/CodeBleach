@@ -421,7 +421,7 @@ open: Go allowance/billing-source surfacing beyond `raw`.
 - **Errors:** `ReviewerError{ code, retryable, cause }`. `Result<T,E>` for expected failures at module boundaries (config load, parse); throw for bugs. Exit codes: `0` ok, `1` runtime failure, `2` config/usage error.
 - **Logging:** JSON lines to stderr, levels `debug|info|warn|error`, one CLI-minted `runId` shared by every line and the run artifact, redaction built in. Human-readable results go to stdout.
 - **Reliability:** per-call timeout + abort, bounded retries (exp backoff + jitter) only on retryable errors, overall review-stage deadline (`review_timeout_ms`) with caller-cancel propagation, partial-failure tolerant (a failed unit ≠ failed run), head-SHA recheck before publish.
-- **Cost:** skip irrelevant files, token budgets, batch small units, cache LLM responses by `hash(prompt+model)` in `.reviewer-cache/` (dev/eval only at first), incremental re-review on `synchronize` = only changed files since last reviewed SHA (Phase 8).
+- **Cost:** skip irrelevant files, token budgets, one request per ReviewUnit with no batching, cache LLM responses by `hash(prompt+model)` in `.reviewer-cache/` (dev/eval only at first), incremental re-review on `synchronize` = only changed files since last reviewed SHA (Phase 8).
 
 ---
 
@@ -437,9 +437,10 @@ src/
   config/              schema.ts, defaults.ts, load.ts, migrate.ts
   diff/                git.ts, parse.ts, positions.ts, filters.ts, paths.ts
   context/             adapters/typescript.ts, parser.ts, search.ts, retrieve.ts, rank.ts, budget.ts
-  review/              engine.ts, prompt.ts, normalize.ts
+  review/              engine.ts, prompt.ts, normalize.ts, result.ts
+  llm/                 constants.ts, training-gate.ts
   validate/            engine.ts, deterministic.ts, llm.ts, dedupe.ts
-  providers/           types.ts, fake.ts, opencode.ts
+  providers/           types.ts, fake.ts, json.ts, opencode.ts
   github/              client.ts, publish.ts, fingerprint.ts
   types/               diff.ts context.ts finding.ts review.ts validation.ts provider.ts index.ts
   utils/               tokens.ts, redact.ts, spawn.ts, glob.ts
@@ -483,7 +484,7 @@ evals/                 cases/, run.ts   (Phase 8)
 | 1 Foundation | Bun/TS repo, types, config loader, CLI, logger, errors, provider interface, walking-skeleton pipeline with fakes, CI | `bun test` + typecheck green; `review --dry-run` produces `run.json` via fakes |
 | 2 Diff Engine | deterministic git diff → `DiffResult` with positions, filters, skip reasons, one synthetic module symbol per eligible file | Fixture diffs map to correct lines/positions/symbols; identical output under hostile Git config |
 | 3 Context Engine | TS adapter, definitions, callers, callees, tests, ranking, budget | `ReviewUnit`s for a fixture repo contain expected items within budget |
-| 4 Review Engine | OpenCode spike → provider, prompts, Zod parse, repair retry, result/usage/artifact | Seeded-bug fixtures yield findings; garbage output handled |
+| 4 Review Engine | OpenCode spike → provider, prompts, Zod parse, repair retry, result/usage/artifact | Done (P4-10, ADR 0020): deterministic seeded-bug smoke green, garbage/incomplete handled, suite + types green, x-plat CI |
 | 5 Validation | Deterministic checks, dedupe, optional LLM check | Hallucinated file/line/evidence rejected in tests |
 | 6 Repo awareness | Rules → prompt, path overrides, inferred conventions + cache | Explicit rules affect prompts; inferred never overrides |
 | 7 GitHub | Octokit publisher, workflow, dedupe markers, SHA recheck | Real PR gets correct inline comments, no dupes on re-push |
