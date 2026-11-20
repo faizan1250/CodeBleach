@@ -149,11 +149,34 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
 
     const result = await runStage(
       "review",
-      () => deps.review.review(contextResult.units, resolved),
+      // The exact head SHA comes from the diff, not the CLI flag: callers may
+      // pass symbolic refs, and the engine must attribute code-owned metadata
+      // to the resolved commit.
+      () => deps.review.review(contextResult.units, resolved, { headSha: diffResult.headSha }),
       (value) => value.findings.length,
     );
     findings = result.findings;
     reviewResult = result;
+    if (result.status === "skipped") {
+      // --no-llm preview: nothing exists to validate or publish. Replace the
+      // "completed" record runStage just added with an explicit skip, then
+      // skip validation/publish with reasons instead of entering Phase 5 stubs.
+      const completed = stages.pop();
+      stages.push({
+        name: "review",
+        status: "skipped",
+        ms: completed?.ms ?? 0,
+        reason: "no_llm_flag",
+      });
+      stages.push({ name: "validation", status: "skipped", ms: 0, reason: "review_skipped_no_llm" });
+      if (input.dryRun) {
+        stages.push({ name: "publish", status: "skipped", ms: 0, reason: "dry-run" });
+      } else {
+        stages.push({ name: "publish", status: "skipped", ms: 0, reason: "review_skipped_no_llm" });
+      }
+      await persist("completed");
+      return { runId, status: "completed", baseSha: input.baseSha, headSha: input.headSha, configSource, stages };
+    }
     await persist("running");
 
     const validatedList = await runStage(
