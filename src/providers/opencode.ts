@@ -326,11 +326,13 @@ export class OpenCodeProvider implements LlmProvider {
       };
     }
     const usage = extractUsage(envelope["usage"]);
+    const costUsd = extractCost(envelope["usage"]);
     return {
       kind: "ok",
       response: {
         text,
         ...(usage === undefined ? {} : { usage }),
+        ...(costUsd === undefined ? {} : { costUsd }),
         model: asNonEmptyString(envelope["model"]) ?? modelId,
         raw: minimalRaw(envelope),
       },
@@ -368,13 +370,29 @@ function extractText(envelope: Record<string, unknown>): string | undefined {
   return parts.length > 0 ? parts.join("") : undefined;
 }
 
-// Unknown when absent; never zero-filled.
-function extractUsage(usage: unknown): { inputTokens: number; outputTokens: number } | undefined {
+// Unknown when absent; never zero-filled. Reasoning stays separate from the
+// output total (it is already included in output_tokens by the API).
+function extractUsage(usage: unknown):
+  | { inputTokens: number; outputTokens: number; reasoningTokens?: number | undefined }
+  | undefined {
   if (!isRecord(usage)) return undefined;
   const inputTokens = asFiniteNumber(usage["input_tokens"]);
   const outputTokens = asFiniteNumber(usage["output_tokens"]);
   if (inputTokens === undefined || outputTokens === undefined) return undefined;
-  return { inputTokens, outputTokens };
+  const details = isRecord(usage["output_tokens_details"])
+    ? asFiniteNumber(usage["output_tokens_details"]["reasoning_tokens"])
+    : undefined;
+  return {
+    inputTokens,
+    outputTokens,
+    ...(details === undefined ? {} : { reasoningTokens: details }),
+  };
+}
+
+// Provider-reported charge only; never estimated. Unknown when absent.
+function extractCost(usage: unknown): number | undefined {
+  if (!isRecord(usage)) return undefined;
+  return asFiniteNumber(usage["cost"]);
 }
 
 // Only diagnostic scalars; full bodies are never persisted.
