@@ -310,13 +310,19 @@ context:
   max_parse_time_ms: 2000
   max_total_parse_time_ms: 30000
   max_tokens_per_unit: 12000
+llm:
+  request_timeout_ms: 90000
+  max_output_tokens: 32768
+  max_retries: 2
+  max_concurrent_requests: 3
+  max_review_unit_input_tokens: 64000
 ```
 
 Behavior: missing file → defaults. Invalid file → `ConfigError` (CLI exit 2); in Action, publish a single comment describing the config error rather than silently reviewing with defaults. User `ignore.paths` extend (never replace) the built-in defaults. A `.reviewer.yml` symlink is followed only when its resolved target stays inside the resolved repository root and is a regular file; outside targets, dangling links, loops, and directories are config errors, never silent defaults. Unknown keys → error (catches typos). Evolution: `version` field + `migrate(raw)` registry chain; new fields are always optional with defaults.
 
 Optional `review.max_file_size_kb` (default 500 KB, absolute ceiling 26623 KB, ADRs 0007, 0009) is measured from the head-commit blob; over-limit files skip with `"too-large"`. An accepted blob plus its 1-byte growth sentinel must fit the 26 MiB per-stream blob-read cap, so values above the ceiling are rejected at config load. Configured glob fields are validated against the documented `*`/`**`/`**/`/`?` subset at load time.
 
-Optional `context` time limits bound the Context Engine (Phase 3): `max_run_time_ms` (default 120000, 5000–600000) is the overall wall-clock deadline, `max_parse_time_ms` (default 2000, 100–30000) caps one file parse, `max_total_parse_time_ms` (default 30000, 1000–180000) caps cumulative parsing. Config load rejects `max_parse_time_ms > max_total_parse_time_ms > max_run_time_ms` violations as `CONFIG_INVALID`. The per-unit hard cap `max_tokens_per_unit` (default 12000, 1000–24000, ADR 0013) covers diff, definition, explicit rules, other context items, and framing reserve; rules are never truncated and hunks are kept whole.
+Optional `context` time limits bound the Context Engine (Phase 3): `max_run_time_ms` (default 120000, 5000–600000) is the overall wall-clock deadline, `max_parse_time_ms` (default 2000, 100–30000) caps one file parse, `max_total_parse_time_ms` (default 30000, 1000–180000) caps cumulative parsing. Config load rejects `max_parse_time_ms > max_total_parse_time_ms > max_run_time_ms` violations as `CONFIG_INVALID`. Optional `llm` controls tune the fixed-model integration (Phase 4, ADR 0016): `request_timeout_ms` (default 90000, 1000–600000), `max_output_tokens` (default 32768), `max_retries` (default 2, 0–5), `max_concurrent_requests` (default 3, 1–10), `max_review_unit_input_tokens` (default 64000, per-unit ceiling). There are no `provider`/`model`/`api_family` selectors: the target is pinned in code (`src/llm/constants.ts`), unknown `llm.*` keys are rejected, and token ceilings are clamped to the authenticated model limits at runtime. Phase 1–3 configuration files load unchanged with `llm` defaults applied.
 
 ---
 
@@ -345,6 +351,16 @@ Rules: the Review/Validation engines depend only on `LlmProvider`. Always Zod-va
 *Surface B — OpenCode Zen/Go model gateway* (`https://opencode.ai/zen/v1`, Go: `/zen/go/v1`), Bearer API key, `GET /models`. Third-party sources (not primary docs) report the gateway exposes **different protocols per model** (`/chat/completions`, `/messages`, `/responses`; some models Gemini-native) — **do not assume OpenAI-compatibility for every model, nor `response_format` support.** Third-party issue reports also show intermittent 5xx/auth errors → retries + fail-open are mandatory.
 
 Spike deliverable (`docs/opencode-spike.md`): chosen surface, auth, model ids, whether schema-constrained output works for the chosen model, timeouts, tool restriction, a working 30-line script. Then implement `OpenCodeProvider` accordingly. Don't silently substitute another vendor.
+
+**Resolved by the P4-00 spike (ADR 0015) and pinned in P4-01 (ADR 0016):** the
+surface is direct OpenCode Go OpenAI Responses at
+`https://opencode.ai/inference/go/openai/v1/responses` with raw model ID
+`muse-spark-1.3-contributor`, bearer `OPENCODE_API_KEY`, CodeBleach User-Agent,
+and one stable opaque `x-opencode-session` per run. No tools, no SDK/agent
+host, no repository execution. Every model request requires exact
+`CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING=true` (Not-ZDR gate, pre-network). Still
+open for P4-02+: completed-response usage/cost/allowance capture, native
+structured-output support, and retry/timeout mapping.
 
 **Prompt-injection & secrets (applies to all LLM calls):** wrap code in delimited blocks and state it is untrusted data; reviewer prompt contains no secrets; no tool access for the model beyond what's strictly needed; redact secrets (regex + entropy) and skip `.env*`, `*.pem`, key files before sending; discard any finding whose output tries to change instructions/format; never execute anything suggested by the model.
 
