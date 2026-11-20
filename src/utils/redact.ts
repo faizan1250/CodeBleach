@@ -133,7 +133,10 @@ function isTelemetryKey(key: string): boolean {
 }
 
 // `?key=value` / `&key=value` in free text; value replaced, key kept for context.
-const URL_QUERY_SECRET_RE = /([?&])([A-Za-z0-9_.\-~%]+)=([^&\s"'<>]+)/g;
+// Literal `#` starts a fragment: excluded from the value so `?api_key=S#frag`
+// keeps `#frag`, and pairs after it in the same token stay opaque (`%23` is
+// not a delimiter and stays inside the value).
+const URL_QUERY_SECRET_RE = /([?&])([A-Za-z0-9_.\-~%]+)=([^&#\s"'<>]+)/g;
 
 // Percent-encoded query names classify on the once-decoded form; the raw
 // capture is always re-emitted. decodeURIComponent runs exactly one pass
@@ -179,8 +182,11 @@ export function redact(text: string, extraSecrets: string[] = []): string {
   URL_QUERY_SECRET_RE.lastIndex = 0;
   out = out.replace(
     URL_QUERY_SECRET_RE,
-    (match: string, mark: string, key: string, value: string) => {
+    (match: string, mark: string, key: string, value: string, offset: number, input: string) => {
       if (value === REDACTED) return match;
+      // Fragment-opaque: skip pairs after the first literal `#` in this token.
+      const token = /[^\s"'<>]*$/.exec(input.slice(0, offset))?.[0] ?? "";
+      if (token.includes("#")) return match;
       const decodedKey = decodeQueryKeyOnce(key);
       if (!isSensitiveAssignmentKey(decodedKey)) return match;
       if (!isSensitiveKey(decodedKey) && isTelemetryKey(decodedKey)) return match;

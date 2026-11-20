@@ -225,14 +225,77 @@ describe("redact percent-encoded query names", () => {
     expect(redact("https://x.test/cb?c%61che=v&b=1")).toBe(
       "https://x.test/cb?c%61che=v&b=1",
     );
-    // Fragment handling matches the plain-name path (value runs to delimiter).
+    // Fragment survives: value stops at literal `#`, fragment opaque.
     expect(redact("https://x.test/cb?api%5Fkey=S3CR3T#frag")).toBe(
-      redact("https://x.test/cb?api_key=S3CR3T#frag").replace("api_key=", "api%5Fkey="),
+      "https://x.test/cb?api%5Fkey=[REDACTED]#frag",
     );
     // Empty values never tokenize, encoded or plain.
     expect(redact("https://x.test/cb?api%5Fkey=&b=1")).toBe(
-      redact("https://x.test/cb?api_key=&b=1").replace("api_key=", "api%5Fkey="),
+      "https://x.test/cb?api%5Fkey=&b=1",
     );
+  });
+
+  test("keeps fragments opaque, redacts only pre-fragment pairs", () => {
+    expect(redact("https://x.test/cb?api_key=SECRET#section")).toBe(
+      "https://x.test/cb?api_key=[REDACTED]#section",
+    );
+    expect(redact("https://x.test/cb?api%5Fkey=S3CR3T#frag")).toBe(
+      "https://x.test/cb?api%5Fkey=[REDACTED]#frag",
+    );
+    expect(redact("https://x.test/cb?x=1#section&api_key=fragment-value")).toBe(
+      "https://x.test/cb?x=1#section&api_key=fragment-value",
+    );
+    expect(redact("https://x.test/cb?x=1#section?api_key=v")).toBe(
+      "https://x.test/cb?x=1#section?api_key=v",
+    );
+    expect(redact("#fragment?api_key=v")).toBe("#fragment?api_key=v");
+    expect(redact("https://x.test/cb?api_key=SECRET#frag&b=2")).toBe(
+      "https://x.test/cb?api_key=[REDACTED]#frag&b=2",
+    );
+    expect(redact("https://x.test/cb?a=1&api_key=SECRET&b=2#frag&token=abc")).toBe(
+      "https://x.test/cb?a=1&api_key=[REDACTED]&b=2#frag&token=abc",
+    );
+    expect(redact("https://x.test/cb?api_key=SECRET%23more")).toBe(
+      "https://x.test/cb?api_key=[REDACTED]",
+    );
+    expect(redact("https://x.test/cb?message=hello%23world")).toBe(
+      "https://x.test/cb?message=hello%23world",
+    );
+    expect(redact("https://x.test/cb?api_key=SECRET#")).toBe(
+      "https://x.test/cb?api_key=[REDACTED]#",
+    );
+    expect(redact("https://x.test/cb?x=1#")).toBe("https://x.test/cb?x=1#");
+    expect(redact("https://x.test/cb?a=1#x=1&y=2#z=3")).toBe(
+      "https://x.test/cb?a=1#x=1&y=2#z=3",
+    );
+    expect(redact("https://x.test/cb?api_key=S#a=b#c=d")).toBe(
+      "https://x.test/cb?api_key=[REDACTED]#a=b#c=d",
+    );
+    expect(redact("https://a.test/cb?api_key=ONE#f1 https://b.test/cb?api_key=TWO#f2")).toBe(
+      "https://a.test/cb?api_key=[REDACTED]#f1 https://b.test/cb?api_key=[REDACTED]#f2",
+    );
+    expect(redact("https://x.test/cb?api%ZZkey=S3CR3T#frag")).toBe(
+      "https://x.test/cb?api%ZZkey=S3CR3T#frag",
+    );
+    expect(redact("issue #123: see https://x.test/cb?api_key=SECRET#frag")).toBe(
+      "issue #123: see https://x.test/cb?api_key=[REDACTED]#frag",
+    );
+    expect(redact("use #hashtag here")).toBe("use #hashtag here");
+  });
+
+  test("fragment redaction is idempotent and leak-free", () => {
+    const samples = [
+      "https://x.test/cb?api_key=SECRET#section",
+      "https://x.test/cb?api%5Fkey=S3CR3T#frag",
+      "https://x.test/cb?x=1#section&api_key=fragment-value",
+      "https://x.test/cb?a=1&api_key=SECRET&b=2#frag&token=abc",
+      "https://x.test/cb?api_key=SECRET%23more",
+    ];
+    for (const sample of samples) {
+      const once = redact(sample);
+      expect(redact(once)).toBe(once);
+    }
+    expect(redact("https://x.test/cb?api_key=SECRET#section")).not.toContain("SECRET");
   });
 
   test("never decodes values", () => {
