@@ -45,6 +45,7 @@ import {
   MIN_MAX_TOTAL_PARSE_TIME_MS,
   mergeIgnorePaths,
 } from "./defaults.ts";
+import { CONTEXT_SAFETY_MARGIN_TOKENS, MODEL_CONTEXT_TOKENS } from "../llm/limits.ts";
 
 export const LANGUAGES = ["typescript", "tsx", "javascript"] as const;
 
@@ -222,6 +223,25 @@ export const ConfigFileSchema = z.strictObject({
         .min(MIN_LLM_REVIEW_TIMEOUT_MS)
         .max(MAX_LLM_REVIEW_TIMEOUT_MS)
         .default(DEFAULT_LLM_REVIEW_TIMEOUT_MS),
+    })
+    .check((ctx) => {
+      // Output tokens ride inside the context window: an input budget that
+      // cannot fit alongside the reserved output plus margin is rejected at
+      // load instead of failing per-unit at request time.
+      const llm = ctx.value;
+      if (
+        llm.max_review_unit_input_tokens + llm.max_output_tokens + CONTEXT_SAFETY_MARGIN_TOKENS >
+        MODEL_CONTEXT_TOKENS
+      ) {
+        ctx.issues.push({
+          code: "custom",
+          message:
+            `llm budgets do not fit the ${MODEL_CONTEXT_TOKENS}-token local context ceiling: ` +
+            `max_review_unit_input_tokens (${llm.max_review_unit_input_tokens}) + max_output_tokens ` +
+            `(${llm.max_output_tokens}) + margin (${CONTEXT_SAFETY_MARGIN_TOKENS}) exceeds it`,
+          input: ctx.value,
+        });
+      }
     })
     .prefault({}),
   ignore: z

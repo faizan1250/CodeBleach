@@ -40,8 +40,9 @@ export const MIN_MAX_TOKENS_PER_UNIT = 1000;
 export const MAX_MAX_TOKENS_PER_UNIT = 24000;
 
 // Non-secret llm.* runtime controls (fixed model; no provider/model selectors).
-// Token ceilings are starting defaults: P4-02 clamps them to the authenticated
-// model limit.* at runtime, never the reverse.
+// Token ceilings below are LOCAL safety bounds enforced pre-request
+// (src/llm/limits.ts): P4-00 verified only the catalog base_url, so no
+// limit.* was ever authenticated and nothing widens these bounds.
 export const DEFAULT_LLM_REQUEST_TIMEOUT_MS = 90000;
 
 export const MIN_LLM_REQUEST_TIMEOUT_MS = 1000;
@@ -52,7 +53,8 @@ export const DEFAULT_LLM_MAX_OUTPUT_TOKENS = 32768;
 
 export const MIN_LLM_MAX_OUTPUT_TOKENS = 1;
 
-// Third-party-reported limit.output; provisional until the P4-02 catalog read.
+// Local hard output ceiling (mirrors the third-party-reported limit.output;
+// never authenticated). Requests above it are rejected, never sent.
 export const MAX_LLM_MAX_OUTPUT_TOKENS = 131072;
 
 export const DEFAULT_LLM_MAX_RETRIES = 2;
@@ -81,7 +83,8 @@ export const DEFAULT_LLM_MAX_REVIEW_UNIT_INPUT_TOKENS = 64000;
 
 export const MIN_LLM_MAX_REVIEW_UNIT_INPUT_TOKENS = 1000;
 
-// Near the third-party-reported context size; provisional, runtime-clamped.
+// Local hard input ceiling (near the third-party-reported context size; never
+// authenticated). A unit fits only after reserving output plus margin (src/llm/limits.ts).
 export const MAX_LLM_MAX_REVIEW_UNIT_INPUT_TOKENS = 1000000;
 
 export const DEFAULT_MAX_CHANGED_LINES_PER_FILE = 1500;

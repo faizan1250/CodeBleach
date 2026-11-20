@@ -1,4 +1,9 @@
-import { MAX_LLM_MAX_OUTPUT_TOKENS } from "../config/defaults.ts";
+import {
+  CONTEXT_SAFETY_MARGIN_TOKENS,
+  MODEL_CONTEXT_TOKENS,
+  MODEL_MAX_OUTPUT_TOKENS,
+  validateUnitBudgets,
+} from "../llm/limits.ts";
 import type { ResolvedConfig } from "../config/schema.ts";
 import { ReviewerError } from "../core/errors.ts";
 import type { ReviewEngine } from "../core/contracts.ts";
@@ -11,7 +16,7 @@ import { RawReviewOutputSchema, type Finding } from "../types/finding.ts";
 import type { ReviewUnit } from "../types/context.ts";
 import type { ReviewBuildResult, ReviewDiagnostic, ReviewUsage } from "../types/review.ts";
 import { redact } from "../utils/redact.ts";
-import { buildReviewPrompt, CODE_REVIEW_PROMPT_VERSION, codeReviewTemplateHash, isPromptWithinBudget } from "./prompt.ts";
+import { buildReviewPrompt, CODE_REVIEW_PROMPT_VERSION, codeReviewTemplateHash } from "./prompt.ts";
 import type { BuiltReviewPrompt } from "./prompt.ts";
 import { normalizeFinding } from "./normalize.ts";
 import { assembleReviewResult, emptyReviewUsage, mergeReviewUsage, type UnitOutcome } from "./result.ts";
@@ -209,7 +214,19 @@ export class ReviewEngineImpl implements ReviewEngine {
     headSha: string,
   ): Promise<UnitOutcome> {
     const built = buildReviewPrompt(unit, config);
-    if (!isPromptWithinBudget(built, config.llm.max_review_unit_input_tokens)) {
+    // Pre-request enforcement: the effective input ceiling is the configured
+    // budget further capped by context minus reserved output minus margin.
+    // Impossible budgets fail closed (CONFIG_INVALID, no provider call);
+    // oversized units skip with a diagnostic, never silent truncation.
+    const budget = validateUnitBudgets({
+      estimatedInputTokens: built.estimatedInputTokens,
+      maxOutputTokens: config.llm.max_output_tokens,
+      inputBudget: config.llm.max_review_unit_input_tokens,
+    });
+    if (!budget.ok) {
+      if (budget.code !== "INPUT_BUDGET_EXCEEDED") {
+        throw new ReviewerError({ code: "CONFIG_INVALID", message: budget.message });
+      }
       this.logger.warn("review unit skipped", { unitId: unit.id, reason: "input-budget-exceeded" });
       return {
         ok: false,
@@ -241,7 +258,11 @@ export class ReviewEngineImpl implements ReviewEngine {
       // failure (refusal, other incomplete reasons, malformed output after
       // its single repair) stays partial with no further attempt.
       if (!isIncompleteCapError(error)) return this.unitFailure(unit, error, usage);
-      const escalated = Math.min(MAX_LLM_MAX_OUTPUT_TOKENS, firstMax * 2);
+      // Escalation stays inside both the output ceiling and the context
+      // window (output counts against context); otherwise the unit is partial.
+      const capByContext =
+        MODEL_CONTEXT_TOKENS - built.estimatedInputTokens - CONTEXT_SAFETY_MARGIN_TOKENS;
+      const escalated = Math.min(MODEL_MAX_OUTPUT_TOKENS, firstMax * 2, capByContext);
       if (escalated <= firstMax) return this.unitFailure(unit, error, usage, "REVIEW_OUTPUT_INCOMPLETE");
       usage.incompleteRetries += 1;
       try {
