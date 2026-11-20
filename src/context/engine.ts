@@ -36,6 +36,7 @@ import { rankContextItems, scoreItem } from "./rank.ts";
 import type { RankInput, RankProximity } from "./rank.ts";
 import { SnapshotReader } from "./snapshot.ts";
 import { isGitTimeout } from "./snapshot.ts";
+import { isRegularBlob } from "./snapshot.ts";
 import { MODULE_SYMBOL_NAME, mapChangedSymbolsForFile } from "./symbols.ts";
 import { resolveTestsForSymbol } from "./tests.ts";
 import { estimateTokens } from "../utils/tokens.ts";
@@ -337,6 +338,32 @@ export class ContextEngineImpl implements ContextEngine {
       }
     };
 
+    // One batched snapshot fetch for every changed file up front (head plus
+    // base blobs in chunked `cat-file --batch` spawns) instead of two spawns
+    // per blob later. Best-effort and skipped entirely when the run is
+    // already out of budget; failures leave ids uncached and the per-file
+    // reads below reproduce the exact original errors. Loads are sequential
+    // so no git child can outlive the build as background work.
+    if (runBudget.remainingRunMs() > 0) {
+      try {
+        const headIndex = await reader.listHeadFiles();
+        const baseIndex = await reader.listBaseFiles();
+        const prefetchOids: string[] = [];
+        for (const file of diff.files) {
+          if (file.skipReason !== undefined || !hasContentChanges(file) || file.status === "deleted") continue;
+          const headEntry = headIndex.get(file.path);
+          if (headEntry !== undefined && isRegularBlob(headEntry)) prefetchOids.push(headEntry.oid);
+          if (file.status !== "added") {
+            const baseEntry = baseIndex.get(file.oldPath ?? file.path);
+            if (baseEntry !== undefined && isRegularBlob(baseEntry)) prefetchOids.push(baseEntry.oid);
+          }
+        }
+        await reader.prefetchBlobs(prefetchOids);
+      } catch {
+        // Best-effort only; per-file reads surface the real error below.
+      }
+    }
+
     for (let index = 0; index < diff.files.length; index += 1) {
       const file = diff.files[index];
       if (file === undefined) continue;
@@ -571,6 +598,10 @@ export class ContextEngineImpl implements ContextEngine {
       unitsWithTruncatedDefinition,
       candidateFilesSkippedByCap,
       queryTimeouts,
+      gitCalls: reader.stats().gitCalls,
+      blobsFetched: reader.stats().blobsFetched,
+      blobCacheHits: reader.stats().blobCacheHits,
+      batchFetches: reader.stats().batchFetches,
       parseCacheHits: parseCache.stats().hits,
       parseCacheMisses: parseCache.stats().misses,
       parseCacheEntries: parseCache.stats().entries,

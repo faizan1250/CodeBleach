@@ -4,6 +4,8 @@ import { RunBudget } from "../../src/context/limits.ts";
 import {
   SnapshotReader,
   isRegularBlob,
+  parseBatchCheckLine,
+  parseBatchContent,
   parseGrepZ,
   parseLsTreeZ,
 } from "../../src/context/snapshot.ts";
@@ -127,6 +129,142 @@ describe("parse grep -z matches", () => {
       expect(codeOf(error)).toBe("PARSE_FAILED");
     }
   });
+});
+
+describe("batch check line parsing", () => {
+  test("parses blob size lines", () => {
+    expect(parseBatchCheckLine(`${OID_A} blob 12`)).toEqual({ oid: OID_A, type: "blob", size: 12 });
+  });
+
+  test("parses missing lines", () => {
+    expect(parseBatchCheckLine(`${OID_A} missing`)).toEqual({ oid: OID_A, type: "missing", size: null });
+  });
+
+  test("lowercases oids", () => {
+    expect(parseBatchCheckLine(`${OID_A.toUpperCase()} blob 1`).oid).toBe(OID_A);
+  });
+
+  test("short lines are GIT_FAILED", () => {
+    try {
+      parseBatchCheckLine("garbage");
+      expect(false).toBe(true);
+    } catch (error) {
+      expect(codeOf(error)).toBe("GIT_FAILED");
+    }
+  });
+
+  test("malformed oids are GIT_FAILED", () => {
+    try {
+      parseBatchCheckLine("not-an-oid blob 3");
+      expect(false).toBe(true);
+    } catch (error) {
+      expect(codeOf(error)).toBe("GIT_FAILED");
+    }
+  });
+
+  test("non-numeric sizes are GIT_FAILED", () => {
+    try {
+      parseBatchCheckLine(`${OID_A} blob many`);
+      expect(false).toBe(true);
+    } catch (error) {
+      expect(codeOf(error)).toBe("GIT_FAILED");
+    }
+  });
+});
+
+function batchFrame(oid: string, content: Uint8Array): Uint8Array {
+  const header = encode(`${oid} blob ${content.length}\n`);
+  const frame = new Uint8Array(header.length + content.length + 1);
+  frame.set(header, 0);
+  frame.set(content, header.length);
+  frame[header.length + content.length] = 10;
+  return frame;
+}
+
+describe("batch content parsing", () => {
+  test("parses one blob frame", () => {
+    const frames = parseBatchContent(batchFrame(OID_A, encode("hello\n")), [OID_A]);
+    const frame = frames.get(OID_A);
+    expect(frame?.status).toBe("blob");
+    if (frame?.status !== "blob") return;
+    expect(decode(frame.bytes)).toBe("hello\n");
+  });
+
+  test("binary content with NUL and LF stays in sync", () => {
+    const content = new Uint8Array([0x61, 0x00, 0x0a, 0xff, 0x61]);
+    const buffer = concat([batchFrame(OID_A, content), batchFrame(OID_B, encode("second"))]);
+    const frames = parseBatchContent(buffer, [OID_A, OID_B]);
+    const first = frames.get(OID_A);
+    const second = frames.get(OID_B);
+    if (first?.status !== "blob" || second?.status !== "blob") {
+      expect(false).toBe(true);
+      return;
+    }
+    expect([...first.bytes]).toEqual([0x61, 0x00, 0x0a, 0xff, 0x61]);
+    expect(decode(second.bytes)).toBe("second");
+  });
+
+  test("empty blob parses", () => {
+    const frames = parseBatchContent(batchFrame(OID_A, new Uint8Array(0)), [OID_A]);
+    expect(frames.get(OID_A)).toMatchObject({ status: "blob", size: 0 });
+  });
+
+  test("missing frame parses", () => {
+    const frames = parseBatchContent(encode(`${OID_A} missing\n`), [OID_A]);
+    expect(frames.get(OID_A)).toEqual({ oid: OID_A, status: "missing" });
+  });
+
+  test("oid mismatch is GIT_FAILED", () => {
+    try {
+      parseBatchContent(batchFrame(OID_B, encode("x")), [OID_A]);
+      expect(false).toBe(true);
+    } catch (error) {
+      expect(codeOf(error)).toBe("GIT_FAILED");
+    }
+  });
+
+  test("non-blob type is GIT_FAILED", () => {
+    const header = encode(`${OID_A} tree 4\n`);
+    const buffer = concat([header, encode("abcd"), encode("\n")]);
+    try {
+      parseBatchContent(buffer, [OID_A]);
+      expect(false).toBe(true);
+    } catch (error) {
+      expect(codeOf(error)).toBe("GIT_FAILED");
+    }
+  });
+
+  test("truncated content is GIT_FAILED", () => {
+    const full = batchFrame(OID_A, encode("hello"));
+    try {
+      parseBatchContent(full.subarray(0, full.length - 2), [OID_A]);
+      expect(false).toBe(true);
+    } catch (error) {
+      expect(codeOf(error)).toBe("GIT_FAILED");
+    }
+  });
+
+  test("truncated header is GIT_FAILED", () => {
+    try {
+      parseBatchContent(encode(`${OID_A} blob`), [OID_A]);
+      expect(false).toBe(true);
+    } catch (error) {
+      expect(codeOf(error)).toBe("GIT_FAILED");
+    }
+  });
+
+  test("trailing bytes are GIT_FAILED", () => {
+    try {
+      parseBatchContent(concat([batchFrame(OID_A, encode("x")), encode("trailing")]), [OID_A]);
+      expect(false).toBe(true);
+    } catch (error) {
+      expect(codeOf(error)).toBe("GIT_FAILED");
+    }
+  });
+
+  function decode(bytes: Uint8Array): string {
+    return new TextDecoder().decode(bytes);
+  }
 });
 
 describe("snapshot reader construction", () => {

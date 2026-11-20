@@ -43,6 +43,12 @@ const FULL_SHA_PATTERN = /^[0-9a-fA-F]{40}$|^[0-9a-fA-F]{64}$/;
 const TAB = 0x09;
 const LF = 0x0a;
 const NUL = 0x00;
+// Batch framing headroom per object: `<40-hex> SP blob SP <size> LF` plus the
+// trailing LF after content. Real headers stay far below this.
+const BATCH_FRAME_SLACK = 128;
+// One-shot batch size: bounds a single `--batch` stdout buffer to
+// 16 × (1MiB + slack) ≈ 16MiB, under the 26MiB transport default.
+const BATCH_CHUNK_SIZE = 16;
 
 const textDecoder = new TextDecoder("utf-8", { fatal: false });
 
@@ -200,6 +206,72 @@ function indexOfByte(buffer: Uint8Array, byte: number, from: number): number {
   return -1;
 }
 
+export type BatchCheckEntry = { oid: string; type: string; size: number | null };
+
+/**
+ * Parse one `git cat-file --batch-check` output line (`<oid> <type> <size>` or
+ * `<oid> missing`). Pure ASCII framing; throws GIT_FAILED on any violation.
+ */
+export function parseBatchCheckLine(line: string): BatchCheckEntry {
+  const parts = line.split(" ");
+  if (parts.length < 2) throw gitFailed(`unexpected batch-check line ${JSON.stringify(line.slice(0, 80))}`);
+  const [oid, kind] = parts as [string, string];
+  if (typeof oid !== "string" || !FULL_SHA_PATTERN.test(oid)) {
+    throw gitFailed(`unexpected batch-check line ${JSON.stringify(line.slice(0, 80))}`);
+  }
+  if (kind === "missing") return { oid: oid.toLowerCase(), type: "missing", size: null };
+  if (parts.length !== 3) throw gitFailed(`unexpected batch-check line ${JSON.stringify(line.slice(0, 80))}`);
+  const size = Number(parts[2]);
+  if (!Number.isSafeInteger(size) || size < 0) {
+    throw gitFailed(`batch-check size for "${oid.toLowerCase()}" is not a valid byte count`);
+  }
+  return { oid: oid.toLowerCase(), type: kind, size };
+}
+
+export type BatchContentFrame = { oid: string; status: "missing" } | { oid: string; status: "blob"; size: number; bytes: Uint8Array };
+
+/**
+ * Parse one-shot `git cat-file --batch` stdout for the requested OIDs, in
+ * request order: `<oid> <type> <size> LF <size bytes> LF` per blob, or
+ * `<oid> missing LF`. Offsets come from header sizes only, so embedded NUL/LF
+ * bytes in blob content never desynchronize the stream. Throws GIT_FAILED on
+ * truncation, OID/type/size mismatch, or non-blob content.
+ */
+export function parseBatchContent(buffer: Uint8Array, expected: readonly string[]): Map<string, BatchContentFrame> {
+  const frames = new Map<string, BatchContentFrame>();
+  let cursor = 0;
+  for (const raw of expected) {
+    const wanted = raw.toLowerCase();
+    const headerEnd = indexOfByte(buffer, LF, cursor);
+    if (headerEnd < 0) throw gitFailed(`incomplete batch response for "${wanted}" (missing header)`);
+    const header = decodeText(buffer.subarray(cursor, headerEnd));
+    cursor = headerEnd + 1;
+    const parts = header.split(" ");
+    if (parts.length < 2 || parts[0]?.toLowerCase() !== wanted) {
+      throw gitFailed(`unexpected batch header for "${wanted}"`);
+    }
+    const oid = wanted;
+    if (parts[1] === "missing") {
+      frames.set(oid, { oid, status: "missing" });
+      continue;
+    }
+    if (parts.length !== 3 || parts[1] !== "blob") {
+      throw gitFailed(`unexpected batch header for "${wanted}"`);
+    }
+    const size = Number(parts[2]);
+    if (!Number.isSafeInteger(size) || size < 0) {
+      throw gitFailed(`batch content size for "${wanted}" is not a valid byte count`);
+    }
+    if (cursor + size + 1 > buffer.length || buffer[cursor + size] !== LF) {
+      throw gitFailed(`incomplete batch response for "${wanted}" (truncated content)`);
+    }
+    frames.set(oid, { oid, status: "blob", size, bytes: buffer.subarray(cursor, cursor + size) });
+    cursor += size + 1;
+  }
+  if (cursor !== buffer.length) throw gitFailed("unexpected trailing bytes in batch response");
+  return frames;
+}
+
 /**
  * Reads exact commit snapshots through safe Git argv calls. Head-side
  * definitions, imports, callers, and tests come from headSha; old-side
@@ -218,6 +290,10 @@ export class SnapshotReader {
   private baseIndex: Map<string, TreeEntry> | null = null;
   private readonly blobCache = new Map<string, string>();
   private cachedTotalBytes = 0;
+  private gitCalls = 0;
+  private blobCacheHits = 0;
+  private blobsFetched = 0;
+  private batchFetches = 0;
 
   constructor(options: SnapshotReaderOptions) {
     if (options === null || options === undefined || typeof options !== "object") {
@@ -250,6 +326,16 @@ export class SnapshotReader {
 
   get cachedEntries(): number {
     return this.blobCache.size;
+  }
+
+  /** Cumulative I/O counters for one reader lifetime (benchmarking only). */
+  stats(): { gitCalls: number; blobCacheHits: number; blobsFetched: number; batchFetches: number } {
+    return {
+      gitCalls: this.gitCalls,
+      blobCacheHits: this.blobCacheHits,
+      blobsFetched: this.blobsFetched,
+      batchFetches: this.batchFetches,
+    };
   }
 
   /** Tracked-file index of the head commit; repo-relative POSIX paths. */
@@ -291,28 +377,67 @@ export class SnapshotReader {
       throw internal("SnapshotReader requires readBlobText oid to be a full hex object id");
     }
     const cached = this.blobCache.get(normalized);
-    if (cached !== undefined) return cached;
-    const sizeText = decodeText(await this.runGit(["cat-file", "-s", normalized], "blob size lookup")).trim();
-    if (!/^[0-9]+$/.test(sizeText)) throw gitFailed(`cannot determine size of blob ${normalized}`);
-    const size = Number(sizeText);
-    if (!Number.isSafeInteger(size) || size < 0) throw gitFailed(`blob ${normalized} has an invalid size`);
-    if (size > this.maxBlobBytes) {
-      throw gitFailed(`blob ${normalized} is ${size} bytes, above the ${this.maxBlobBytes}-byte per-blob snapshot cap`);
+    if (cached !== undefined) {
+      this.blobCacheHits += 1;
+      return cached;
     }
-    if (this.cachedTotalBytes + size > this.maxTotalBytes) {
+    // One `cat-file --batch` spawn carries header (exact size) plus content,
+    // replacing the old size-probe + content-read spawn pair. Over-cap blobs
+    // exceed the stdout bound and resolve to the same cap errors via a probe.
+    let stdout: Uint8Array;
+    try {
+      stdout = await this.runBatch([normalized], this.maxBlobBytes + BATCH_FRAME_SLACK);
+    } catch (error) {
+      if (error instanceof ReviewerError && error.code === "GIT_FAILED" && isGitOutputLimit(error)) {
+        throw await this.overCapError(normalized);
+      }
+      throw error;
+    }
+    const frames = parseBatchContent(stdout, [normalized]);
+    const frame = frames.get(normalized);
+    if (frame === undefined || frame.status === "missing") {
+      throw gitFailed(`blob ${normalized} is missing`);
+    }
+    if (frame.size > this.maxBlobBytes) {
+      throw gitFailed(`blob ${normalized} is ${frame.size} bytes, above the ${this.maxBlobBytes}-byte per-blob snapshot cap`);
+    }
+    if (this.cachedTotalBytes + frame.size > this.maxTotalBytes) {
       throw gitFailed(
-        `snapshot total ${this.cachedTotalBytes + size} bytes would exceed the ${this.maxTotalBytes}-byte run cap`,
+        `snapshot total ${this.cachedTotalBytes + frame.size} bytes would exceed the ${this.maxTotalBytes}-byte run cap`,
       );
     }
-    const content = await this.runGit(
-      ["cat-file", "blob", normalized],
-      "blob read",
-      Math.min(size + 1, DEFAULT_MAX_STDOUT_BYTES),
-    );
-    const text = decodeText(content);
+    const text = decodeText(frame.bytes);
     this.blobCache.set(normalized, text);
-    this.cachedTotalBytes += size;
+    this.cachedTotalBytes += frame.size;
+    this.blobsFetched += 1;
     return text;
+  }
+
+  /**
+   * Best-effort prefetch of known blob ids into the per-reader cache, one
+   * `cat-file --batch` spawn per chunk of 16. Never throws: every failure
+   * mode (timeout, truncation, caps, missing) simply leaves the id uncached
+   * so the later lazy `readBlobText` reproduces the exact original error with
+   * its diagnostics. Only blob ids from commit-tree snapshots are fed in, so
+   * the working tree is never read.
+   */
+  async prefetchBlobs(oids: readonly string[]): Promise<void> {
+    const pending: string[] = [];
+    const seen = new Set<string>();
+    for (const oid of oids) {
+      const normalized = typeof oid === "string" ? oid.toLowerCase() : "";
+      if (!FULL_SHA_PATTERN.test(normalized) || seen.has(normalized) || this.blobCache.has(normalized)) continue;
+      seen.add(normalized);
+      pending.push(normalized);
+    }
+    for (let start = 0; start < pending.length; start += BATCH_CHUNK_SIZE) {
+      const chunk = pending.slice(start, start + BATCH_CHUNK_SIZE);
+      try {
+        await this.fetchChunk(chunk);
+      } catch {
+        // Best-effort only; per-file reads surface the real error below.
+      }
+    }
   }
 
   /**
@@ -362,6 +487,74 @@ export class SnapshotReader {
     return this.readBlobText(entry.oid);
   }
 
+  /**
+   * One `cat-file --batch` spawn for the chunk. Frames arrive in request
+   * order; over-cap, missing, non-blob, and total-cap ids are skipped (left
+   * uncached) while in-sync siblings still cache. Transport or protocol
+   * failures reject the chunk and prefetch drops it silently.
+   */
+  private async fetchChunk(oids: readonly string[]): Promise<void> {
+    if (oids.length === 0) return;
+    const stdout = await this.runBatch(oids, oids.length * (this.maxBlobBytes + BATCH_FRAME_SLACK));
+    const frames = parseBatchContent(
+      stdout,
+      oids.map((oid) => oid.toLowerCase()),
+    );
+    for (const oid of oids) {
+      const normalized = oid.toLowerCase();
+      if (this.blobCache.has(normalized)) continue;
+      const frame = frames.get(normalized);
+      if (frame === undefined || frame.status === "missing") continue;
+      if (frame.size > this.maxBlobBytes) continue;
+      if (this.cachedTotalBytes + frame.size > this.maxTotalBytes) continue;
+      this.blobCache.set(normalized, decodeText(frame.bytes));
+      this.cachedTotalBytes += frame.size;
+      this.blobsFetched += 1;
+    }
+  }
+
+  /** Exact legacy cap/total error for a blob known to exceed the batch stdout bound. */
+  private async overCapError(normalized: string): Promise<ReviewerError> {
+    let stdout: string;
+    try {
+      stdout = decodeText(await this.runGit(["cat-file", "--batch-check"], "blob size probe", 4096, `${normalized}\n`));
+    } catch (error) {
+      if (error instanceof ReviewerError) throw error;
+      throw gitFailed(`cannot determine size of blob ${normalized}`, error);
+    }
+    const firstLine = stdout.split("\n")[0] ?? "";
+    let entry: BatchCheckEntry;
+    try {
+      entry = parseBatchCheckLine(firstLine);
+    } catch {
+      throw gitFailed(`cannot determine size of blob ${normalized}`);
+    }
+    if (entry.type === "missing" || entry.size === null || entry.oid !== normalized) {
+      throw gitFailed(`blob ${normalized} is missing`);
+    }
+    if (entry.size > this.maxBlobBytes) {
+      throw gitFailed(`blob ${normalized} is ${entry.size} bytes, above the ${this.maxBlobBytes}-byte per-blob snapshot cap`);
+    }
+    if (this.cachedTotalBytes + entry.size > this.maxTotalBytes) {
+      throw gitFailed(
+        `snapshot total ${this.cachedTotalBytes + entry.size} bytes would exceed the ${this.maxTotalBytes}-byte run cap`,
+      );
+    }
+    // Size fits after all; the batch spawn must have failed another way.
+    throw gitFailed(`blob ${normalized} batch read exceeded the output limit`);
+  }
+
+  /**
+   * Single one-shot `git cat-file --batch` spawn: argv-only, piped stdin fed
+   * from memory, process exits at stdin EOF and is reaped by runProcess, so
+   * no persistent background process can leak. Timeout, output-limit, and
+   * abort semantics come from runProcess unchanged.
+   */
+  private async runBatch(oids: readonly string[], maxStdoutBytes: number): Promise<Uint8Array> {
+    this.batchFetches += 1;
+    return this.runGit(["cat-file", "--batch"], "blob batch read", maxStdoutBytes, `${oids.join("\n")}\n`);
+  }
+
   private timeoutFor(): number {
     const remaining = this.runBudget?.remainingRunMs();
     const timeout = remaining === undefined ? this.timeoutMs : Math.min(this.timeoutMs, remaining);
@@ -371,15 +564,22 @@ export class SnapshotReader {
     return timeout;
   }
 
-  private async runGit(args: readonly string[], what: string, maxStdoutBytes?: number): Promise<Uint8Array> {
+  private async runGit(
+    args: readonly string[],
+    what: string,
+    maxStdoutBytes?: number | undefined,
+    stdinData?: string | undefined,
+  ): Promise<Uint8Array> {
     // Single attempt per call; no retry. Each timed-out invocation surfaces
     // exactly once so callers can count timed-out Git queries without dedupe.
+    this.gitCalls += 1;
     try {
       const result = await runProcess({
         cmd: ["git", ...args],
         cwd: this.repoRoot,
         timeoutMs: this.timeoutFor(),
         ...(maxStdoutBytes === undefined ? {} : { maxStdoutBytes }),
+        ...(stdinData === undefined ? {} : { stdinData }),
       });
       return result.stdout;
     } catch (error) {
