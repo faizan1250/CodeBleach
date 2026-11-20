@@ -239,8 +239,38 @@ describe("opencode provider responses", () => {
     const err = await codeOf(provider.complete(REQUEST));
     expect(err.code).toBe("PROVIDER_FAILED");
     expect(err.retryable).toBe(false);
+    expect(err.incompleteReason).toBe("max_output_tokens");
     expect(err.message).toContain("max_output_tokens");
     expect(calls).toHaveLength(1);
+  });
+
+  test("incomplete content_filter carries its typed reason", async () => {
+    const { calls, fetchFn } = captureFetch([
+      jsonResponse({ status: "incomplete", incomplete_details: { reason: "content_filter" } }),
+    ]);
+    const provider = new OpenCodeProvider({ env: GATE, version: "0.1.0", fetchFn });
+    const err = await codeOf(provider.complete(REQUEST));
+    expect(err.code).toBe("PROVIDER_FAILED");
+    expect(err.retryable).toBe(false);
+    expect(err.incompleteReason).toBe("content_filter");
+    expect(err.message).toContain("content_filter");
+    expect(calls).toHaveLength(1);
+  });
+
+  test("incomplete without a reason degrades to unknown", async () => {
+    for (const body of [
+      { status: "incomplete" },
+      { status: "incomplete", incomplete_details: {} },
+      { status: "incomplete", incomplete_details: { reason: "mystery_reason" } },
+      { status: "incomplete", incomplete_details: { reason: 42 } },
+    ]) {
+      const { fetchFn } = captureFetch([jsonResponse(body)]);
+      const provider = new OpenCodeProvider({ env: GATE, version: "0.1.0", fetchFn });
+      const err = await codeOf(provider.complete(REQUEST));
+      expect(err.code).toBe("PROVIDER_FAILED");
+      expect(err.retryable).toBe(false);
+      expect(err.incompleteReason).toBe("unknown");
+    }
   });
 
   test("failed envelopes fail without retry with the detail preserved", async () => {

@@ -4,7 +4,7 @@ import {
   DEFAULT_LLM_REQUEST_TIMEOUT_MS,
   MAX_LLM_MAX_RETRIES,
 } from "../config/defaults.ts";
-import { ReviewerError } from "../core/errors.ts";
+import { ReviewerError, type IncompleteReason } from "../core/errors.ts";
 import {
   API_KEY_ENV,
   OPENCODE_RESPONSES_ENDPOINT,
@@ -60,6 +60,11 @@ function asNonEmptyString(value: unknown): string | undefined {
 
 function asFiniteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function parseIncompleteReason(reason: unknown): IncompleteReason {
+  if (reason === "max_output_tokens" || reason === "content_filter") return reason;
+  return "unknown";
 }
 
 function backoffMs(retryIndex: number): number {
@@ -301,13 +306,19 @@ export class OpenCodeProvider implements LlmProvider {
     modelId: string,
     key: string,
   ): Promise<AttemptOutcome> {
-    const fail = (message: string, retryable: boolean, waitMs: number): AttemptOutcome => ({
+    const fail = (
+      message: string,
+      retryable: boolean,
+      waitMs: number,
+      incompleteReason?: IncompleteReason | undefined,
+    ): AttemptOutcome => ({
       kind: "error",
       error: new ReviewerError({
         code: "PROVIDER_FAILED",
         message,
         retryable,
         ...(retryable ? { retries: attempt } : {}),
+        ...(incompleteReason === undefined ? {} : { incompleteReason }),
       }),
       waitMs,
     });
@@ -372,6 +383,7 @@ export class OpenCodeProvider implements LlmProvider {
     const status = asNonEmptyString(envelope["status"]);
     if (status === "incomplete") {
       // Distinct from parse failure: truncated output is never JSON-repaired (P4-05 owns escalation).
+      // Classification is the typed reason only; the message keeps the redacted reason for humans.
       const reason = isRecord(envelope["incomplete_details"])
         ? asNonEmptyString(envelope["incomplete_details"]["reason"])
         : undefined;
@@ -379,6 +391,7 @@ export class OpenCodeProvider implements LlmProvider {
         `provider response incomplete${reason !== undefined ? `: ${redact(reason, [key])}` : ""}`,
         false,
         0,
+        parseIncompleteReason(reason),
       );
     }
     if (status === "failed") {

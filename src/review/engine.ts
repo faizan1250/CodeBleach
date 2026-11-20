@@ -70,11 +70,14 @@ function skipOutcome(unit: ReviewUnit, reason: "cancelled" | "deadline"): UnitOu
 }
 // P4-05: Responses `incomplete` is not a parse failure and is never
 // JSON-repaired. Only `max_output_tokens` gets one bounded cap escalation per
-// unit; the provider preserves the reason in the message, which is the
-// contract matched on here.
+// unit, matched on the typed `incompleteReason` the provider sets from
+// `incomplete_details.reason`. Message text never affects classification.
 function isIncompleteCapError(error: unknown): boolean {
-  if (!(error instanceof ReviewerError) || error.code !== "PROVIDER_FAILED") return false;
-  return /provider response incomplete/i.test(error.message) && error.message.includes("max_output_tokens");
+  return (
+    error instanceof ReviewerError &&
+    error.code === "PROVIDER_FAILED" &&
+    error.incompleteReason === "max_output_tokens"
+  );
 }
 
 /** One focused pass, one provider request per ReviewUnit. No batching. */

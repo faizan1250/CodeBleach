@@ -10,11 +10,20 @@ export type ErrorCode =
   | "INTERNAL"
   | "INVALID_INPUT";
 
+/**
+ * Typed Responses `incomplete_details.reason`. Only `max_output_tokens` gets
+ * the bounded cap escalation; every other value (including absent or
+ * unrecognized reasons, normalized to `unknown`) stays partial.
+ */
+export type IncompleteReason = "max_output_tokens" | "content_filter" | "unknown";
+
 export class ReviewerError extends Error {
   readonly code: ErrorCode;
   readonly retryable: boolean;
   /** Transport retries performed before this error; undefined when none were attempted. */
   readonly retries: number | undefined;
+  /** Set only on `PROVIDER_FAILED` errors from a Responses `incomplete` status. */
+  readonly incompleteReason: IncompleteReason | undefined;
 
   constructor(input: {
     code: ErrorCode;
@@ -22,11 +31,13 @@ export class ReviewerError extends Error {
     retryable?: boolean;
     cause?: unknown;
     retries?: number | undefined;
+    incompleteReason?: IncompleteReason | undefined;
   }) {
     super(input.message, input.cause === undefined ? undefined : { cause: input.cause });
     this.name = "ReviewerError";
     this.code = input.code;
     this.retryable = input.retryable ?? false;
     this.retries = input.retries;
+    this.incompleteReason = input.incompleteReason;
   }
 }
