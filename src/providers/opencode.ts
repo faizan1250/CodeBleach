@@ -30,7 +30,7 @@ export interface OpenCodeProviderOptions {
   maxRetries?: number | undefined;
   timeoutMs?: number | undefined;
   fetchFn?: typeof fetch | undefined;
-  sleep?: ((ms: number) => Promise<void>) | undefined;
+  sleep?: ((ms: number, signal?: AbortSignal) => Promise<void>) | undefined;
 }
 
 function mintSessionId(): string {
@@ -66,6 +66,28 @@ function parseRetryAfterMs(header: string | null): number | undefined {
   return undefined;
 }
 
+// Default backoff sleep: resolves after ms, rejects promptly on abort with the
+// timer cleared and the listener removed. Never outlives the backoff window.
+function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted === true) {
+    return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+  }
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(onTimeout, ms);
+    function onTimeout(): void {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }
+    function onAbort(): void {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted === true) onAbort();
+  });
+}
+
 type AttemptOutcome =
   | { kind: "ok"; response: LlmResponse }
   | { kind: "error"; error: ReviewerError; waitMs: number };
@@ -82,7 +104,7 @@ export class OpenCodeProvider implements LlmProvider {
   private readonly maxRetries: number;
   private readonly defaultTimeoutMs: number;
   private readonly fetchFn: typeof fetch;
-  private readonly sleepFn: (ms: number) => Promise<void>;
+  private readonly sleepFn: (ms: number, signal?: AbortSignal) => Promise<void>;
 
   constructor(options: OpenCodeProviderOptions = {}) {
     this.env = options.env ?? process.env;
@@ -99,7 +121,7 @@ export class OpenCodeProvider implements LlmProvider {
         ? DEFAULT_LLM_REQUEST_TIMEOUT_MS
         : options.timeoutMs;
     this.fetchFn = options.fetchFn ?? fetch;
-    this.sleepFn = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    this.sleepFn = options.sleep ?? abortableSleep;
   }
 
   async complete(request: LlmRequest, signal?: AbortSignal): Promise<LlmResponse> {
@@ -151,7 +173,13 @@ export class OpenCodeProvider implements LlmProvider {
     for (let attempt = 0; ; attempt += 1) {
       if (signal?.aborted) throw abortError();
       if (attempt > 0) {
-        await this.sleepFn(waitMs);
+        try {
+          await this.sleepFn(waitMs, signal);
+        } catch (error) {
+          // Abort during backoff rejects promptly; a non-abort sleep failure propagates unchanged.
+          if (signal?.aborted) throw abortError();
+          throw error;
+        }
         // Cancel landing in the backoff window must not fire another POST.
         if (signal?.aborted) throw abortError();
       }

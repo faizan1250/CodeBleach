@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
   API_KEY_ENV,
   FIXED_MODEL_ID,
@@ -434,6 +434,76 @@ describe("opencode provider retries", () => {
     expect(err.retryable).toBe(false);
     expect(err.message).toContain("aborted");
     expect(calls).toHaveLength(1);
+  });
+
+  test("abort before backoff fires no sleep and no retry", async () => {
+    const controller = new AbortController();
+    const seen: number[] = [];
+    const calls: Captured[] = [];
+    const fetchFn = (async (): Promise<Response> => {
+      controller.abort(new Error("deadline"));
+      calls.push({ url: OPENCODE_RESPONSES_ENDPOINT, init: {} });
+      return jsonResponse({ error: "busy" }, 500);
+    }) as unknown as typeof fetch;
+    const provider = new OpenCodeProvider({
+      env: GATE,
+      version: "0.1.0",
+      fetchFn,
+      sleep: (ms: number) => {
+        seen.push(ms);
+        return Promise.resolve();
+      },
+    });
+    const err = await codeOf(provider.complete(REQUEST, controller.signal));
+    expect(err.code).toBe("PROVIDER_FAILED");
+    expect(err.retryable).toBe(false);
+    expect(err.message).toContain("aborted");
+    expect(calls).toHaveLength(1);
+    expect(seen).toHaveLength(0);
+  });
+
+  test("abort during real pending backoff rejects promptly with one POST", async () => {
+    const { calls, fetchFn } = captureFetch([
+      jsonResponse({ error: "slow" }, 429, { "Retry-After": "30" }),
+      jsonResponse(okBody()),
+    ]);
+    const provider = new OpenCodeProvider({ env: GATE, version: "0.1.0", fetchFn });
+    const controller = new AbortController();
+    const addSpy = spyOn(controller.signal, "addEventListener");
+    const removeSpy = spyOn(controller.signal, "removeEventListener");
+    const clearSpy = spyOn(globalThis, "clearTimeout");
+    setTimeout(() => controller.abort(new Error("deadline")), 50);
+    const started = Date.now();
+    const err = await codeOf(provider.complete(REQUEST, controller.signal));
+    const elapsed = Date.now() - started;
+    expect(err.code).toBe("PROVIDER_FAILED");
+    expect(err.retryable).toBe(false);
+    expect(err.message).toContain("aborted");
+    expect(calls).toHaveLength(1);
+    expect(elapsed).toBeLessThan(5000);
+    expect(clearSpy).toHaveBeenCalled();
+    expect(removeSpy.mock.calls.length).toBe(addSpy.mock.calls.length);
+    clearSpy.mockRestore();
+    addSpy.mockRestore();
+    removeSpy.mockRestore();
+  });
+
+  test("real backoff cleans up its timer and listener on success", async () => {
+    const { calls, fetchFn } = captureFetch([
+      jsonResponse({ error: "busy" }, 500),
+      jsonResponse(okBody()),
+    ]);
+    const provider = new OpenCodeProvider({ env: GATE, version: "0.1.0", fetchFn });
+    const controller = new AbortController();
+    const addSpy = spyOn(controller.signal, "addEventListener");
+    const removeSpy = spyOn(controller.signal, "removeEventListener");
+    const res = await provider.complete(REQUEST, controller.signal);
+    expect(res.text).toBe("hello");
+    expect(calls).toHaveLength(2);
+    expect(addSpy.mock.calls.length).toBeGreaterThan(0);
+    expect(removeSpy.mock.calls.length).toBe(addSpy.mock.calls.length);
+    addSpy.mockRestore();
+    removeSpy.mockRestore();
   });
 
   test("nan max retries fall back to the default bound", async () => {
