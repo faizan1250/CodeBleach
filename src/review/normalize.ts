@@ -35,7 +35,11 @@ export function fingerprintForFinding(input: {
   category: string;
   title: string;
 }): string {
-  const fallback = input.file.trim().replace(/\\/g, "/").replace(/\/{2,}/g, "/").replace(/^(?:\.\/)+/, "");
+  const fallback = input.file
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/")
+    .replace(/^(?:\.\/)+/, "");
   const normalizedFile = normalizeRepoPath(input.file) ?? fallback;
   const normalizedTitle = normalizeTitleStorage(input.title).toLowerCase();
   return createHash("sha1")

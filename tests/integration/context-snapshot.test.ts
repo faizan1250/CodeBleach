@@ -128,11 +128,7 @@ describe("head and merge-base snapshots", () => {
   test("blob-size cap is enforced before reading", async () => {
     const { dir, cleanup } = await makeRepo();
     try {
-      const base = await writeAndCommit(
-        dir,
-        { "src/big.ts": `${"x".repeat(100)}\n`, "src/small.ts": "ok\n" },
-        "base",
-      );
+      const base = await writeAndCommit(dir, { "src/big.ts": `${"x".repeat(100)}\n`, "src/small.ts": "ok\n" }, "base");
       const reader = readerFor(dir, base, base, { maxBlobBytes: 10 });
       expect(await codeOf(reader.readHeadText("src/big.ts"))).toBe("GIT_FAILED");
       expect(await reader.readHeadText("src/small.ts")).toBe("ok\n");
@@ -252,6 +248,110 @@ describe("head commit search", () => {
       const index = await reader.listBaseFiles();
       index.delete("src/a.ts");
       expect((await reader.listBaseFiles()).has("src/a.ts")).toBe(true);
+    } finally {
+      await cleanup();
+    }
+  });
+});
+
+describe("batched blob reads", () => {
+  test("one blob costs one spawn and repeats hit the cache", async () => {
+    const { dir, cleanup } = await makeRepo();
+    try {
+      const base = await writeAndCommit(dir, { "src/a.ts": "const v = 1;\n" }, "base");
+      const reader = readerFor(dir, base, base);
+      const before = reader.stats();
+      expect(await reader.readHeadText("src/a.ts")).toBe("const v = 1;\n");
+      const afterFirst = reader.stats();
+      // One ls-tree index spawn plus one batch blob spawn.
+      expect(afterFirst.gitCalls - before.gitCalls).toBe(2);
+      expect(afterFirst.batchFetches - before.batchFetches).toBe(1);
+      expect(afterFirst.blobsFetched - before.blobsFetched).toBe(1);
+      expect(await reader.readHeadText("src/a.ts")).toBe("const v = 1;\n");
+      const afterSecond = reader.stats();
+      expect(afterSecond.gitCalls).toBe(afterFirst.gitCalls);
+      expect(afterSecond.blobCacheHits - afterFirst.blobCacheHits).toBe(1);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("prefetch is best-effort and never throws", async () => {
+    const { dir, cleanup } = await makeRepo();
+    try {
+      const base = await writeAndCommit(dir, { "src/a.ts": "const v = 1;\n" }, "base");
+      const reader = readerFor(dir, base, base);
+      const oid = (await reader.listHeadFiles()).get("src/a.ts")?.oid;
+      expect(oid).toBeDefined();
+      await reader.prefetchBlobs([oid as string, "0".repeat(40), "not-an-oid", oid as string]);
+      expect(await reader.readBlobText(oid as string)).toBe("const v = 1;\n");
+      expect(reader.stats().blobCacheHits).toBe(1);
+      expect(await codeOf(reader.readBlobText("0".repeat(40)))).toBe("GIT_FAILED");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("prefetch skips total-capped blobs while lazy reads keep exact errors", async () => {
+    const { dir, cleanup } = await makeRepo();
+    try {
+      const base = await writeAndCommit(
+        dir,
+        { "src/one.ts": `${"a".repeat(50)}\n`, "src/two.ts": `${"b".repeat(50)}\n` },
+        "base",
+      );
+      const reader = readerFor(dir, base, base, { maxTotalBytes: 60 });
+      const index = await reader.listHeadFiles();
+      const one = index.get("src/one.ts")?.oid;
+      const two = index.get("src/two.ts")?.oid;
+      expect(one).toBeDefined();
+      expect(two).toBeDefined();
+      await reader.prefetchBlobs([one as string, two as string]);
+      expect(reader.cachedEntries).toBe(1);
+      const error = await reader.readHeadText("src/two.ts").then(
+        () => null,
+        (caught: unknown) => caught as Error,
+      );
+      expect(error).toBeInstanceOf(ReviewerError);
+      expect((error as ReviewerError).code).toBe("GIT_FAILED");
+      expect((error as Error).message).toContain("would exceed the 60-byte run cap");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("over-cap blob keeps the exact per-blob cap error", async () => {
+    const { dir, cleanup } = await makeRepo();
+    try {
+      const base = await writeAndCommit(dir, { "src/big.ts": `${"x".repeat(100)}\n` }, "base");
+      const reader = readerFor(dir, base, base, { maxBlobBytes: 10 });
+      const error = await reader.readHeadText("src/big.ts").then(
+        () => null,
+        (caught: unknown) => caught as Error,
+      );
+      expect(error).toBeInstanceOf(ReviewerError);
+      expect((error as Error).message).toContain("above the 10-byte per-blob snapshot cap");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("binary blob content round-trips byte-identically", async () => {
+    const { dir, cleanup } = await makeRepo();
+    try {
+      const full = join(dir, "src", "bin.dat");
+      await mkdir(dirname(full), { recursive: true });
+      const bytes = new Uint8Array([0x61, 0x00, 0x0a, 0xff, 0x62]);
+      await writeFile(full, bytes);
+      await git(dir, ["add", "-A"]);
+      await git(dir, ["commit", "-m", "binary", "--quiet"]);
+      const base = await git(dir, ["rev-parse", "HEAD"]);
+      const reader = readerFor(dir, base, base);
+      const oid = (await reader.listHeadFiles()).get("src/bin.dat")?.oid;
+      expect(oid).toBeDefined();
+      const text = await reader.readBlobText(oid as string);
+      expect(text).toBe(new TextDecoder("utf-8", { fatal: false }).decode(bytes));
+      expect(reader.cachedBytes).toBe(bytes.length);
     } finally {
       await cleanup();
     }

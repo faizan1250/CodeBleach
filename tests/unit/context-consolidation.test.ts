@@ -5,11 +5,7 @@ import type { Definition } from "../../src/context/language.ts";
 import type { SupportedLanguage } from "../../src/context/runtime.ts";
 import { matchLocalCall, targetIdentity } from "../../src/context/calls.ts";
 import type { Definition as CallDef } from "../../src/context/language.ts";
-import {
-  callerReason,
-  findTargetDeclaration,
-  snippetAround,
-} from "../../src/context/callers.ts";
+import { callerReason, findTargetDeclaration, snippetAround } from "../../src/context/callers.ts";
 import {
   candidatePaths,
   importReason,

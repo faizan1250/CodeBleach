@@ -3,11 +3,7 @@ import { ConfigFileSchema } from "../../src/config/schema.ts";
 import type { ResolvedConfig } from "../../src/config/schema.ts";
 import { ReviewerError } from "../../src/core/errors.ts";
 import type { Logger } from "../../src/core/logger.ts";
-import {
-  API_KEY_ENV,
-  FIXED_MODEL_ID,
-  TRAINING_OPT_IN_ENV,
-} from "../../src/llm/constants.ts";
+import { API_KEY_ENV, FIXED_MODEL_ID, TRAINING_OPT_IN_ENV } from "../../src/llm/constants.ts";
 import { OpenCodeProvider } from "../../src/providers/opencode.ts";
 import { FakeProvider } from "../../src/providers/fake.ts";
 import { completeJsonWithStats, newJsonCallStats } from "../../src/providers/json.ts";
@@ -218,9 +214,7 @@ describe("review stage deadline config", () => {
   test("rejects review deadlines outside 1000ms to 3600000ms", () => {
     expect(() => ConfigFileSchema.parse({ llm: { review_timeout_ms: 999 } })).toThrow();
     expect(() => ConfigFileSchema.parse({ llm: { review_timeout_ms: 3600001 } })).toThrow();
-    expect(ConfigFileSchema.parse({ llm: { review_timeout_ms: 1000 } }).llm.review_timeout_ms).toBe(
-      1000,
-    );
+    expect(ConfigFileSchema.parse({ llm: { review_timeout_ms: 1000 } }).llm.review_timeout_ms).toBe(1000);
   });
 });
 
@@ -295,10 +289,7 @@ describe("engine retry and repair accounting", () => {
     const calls: unknown[] = [];
     const provider = new OpenCodeProvider({
       env: { ...GATE },
-      fetchFn: mockFetch(
-        [jsonResponse({ error: "busy" }, 500), jsonResponse(okEnvelope([rawFinding()]))],
-        calls,
-      ),
+      fetchFn: mockFetch([jsonResponse({ error: "busy" }, 500), jsonResponse(okEnvelope([rawFinding()]))], calls),
       sleep: () => Promise.resolve(),
     });
     const result = await engineFor(provider).review([unit()], configWith());
@@ -333,10 +324,7 @@ describe("engine retry and repair accounting", () => {
   });
 
   test("keeps repair requests distinct from transport retries", async () => {
-    const provider = new FakeProvider([
-      { respond: "not json", retries: 2 },
-      { respond: { findings: [rawFinding()] } },
-    ]);
+    const provider = new FakeProvider([{ respond: "not json", retries: 2 }, { respond: { findings: [rawFinding()] } }]);
     const result = await engineFor(provider).review([unit()], configWith());
     expect(result.status).toBe("complete");
     expect(result.findings).toHaveLength(1);
@@ -378,10 +366,7 @@ describe("engine deadlines and cancellation", () => {
     expect(result.status).toBe("failed");
     expect(result.findings).toEqual([]);
     expect(result.unitsReviewed).toBe(0);
-    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
-      "REVIEW_CANCELLED",
-      "REVIEW_CANCELLED",
-    ]);
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(["REVIEW_CANCELLED", "REVIEW_CANCELLED"]);
     for (const diagnostic of result.diagnostics) {
       expect(diagnostic.retryable).toBe(false);
     }
@@ -399,10 +384,10 @@ describe("engine deadlines and cancellation", () => {
 
   test("a stage deadline during requests preserves completed findings", async () => {
     const provider = new ManualProvider([JSON.stringify({ findings: [rawFinding({ title: "kept" })] })]);
-    const pending = engineFor(provider).review(
-      [unit({ id: "u-1" }), unit({ id: "u-2" }), unit({ id: "u-3" })],
-      { ...configWithReviewTimeout(40), llm: { ...configWithReviewTimeout(40).llm, max_concurrent_requests: 1 } },
-    );
+    const pending = engineFor(provider).review([unit({ id: "u-1" }), unit({ id: "u-2" }), unit({ id: "u-3" })], {
+      ...configWithReviewTimeout(40),
+      llm: { ...configWithReviewTimeout(40).llm, max_concurrent_requests: 1 },
+    });
     await tick();
     provider.resolveNext();
     const result = await pending;
@@ -411,9 +396,7 @@ describe("engine deadlines and cancellation", () => {
     expect(result.unitsReviewed).toBe(1);
     expect(result.unitsFailed).toBe(2);
     expect(provider.calls).toHaveLength(2);
-    expect(
-      result.diagnostics.every((diagnostic) => diagnostic.code === "REVIEW_DEADLINE_EXCEEDED"),
-    ).toBe(true);
+    expect(result.diagnostics.every((diagnostic) => diagnostic.code === "REVIEW_DEADLINE_EXCEEDED")).toBe(true);
   });
 
   test("mid-run caller abort preserves completed findings", async () => {

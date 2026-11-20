@@ -140,9 +140,12 @@ const PathOverrideSchema = z.strictObject({
 
 const ContextSchema = z
   .strictObject({
-    max_run_time_ms: z.number().int().min(MIN_MAX_RUN_TIME_MS).max(MAX_MAX_RUN_TIME_MS).default(
-      DEFAULT_MAX_RUN_TIME_MS,
-    ),
+    max_run_time_ms: z
+      .number()
+      .int()
+      .min(MIN_MAX_RUN_TIME_MS)
+      .max(MAX_MAX_RUN_TIME_MS)
+      .default(DEFAULT_MAX_RUN_TIME_MS),
     max_parse_time_ms: z
       .number()
       .int()
@@ -199,12 +202,7 @@ export const ConfigFileSchema = z.strictObject({
         .min(MIN_LLM_MAX_OUTPUT_TOKENS)
         .max(MAX_LLM_MAX_OUTPUT_TOKENS)
         .default(DEFAULT_LLM_MAX_OUTPUT_TOKENS),
-      max_retries: z
-        .number()
-        .int()
-        .min(MIN_LLM_MAX_RETRIES)
-        .max(MAX_LLM_MAX_RETRIES)
-        .default(DEFAULT_LLM_MAX_RETRIES),
+      max_retries: z.number().int().min(MIN_LLM_MAX_RETRIES).max(MAX_LLM_MAX_RETRIES).default(DEFAULT_LLM_MAX_RETRIES),
       max_concurrent_requests: z
         .number()
         .int()

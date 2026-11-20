@@ -38,10 +38,8 @@ const A_HEAD =
   "export function f(x: number): number {\n" +
   "  return helper(x + 1);\n" +
   "}\n";
-const TWO_BASE =
-  "export function f(): number {\n  return 1;\n}\nexport function g(): number {\n  return 2;\n}\n";
-const TWO_HEAD =
-  "export function f(): number {\n  return 10;\n}\nexport function g(): number {\n  return 20;\n}\n";
+const TWO_BASE = "export function f(): number {\n  return 1;\n}\nexport function g(): number {\n  return 2;\n}\n";
+const TWO_HEAD = "export function f(): number {\n  return 10;\n}\nexport function g(): number {\n  return 20;\n}\n";
 
 function timeoutError(): ReviewerError {
   return new ReviewerError({
@@ -135,9 +133,9 @@ describe("p3-f03 git query timeouts", () => {
       });
       const result = await engine.build(diff, config, dir);
       expect(result.diagnostics.queryTimeouts).toBe(0);
-      expect(
-        result.diagnostics.diagnostics.some((d) => d.stage === "callee" && d.code === "parse-cancelled"),
-      ).toBe(true);
+      expect(result.diagnostics.diagnostics.some((d) => d.stage === "callee" && d.code === "parse-cancelled")).toBe(
+        true,
+      );
     } finally {
       await cleanup();
     }
@@ -228,7 +226,7 @@ describe("p3-f03 git query timeouts", () => {
         {
           diff: diffEngine,
           context,
-          review: { review: () => Promise.resolve(emptyReviewResult()) },
+          review: { review: () => Promise.resolve(emptyReviewResult()), requiresLlm: false },
           validation: { validate: () => Promise.resolve([]) },
           publisher: { publish: () => Promise.resolve({ published: 0, skipped: 0, failures: [] }) },
           logger: logger(),

@@ -24,9 +24,7 @@ export class FakeProvider implements LlmProvider {
 
   async complete(request: LlmRequest): Promise<LlmResponse> {
     this.calls.push({ ...request });
-    const index = this.steps.findIndex(
-      (step) => step.match === undefined || step.match(request),
-    );
+    const index = this.steps.findIndex((step) => step.match === undefined || step.match(request));
     if (index === -1) {
       throw new Error(`FakeProvider: no scripted step matched request to ${request.system}`);
     }

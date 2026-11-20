@@ -114,14 +114,16 @@ Symbol resolution is **best-effort by name + import path**, not a type checker. 
 
 Test discovery is bounded: `MAX_TEST_GREP_MATCHES=200` per symbol-name grep, `MAX_TEST_SCAN_FILES=200` scanned files, deterministic ordering throughout; expected misses stay silent, only `parse-cancelled`/`cap-reached`-class outcomes become diagnostics.
 
+Snapshot blob reads are one-shot `git cat-file --batch` fetches (`src/context/snapshot.ts`, ADR 0026): single-OID lazy reads cost one spawn (header size replaces the old size probe), `prefetchBlobs` pulls all changed-file head/base blobs up front in 16-OID chunks, all argv-only with stdin from memory and no persistent background process. Protocol parsing is binary-safe with in-order OID checks; per-blob and cumulative byte caps still gate caching; prefetch is best-effort and never throws. Diagnostics carry additive `gitCalls/blobsFetched/blobCacheHits/batchFetches` alongside `queryTimeouts` and the parse-cache counters.
+
 `queryTimeouts` counts engine-observed timed-out Git subprocess calls only (`isGitTimeout` in `src/context/snapshot.ts`: `GIT_FAILED` whose cause reason is `"timeout"`). Git runs single-attempt with no retry, and resolvers rethrow timeout-cause errors instead of recording them as content misses, so the engine counts each exactly once at its catch sites. Deadline skips, parse cancellations, and non-timeout Git failures (exit, output-limit, abort) never increment it. A Git subprocess that exceeds its stdout/stderr byte cap (`runProcess` reason `"output-limit"`, `isGitOutputLimit`) surfaces as the distinct transport code `transport-output-limit` — never `cap-reached` (reserved for caller/callee/test/file candidate caps) and never a budget/timeout code — with its own budget-independent path through the same rethrow-and-count-once structure.
 
-Per-run parse cache (`src/context/parse-cache.ts`): one extraction bundle per `(commit, path, language)` key (lowercased commit; head/base entries stay separate via distinct SHAs). Stores plain extraction data only — never Tree/WASM handles — so nothing disposes beyond `clear()` at run end. Hits never touch the run budget; misses parse once under it (per-file, cumulative, and deadline limits all apply); cancelled parses are never cached. Caps `MAX_PARSE_CACHE_ENTRIES=256`, `MAX_PARSE_CACHE_BYTES=8MiB` (source-bytes proxy). Diagnostics carry additive `parseCacheHits/Misses/Entries`; `filesParsed` counts actual parses only (hits excluded). Cached outputs are byte-identical to uncached ones.
+Per-run parse cache (`src/context/parse-cache.ts`): one extraction bundle per `(commit, path, language)` key (lowercased commit; head/base entries stay separate via distinct SHAs; source-equality re-parses on overwrite, so identical blobs parse once per review with no stale cross-content). Stores plain extraction data only — never Tree/WASM handles — so nothing disposes beyond `clear()` at run end. Hits never touch the run budget; misses parse once under it (per-file, cumulative, and deadline limits all apply); cancelled parses are never cached. Caps `MAX_PARSE_CACHE_ENTRIES=256`, `MAX_PARSE_CACHE_BYTES=8MiB` (source-bytes proxy). Diagnostics carry additive `parseCacheHits/Misses/Entries`; `filesParsed` counts actual parses only (hits excluded). Cached outputs are byte-identical to uncached ones.
 
 Partial behavior: `ContextBuildResult.status` is `complete` (no issues) | `partial` (issues with units produced, or deadline/budget with zero units) | `failed` (zero units plus a retrieval-failure diagnostic; cap-only, budget-only, or parse-cancelled-only diagnostics stay `partial`). A transport `transport-output-limit` diagnostic is fatal only when zero usable units remain (otherwise `partial` with preserved context); it never completes and never converts every failure to fatal. Engine diagnostics (`ContextDiagnostic{stage, path, symbol?, code, reason}`, stages `snapshot | parse | import | caller | callee | test`) are bounded (max 100, key-deduped) and carry static codes (`cap-reached | budget-exceeded | parse-cancelled | timeout | transport-output-limit | deadline` plus per-stage `*-failed` fallbacks) plus path/symbol truncated to 200 chars — never messages, source text, or file content. Partial/failed runs still persist `run.json` with units + diagnostics verbatim (redacted by `sanitizePayload`).
 
 ### 4.3 Review Engine (`src/review`)
-- **MVP: one agent, one pass per ReviewUnit** with a single focused prompt (bugs, null handling, security, regressions). One unit maps to one provider request (plus bounded transport retries, one JSON repair, one `max_output_tokens` cap escalation); never batch units or split a semantic unit. Add specialized passes (security, concurrency, perf) as separate prompt files only if evals show recall gaps. Separate agents are justified only when a pass needs different tools/context or different models for cost; not before.
+- **MVP: one agent, one pass per ReviewUnit** with a single focused prompt (bugs, null handling, security, regressions). One unit maps to one provider request (plus bounded transport retries, one JSON repair, one `max_output_tokens` cap escalation, ADR 0024); never batch units or split a semantic unit. Add specialized passes (security, concurrency, perf) as separate prompt files only if evals show recall gaps. Separate agents are justified only when a pass needs different tools/context or different models for cost; not before.
 - Input: `ReviewUnit` (diff hunks with line numbers, symbol, context items, rules).
 - Output: `ReviewBuildResult` (ADR 0017) — `status` (`complete | partial | failed | skipped`), code-owned `Finding[]` (ids, `sha1(file + symbol + category + normalized title)` fingerprints, head SHA, symbol, origin), bounded redacted per-unit diagnostics, and usage (`requests/retries/repairRequests/incompleteRetries`, tokens/cost only when the provider reports them). Model output passes strict `RawReviewOutput` (Zod) validation first; the LLM never produces ids, SHAs or fingerprints. A failed unit never erases findings from successful ones. Bounded concurrency (default 3), stable result order. One stage deadline (`review_timeout_ms`, default 600000) plus caller `AbortSignal` bound the whole run (ADR 0018): stops skip queued units with `REVIEW_DEADLINE_EXCEEDED` / `REVIEW_CANCELLED` and abort in-flight requests, preserving completed findings.
 - Prompt rules: report only issues introduced by the PR; cite exact code in `evidence`; use only provided context; say nothing if no confirmed bug (`findings: []` is a valid answer); untrusted code goes inside delimited blocks and is declared as data.
@@ -396,7 +398,11 @@ provider + engine built from `config.llm` bounds, one opaque `ses_`-prefixed
 session per run, resolved `diff.headSha` passed per review call for code-owned
 attribution, `--no-llm` offline preview (skipped review `no_llm_flag`,
 validation/publish skipped `review_skipped_no_llm`, exit 0), demo unchanged
-and network-free, live preflight non-ZDR warning. Validation stays
+and network-free, live preflight non-ZDR warning. Resolved by the
+reliability pass (ADR 0025): pipeline LLM preflight right after config —
+consent, key, fixed-model wiring, and usable budgets fail `CONFIG_INVALID`
+before diff and context (offline/canned engines declare
+`requiresLlm: false` and skip it); `--dry-run` preflights identically. Validation stays
 `NOT_IMPLEMENTED` with findings retained in `run.json`: a live `--dry-run`
 completes honestly — validation recorded as skipped
 (`validation_unimplemented`), findings kept unvalidated, publish still
@@ -438,10 +444,10 @@ src/
   cli/                 index.ts, commands/{review,config,version}.ts
   core/                pipeline.ts, errors.ts, result.ts, logger.ts, run-artifact.ts
   config/              schema.ts, defaults.ts, load.ts, migrate.ts
-  diff/                git.ts, parse.ts, positions.ts, filters.ts, paths.ts
+  diff/                   diff/                git.ts (orchestration + public surface), revisions.ts, git-exec.ts, blobs.ts, patches.ts, parse.ts, positions.ts, filters.ts, paths.ts
   context/             adapters/typescript.ts, parser.ts, search.ts, retrieve.ts, rank.ts, budget.ts
-  review/              engine.ts, prompt.ts, normalize.ts, result.ts
-  llm/                 constants.ts, training-gate.ts
+  review/              engine.ts (orchestration), stage.ts, pool.ts, unit-runner.ts, prompt.ts, normalize.ts, result.ts
+  llm/                 constants.ts, training-gate.ts, preflight.ts
   validate/            engine.ts, deterministic.ts, llm.ts, dedupe.ts
   providers/           types.ts, fake.ts, json.ts, opencode.ts
   github/              client.ts, publish.ts, fingerprint.ts

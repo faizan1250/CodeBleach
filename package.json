@@ -2,16 +2,21 @@
   "dependencies": {
     "@vscode/tree-sitter-wasm": "0.3.1",
     "web-tree-sitter": "0.25.10",
-    "zod": "^4.6.7"
+    "zod": "4.6.7"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.6.8",
     "@types/bun": "^1.4.4",
-    "typescript": "^7.0.2"
+    "typescript": "7.0.2"
   },
   "name": "codebleach",
   "private": true,
+  "license": "MIT",
   "scripts": {
     "check": "bun run typecheck && bun test",
+    "format": "biome format --write src tests scripts",
+    "format:check": "biome format src tests scripts",
+    "lint": "biome lint src tests scripts",
     "review": "bun run src/cli/index.ts review",
     "test": "bun test",
     "typecheck": "tsc --noEmit"

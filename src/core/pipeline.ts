@@ -1,23 +1,10 @@
 import { loadConfig as defaultLoadConfig } from "../config/load.ts";
 import type { ResolvedConfig } from "../config/schema.ts";
 import { ReviewerError } from "./errors.ts";
-import type {
-  ConfigSource,
-  PipelineDeps,
-  PipelineInput,
-  RunSummary,
-  StageName,
-  StageResult,
-} from "./contracts.ts";
+import type { ConfigSource, PipelineDeps, PipelineInput, RunSummary, StageName, StageResult } from "./contracts.ts";
 import { RUN_ARTIFACT_SCHEMA_VERSION, writeArtifact, type RunArtifact } from "./run-artifact.ts";
-import type {
-  DiffResult,
-  Finding,
-  PrMeta,
-  PublishResult,
-  ReviewUnit,
-  ValidatedFinding,
-} from "../types/index.ts";
+import { requireLlmPreflight } from "../llm/preflight.ts";
+import type { DiffResult, Finding, PrMeta, PublishResult, ReviewUnit, ValidatedFinding } from "../types/index.ts";
 import type { ContextBuildDiagnostics } from "../types/context.ts";
 import type { ReviewBuildResult } from "../types/review.ts";
 
@@ -128,6 +115,16 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
     configSource = loaded.source;
     const resolved = config;
     await persist("running");
+
+    // LLM preflight (ADR 0025): runs that will call the model fail here —
+    // before diff (git spawns) and context (parse over changed files) — on
+    // missing consent/key or unusable budgets. Offline/canned review engines
+    // (requiresLlm === false) skip it. Engine/provider gates stay as
+    // defense-in-depth; no new stage is recorded, so a preflight failure
+    // leaves stages at [config completed].
+    if (deps.review.requiresLlm !== false) {
+      requireLlmPreflight({ config: resolved, env: input.env });
+    }
 
     const diffResult = await runStage(
       "diff",

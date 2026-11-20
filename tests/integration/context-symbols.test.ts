@@ -33,7 +33,12 @@ describe("context symbols from commit snapshots", () => {
     try {
       outside = await mkdtemp(join(tmpdir(), "codebleach-sym-"));
       await mkdir(join(dir, "src"), { recursive: true });
-      await writeIndexed(dir, outside, "src/f.ts", "export function f(x?: string) {\n  if (!x) return 0;\n  return x.length;\n}\n");
+      await writeIndexed(
+        dir,
+        outside,
+        "src/f.ts",
+        "export function f(x?: string) {\n  if (!x) return 0;\n  return x.length;\n}\n",
+      );
       const base = await commitIndex(dir, "base");
       await writeIndexed(dir, outside, "src/f.ts", "export function f(x?: string) {\n  return x.length;\n}\n");
       const head = await commitIndex(dir, "head");
@@ -42,9 +47,7 @@ describe("context symbols from commit snapshots", () => {
       expect(result.files).toHaveLength(1);
       const file = result.files[0];
       if (file === undefined) throw new Error("expected one file");
-      expect(file.symbols).toEqual([
-        { name: "<module>", kind: "module", startLine: 1, endLine: 3, changedLines: [] },
-      ]);
+      expect(file.symbols).toEqual([{ name: "<module>", kind: "module", startLine: 1, endLine: 3, changedLines: [] }]);
       const reader = new SnapshotReader({ repoRoot: dir, headSha: result.headSha, mergeBase: result.mergeBase });
       const symbols = await mapChangedSymbolsForFile({ file, reader });
       expect(symbols).toHaveLength(1);
@@ -149,7 +152,12 @@ describe("context symbols from commit snapshots", () => {
     try {
       outside = await mkdtemp(join(tmpdir(), "codebleach-sym-"));
       await mkdir(join(dir, "src"), { recursive: true });
-      await writeIndexed(dir, outside, "src/f.ts", "export function f(x?: string) {\n  if (!x) return 0;\n  return x.length;\n}\n");
+      await writeIndexed(
+        dir,
+        outside,
+        "src/f.ts",
+        "export function f(x?: string) {\n  if (!x) return 0;\n  return x.length;\n}\n",
+      );
       const base = await commitIndex(dir, "base");
       await writeIndexed(dir, outside, "src/f.ts", "export function f(x?: string) {\n  return x.length;\n}\n");
       const head = await commitIndex(dir, "head");
@@ -175,7 +183,12 @@ describe("context symbols from commit snapshots", () => {
     try {
       outside = await mkdtemp(join(tmpdir(), "codebleach-sym-"));
       await mkdir(join(dir, "src"), { recursive: true });
-      await writeIndexed(dir, outside, "src/f.ts", "export function f(x?: string) {\n  if (!x) return 0;\n  return x.length;\n}\n");
+      await writeIndexed(
+        dir,
+        outside,
+        "src/f.ts",
+        "export function f(x?: string) {\n  if (!x) return 0;\n  return x.length;\n}\n",
+      );
       const base = await commitIndex(dir, "base");
       await writeIndexed(dir, outside, "src/f.ts", "export function f(x?: string) {\n  return x.length;\n}\n");
       const head = await commitIndex(dir, "head");

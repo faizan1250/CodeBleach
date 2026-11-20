@@ -3,11 +3,7 @@ import { ConfigFileSchema, type ResolvedConfig } from "../../src/config/schema.t
 import type { Logger } from "../../src/core/logger.ts";
 import { FakeProvider } from "../../src/providers/fake.ts";
 import { ReviewEngineImpl } from "../../src/review/engine.ts";
-import {
-  fingerprintForFinding,
-  normalizeFinding,
-  normalizeRepoPath,
-} from "../../src/review/normalize.ts";
+import { fingerprintForFinding, normalizeFinding, normalizeRepoPath } from "../../src/review/normalize.ts";
 import type { ReviewUnit } from "../../src/types/context.ts";
 import type { RawFinding } from "../../src/types/finding.ts";
 import type { Rule } from "../../src/types/rules.ts";
@@ -218,32 +214,28 @@ describe("normalizeFinding", () => {
   });
 
   test("rejects unknown ruleId", () => {
-    expect(
-      normalizeFinding(raw({ ruleId: "no-such-rule" }), { unit: unit(), headSha: "h" }),
-    ).toBeNull();
+    expect(normalizeFinding(raw({ ruleId: "no-such-rule" }), { unit: unit(), headSha: "h" })).toBeNull();
   });
 
   test("rejects absolute finding paths", () => {
-    expect(
-      normalizeFinding(raw({ file: "/etc/passwd" }), { unit: unit(), headSha: "h" }),
-    ).toBeNull();
+    expect(normalizeFinding(raw({ file: "/etc/passwd" }), { unit: unit(), headSha: "h" })).toBeNull();
   });
 
   test("rejects traversal in evidence paths", () => {
     expect(
-      normalizeFinding(
-        raw({ evidence: [{ file: "../secret.ts", startLine: 1, endLine: 1, quote: "x" }] }),
-        { unit: unit(), headSha: "h" },
-      ),
+      normalizeFinding(raw({ evidence: [{ file: "../secret.ts", startLine: 1, endLine: 1, quote: "x" }] }), {
+        unit: unit(),
+        headSha: "h",
+      }),
     ).toBeNull();
   });
 
   test("rejects blank evidence quotes", () => {
     expect(
-      normalizeFinding(
-        raw({ evidence: [{ file: "src/auth.ts", startLine: 9, endLine: 9, quote: "   " }] }),
-        { unit: unit(), headSha: "h" },
-      ),
+      normalizeFinding(raw({ evidence: [{ file: "src/auth.ts", startLine: 9, endLine: 9, quote: "   " }] }), {
+        unit: unit(),
+        headSha: "h",
+      }),
     ).toBeNull();
   });
 
@@ -284,9 +276,7 @@ describe("engine normalization", () => {
   });
 
   test("drops unknown-ruleId findings", async () => {
-    const provider = new FakeProvider([
-      { respond: { findings: [{ ...raw(), ruleId: "invented-rule" }] } },
-    ]);
+    const provider = new FakeProvider([{ respond: { findings: [{ ...raw(), ruleId: "invented-rule" }] } }]);
     const engine = new ReviewEngineImpl({
       provider,
       logger: nullLogger(),

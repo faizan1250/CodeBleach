@@ -18,10 +18,7 @@ import { runPipeline } from "../../core/pipeline.ts";
 import { OpenCodeProvider } from "../../providers/opencode.ts";
 import { ReviewEngineImpl } from "../../review/engine.ts";
 import { skippedReviewResult } from "../../review/result.ts";
-import {
-  stubPublisher,
-  stubValidationEngine,
-} from "../../core/stubs.ts";
+import { stubPublisher, stubValidationEngine } from "../../core/stubs.ts";
 import { readVersion } from "./version.ts";
 import { exitCodeForError } from "../exit-codes.ts";
 
@@ -115,7 +112,7 @@ export async function runReview(options: ReviewOptions, logger: Logger): Promise
       {
         diff: new GitDiffEngine({ logger }),
         context: new ContextEngineImpl({ logger }),
-        review: { review: () => Promise.resolve(skippedReviewResult()) },
+        review: { review: () => Promise.resolve(skippedReviewResult()), requiresLlm: false },
         validation: stubValidationEngine,
         publisher: stubPublisher,
       },
@@ -167,7 +164,10 @@ async function runEngines(
   engines: {
     diff: GitDiffEngine | typeof demoDiffEngine;
     context: ContextEngineImpl | typeof demoContextEngine;
-    review: ReviewEngineImpl | typeof demoReviewEngine | { review: () => Promise<ReturnType<typeof skippedReviewResult>> };
+    review:
+      | ReviewEngineImpl
+      | typeof demoReviewEngine
+      | { review: () => Promise<ReturnType<typeof skippedReviewResult>>; requiresLlm?: boolean | undefined };
     validation: typeof demoValidationEngine | typeof stubValidationEngine;
     publisher: typeof demoPublisher | typeof stubPublisher;
   },
@@ -186,11 +186,10 @@ async function runEngines(
         outDir: options.out,
         runId: options.runId,
         secrets: options.secrets,
+        env: options.env,
       },
     );
-    console.log(
-      `review ${summary.status}: ${summary.stages.length} stages, ${summary.configSource} config`,
-    );
+    console.log(`review ${summary.status}: ${summary.stages.length} stages, ${summary.configSource} config`);
     if (options.noLlm && !options.demo) {
       console.log("offline preview: no model review or validation occurred (--no-llm)");
     } else if (options.dryRun && !options.demo) {

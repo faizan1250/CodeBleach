@@ -79,6 +79,10 @@ export interface ContextBuildDiagnostics {
   unitsWithTruncatedDefinition: number;
   candidateFilesSkippedByCap: number;
   queryTimeouts: number;
+  gitCalls: number;
+  blobsFetched: number;
+  blobCacheHits: number;
+  batchFetches: number;
   parseCacheHits: number;
   parseCacheMisses: number;
   parseCacheEntries: number;

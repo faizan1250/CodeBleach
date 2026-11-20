@@ -5,7 +5,7 @@ import { getAdapter } from "./language.ts";
 import type { Definition, DefinitionKind } from "./language.ts";
 import { ParseCache } from "./parse-cache.ts";
 import type { ErrorRange } from "./parser.ts";
-import { SnapshotReader } from "./snapshot.ts";
+import type { SnapshotReader } from "./snapshot.ts";
 import type { ChangedFile, ChangedSymbol, DiffHunk, SymbolKind } from "../types/diff.ts";
 
 export const MODULE_SYMBOL_NAME = "<module>";
@@ -126,7 +126,15 @@ function moduleOwner(headLineCount: number, file: ChangedFile): Owner {
     if (commentable > endLine) endLine = commentable;
   }
   if (endLine < 1) endLine = 1;
-  return { key: "module", name: MODULE_SYMBOL_NAME, kind: "module", container: undefined, startLine: 1, endLine, occurrence: 0 };
+  return {
+    key: "module",
+    name: MODULE_SYMBOL_NAME,
+    kind: "module",
+    container: undefined,
+    startLine: 1,
+    endLine,
+    occurrence: 0,
+  };
 }
 
 interface AnchorCandidate {
@@ -347,7 +355,7 @@ export async function mapChangedSymbolsForFile(options: MapFileSymbolsOptions): 
   let hasChanges = false;
   for (const hunk of file.hunks) {
     for (const line of hunk.lines) {
-      if ((line.kind === "add" || line.kind === "del")) {
+      if (line.kind === "add" || line.kind === "del") {
         hasChanges = true;
         break;
       }
@@ -384,7 +392,9 @@ export async function mapChangedSymbolsForFile(options: MapFileSymbolsOptions): 
     try {
       baseText = await reader.readBaseText(file.oldPath ?? file.path);
     } catch (error) {
-      throw error instanceof ReviewerError ? error : gitFailed(`cannot read base snapshot for ${file.oldPath ?? file.path}`, error);
+      throw error instanceof ReviewerError
+        ? error
+        : gitFailed(`cannot read base snapshot for ${file.oldPath ?? file.path}`, error);
     }
   }
 

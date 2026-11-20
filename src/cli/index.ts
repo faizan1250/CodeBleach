@@ -142,9 +142,7 @@ async function runConfigCommand(args: string[]): Promise<number> {
   }
   const logger = createLogger({ level: "info", runId: randomUUID() });
   const repo = parsed.values["repo"] ?? ".";
-  return subcommand === "validate"
-    ? runConfigValidate(repo, logger)
-    : runConfigPrint(repo, logger);
+  return subcommand === "validate" ? runConfigValidate(repo, logger) : runConfigPrint(repo, logger);
 }
 
 async function main(): Promise<number> {

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import type { z } from "zod";
 import { ReviewerError } from "../core/errors.ts";
 import type { LlmProvider, LlmRequest, LlmResponse } from "./types.ts";
 
@@ -39,11 +39,7 @@ function badOutput(message: string, cause?: unknown): ReviewerError {
  * Parse provider text as JSON and validate it. Never trusts `response.parsed`.
  * One repair retry with the original text plus validation errors, then gives up.
  */
-export async function completeJson<T>(
-  provider: LlmProvider,
-  request: LlmRequest,
-  schema: z.ZodType<T>,
-): Promise<T> {
+export async function completeJson<T>(provider: LlmProvider, request: LlmRequest, schema: z.ZodType<T>): Promise<T> {
   return completeJsonWithStats(provider, request, schema, newJsonCallStats());
 }
 
@@ -146,15 +142,11 @@ async function repair<T>(
   }
   const validated = schema.safeParse(attempt.value);
   if (!validated.success) {
-    throw badOutput(
-      `provider response failed schema validation twice: ${describeIssues(validated.error)}`,
-    );
+    throw badOutput(`provider response failed schema validation twice: ${describeIssues(validated.error)}`);
   }
   return validated.data;
 }
 
 function describeIssues(error: z.ZodError): string {
-  return error.issues
-    .map((issue) => `${issue.path.map(String).join(".") || "(root)"}: ${issue.message}`)
-    .join("; ");
+  return error.issues.map((issue) => `${issue.path.map(String).join(".") || "(root)"}: ${issue.message}`).join("; ");
 }

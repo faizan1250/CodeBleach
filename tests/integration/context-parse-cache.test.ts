@@ -46,11 +46,10 @@ const A_HEAD =
   "export function g(x: number): number {\n" +
   "  return helper(x * 3);\n" +
   "}\n";
-const MAIN =
-  'import { f } from "./a.ts";\n' + "export function main(): number {\n" + "  return f(1);\n" + "}\n";
+const MAIN = 'import { f } from "./a.ts";\n' + "export function main(): number {\n" + "  return f(1);\n" + "}\n";
 const A_TEST =
   'import { f } from "./a.ts";\n' +
-  "import { strict as assert } from \"node:assert\";\n" +
+  'import { strict as assert } from "node:assert";\n' +
   "export function checkF(): void {\n" +
   "  assert.equal(f(1), 3);\n" +
   "}\n";

@@ -10,11 +10,7 @@ import type {
   ReviewUnit,
   ValidatedFinding,
 } from "../types/index.ts";
-import type {
-  ReviewDiagnostic,
-  ReviewStatus,
-  ReviewUsage,
-} from "../types/review.ts";
+import type { ReviewDiagnostic, ReviewStatus, ReviewUsage } from "../types/review.ts";
 import type { ConfigSource, StageResult } from "./contracts.ts";
 
 export const RUN_ARTIFACT_SCHEMA_VERSION = 1;
@@ -56,11 +52,7 @@ export interface RunArtifact {
 }
 
 /** Atomically write pretty-printed, recursively redacted JSON to `<outDir>/run.json`. */
-export async function writeArtifact(
-  outDir: string,
-  artifact: RunArtifact,
-  secrets: string[] = [],
-): Promise<void> {
+export async function writeArtifact(outDir: string, artifact: RunArtifact, secrets: string[] = []): Promise<void> {
   await mkdir(outDir, { recursive: true });
   const redacted = sanitizePayload(artifact, secrets) as RunArtifact;
   const path = join(outDir, "run.json");

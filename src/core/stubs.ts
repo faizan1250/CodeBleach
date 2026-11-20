@@ -1,10 +1,4 @@
-import type {
-  ContextEngine,
-  DiffEngine,
-  Publisher,
-  ReviewEngine,
-  ValidationEngine,
-} from "./contracts.ts";
+import type { ContextEngine, DiffEngine, Publisher, ReviewEngine, ValidationEngine } from "./contracts.ts";
 import { ReviewerError } from "./errors.ts";
 
 function notImplemented(stage: string, phase: string): ReviewerError {

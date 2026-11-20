@@ -35,8 +35,6 @@ describe("p3-11 unit helpers", () => {
 
   test("item ids are stable", () => {
     const unit = stableUnitId("a".repeat(40), "src/a.ts", "function", undefined, "f", 1);
-    expect(stableItemId(unit, "definition", "src/a.ts", 1)).toBe(
-      stableItemId(unit, "definition", "src/a.ts", 1),
-    );
+    expect(stableItemId(unit, "definition", "src/a.ts", 1)).toBe(stableItemId(unit, "definition", "src/a.ts", 1));
   });
 });

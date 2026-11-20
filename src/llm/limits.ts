@@ -1,7 +1,4 @@
-import {
-  MAX_LLM_MAX_OUTPUT_TOKENS,
-  MAX_LLM_MAX_REVIEW_UNIT_INPUT_TOKENS,
-} from "../config/defaults.ts";
+import { MAX_LLM_MAX_OUTPUT_TOKENS, MAX_LLM_MAX_REVIEW_UNIT_INPUT_TOKENS } from "../config/defaults.ts";
 
 // Local enforcement bounds for muse-spark-1.3-contributor via opencode-go.
 // Provenance: the P4-00 authenticated catalog read verified ONLY
@@ -23,9 +20,7 @@ export interface CatalogLimits {
   maxOutputTokens: number;
 }
 
-export type CatalogLimitsResult =
-  | { ok: true; limits: CatalogLimits }
-  | { ok: false; reason: string };
+export type CatalogLimitsResult = { ok: true; limits: CatalogLimits } | { ok: false; reason: string };
 
 function asPositiveInt(value: unknown): number | undefined {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
@@ -65,7 +60,12 @@ export type UnitBudgetResult =
   | { ok: true; effectiveInputCeiling: number }
   | {
       ok: false;
-      code: "INVALID_BUDGET" | "OUTPUT_CEILING_EXCEEDED" | "INPUT_CEILING_EXCEEDED" | "BUDGET_EXCEEDS_CONTEXT" | "INPUT_BUDGET_EXCEEDED";
+      code:
+        | "INVALID_BUDGET"
+        | "OUTPUT_CEILING_EXCEEDED"
+        | "INPUT_CEILING_EXCEEDED"
+        | "BUDGET_EXCEEDS_CONTEXT"
+        | "INPUT_BUDGET_EXCEEDED";
       message: string;
     };
 

@@ -11,13 +11,7 @@ import type {
 import { ConfigFileSchema, type ResolvedConfig } from "../../src/config/schema.ts";
 import { ok, err } from "../../src/core/result.ts";
 import { emptyReviewUsage } from "../../src/review/result.ts";
-import type {
-  DiffResult,
-  Finding,
-  ReviewBuildResult,
-  ReviewUnit,
-  ValidatedFinding,
-} from "../../src/types/index.ts";
+import type { DiffResult, Finding, ReviewBuildResult, ReviewUnit, ValidatedFinding } from "../../src/types/index.ts";
 
 /** Configurable engines for pipeline tests: record calls, inject failures, embed secrets. */
 export interface FixtureOptions {
@@ -101,6 +95,10 @@ export function createFixtureEngines(options: FixtureOptions = {}): FixtureEngin
       unitsWithTruncatedDefinition: 0,
       candidateFilesSkippedByCap: 0,
       queryTimeouts: 0,
+      gitCalls: 0,
+      blobsFetched: 0,
+      blobCacheHits: 0,
+      batchFetches: 0,
       parseCacheHits: 0,
       parseCacheMisses: 0,
       parseCacheEntries: 0,
@@ -129,7 +127,8 @@ export function createFixtureEngines(options: FixtureOptions = {}): FixtureEngin
     checks: [{ name: "schema", passed: true }],
   };
 
-  const loadConfig = ((_repoDir: string) => Promise.resolve(ok({ config, source: "defaults" as const }))) as LoadConfigFn;
+  const loadConfig = ((_repoDir: string) =>
+    Promise.resolve(ok({ config, source: "defaults" as const }))) as LoadConfigFn;
 
   return {
     order,
@@ -148,6 +147,8 @@ export function createFixtureEngines(options: FixtureOptions = {}): FixtureEngin
       },
     },
     review: {
+      // Fixture review never touches the network: canned findings only.
+      requiresLlm: false,
       review: (units) => {
         maybeFail(order, "review", options);
         return Promise.resolve({
@@ -177,7 +178,5 @@ export function createFixtureEngines(options: FixtureOptions = {}): FixtureEngin
 
 export function failingLoadConfig(code: "CONFIG_INVALID" | "CONFIG_UNSUPPORTED_VERSION"): LoadConfigFn {
   return ((_repoDir: string) =>
-    Promise.resolve(
-      err(new ReviewerError({ code, message: "bad config" })),
-    )) as LoadConfigFn;
+    Promise.resolve(err(new ReviewerError({ code, message: "bad config" })))) as LoadConfigFn;
 }

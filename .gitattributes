@@ -1,0 +1,4 @@
+# Normalize line endings to LF on every OS so `bun run format:check`
+# passes identically on Windows, macOS, and Linux regardless of the
+# checker's core.autocrlf setting.
+* text=auto eol=lf

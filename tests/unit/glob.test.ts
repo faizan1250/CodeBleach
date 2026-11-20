@@ -39,16 +39,7 @@ describe("isValidGlobPattern", () => {
   });
 
   test("rejects dot, dotdot, and empty segments", () => {
-    for (const pattern of [
-      ".",
-      "..",
-      "src/./a.ts",
-      "../a.ts",
-      "src/../a.ts",
-      "src//a.ts",
-      "src/",
-      "a/**//b",
-    ]) {
+    for (const pattern of [".", "..", "src/./a.ts", "../a.ts", "src/../a.ts", "src//a.ts", "src/", "a/**//b"]) {
       expect(isValidGlobPattern(pattern)).toBe(false);
     }
   });

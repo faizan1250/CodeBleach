@@ -101,7 +101,9 @@ function hasSensitiveSegment(key: string): boolean {
   // HTTP|Auth|Token) so leading-acronym keys classify without broad DB/API rules.
   // Single-token all-caps concatenations (DBPASSWORD) have no boundary and stay
   // non-sensitive by design.
-  const segments = key.split(/[_\-.]+/).flatMap((part) => part.split(/(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/));
+  const segments = key
+    .split(/[_\-.]+/)
+    .flatMap((part) => part.split(/(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/));
   return segments.some((segment) => {
     const normalized = segment.toLowerCase();
     if (SENSITIVE_SEGMENTS.has(normalized)) return true;
@@ -151,6 +153,23 @@ function decodeQueryKeyOnce(key: string): string {
   }
 }
 
+// Per-URL fragment scope shared by query + assignment paths. Within one
+// whitespace/quote-delimited token, a new explicit URL start after `,` or `;`
+// begins a fresh URL with independent fragment state. Only `http(s)://`
+// after `,`/`;` resets; bare commas never split prose.
+function urlScopeToken(token: string): string {
+  const next = /[,;]https?:\/\/[^,;\s"'<>]*$/i.exec(token);
+  return next ? next[0].slice(1) : token;
+}
+
+// True when keyOffset sits after a literal `#` in the current URL scope.
+// Whitespace/quotes already delimit tokens, so prose `#` never protects a
+// later assignment separated by a space.
+function isInUrlFragment(input: string, keyOffset: number): boolean {
+  const token = /[^\s"'<>]*$/.exec(input.slice(0, keyOffset))?.[0] ?? "";
+  return urlScopeToken(token).includes("#");
+}
+
 // `.env` / YAML / JSON / log `KEY=value` / `KEY: value` (optionally quoted).
 // Runs after TOKEN_PATTERNS so structured tokens are already gone. The opening
 // value quote is consumed and the original closing quote stays, so quoted JSON
@@ -166,10 +185,23 @@ function decodeQueryKeyOnce(key: string): string {
 const ASSIGNMENT_SECRET_RE =
   /(^|[\s{,;("'])(["']?)([A-Za-z0-9_.-]+)(["']?)\s*([:=])\s*(?:(\\?")((?:\\.|[^"\\])*?)(\\?")|(\\?')((?:\\.|[^'\\])*?)(\\?')|(["']?)([^"'\s,};&]+))/gim;
 
-/** Replace exact secrets (longest first) and known token patterns with [REDACTED]. */
+/** Replace exact secrets (longest first) and known token patterns with [REDACTED].
+ *
+ * Blind literal replacement applies only to secrets of at least
+ * MIN_LITERAL_SECRET_LENGTH chars: shorter values collide with ordinary prose
+ * (`OPENCODE_API_KEY=x` would otherwise rewrite every `x`). Context-aware
+ * paths (sensitive `KEY=value` assignments, `?key=value` query pairs,
+ * `sanitizePayload` whole-value drops, Bearer/Basic/JWT/token patterns)
+ * classify by key or shape and stay length-independent. */
+// Blind literal secrets need a length floor: below 8 chars collisions with
+// prose/tokens are near-certain, while real keys (Bearer, `sk-`, API values)
+// are far longer. Only this literal replacer is gated; key-driven paths below
+// and TOKEN_PATTERNS above keep full recall on short values.
+const MIN_LITERAL_SECRET_LENGTH = 8;
+
 export function redact(text: string, extraSecrets: string[] = []): string {
   let out = text;
-  const secrets = [...new Set(extraSecrets.filter((s) => s.length > 0))].sort(
+  const secrets = [...new Set(extraSecrets.filter((s) => s.length >= MIN_LITERAL_SECRET_LENGTH))].sort(
     (a, b) => b.length - a.length,
   );
   for (const secret of secrets) {
@@ -184,9 +216,9 @@ export function redact(text: string, extraSecrets: string[] = []): string {
     URL_QUERY_SECRET_RE,
     (match: string, mark: string, key: string, value: string, offset: number, input: string) => {
       if (value === REDACTED) return match;
-      // Fragment-opaque: skip pairs after the first literal `#` in this token.
-      const token = /[^\s"'<>]*$/.exec(input.slice(0, offset))?.[0] ?? "";
-      if (token.includes("#")) return match;
+      // Fragment-opaque per URL scope: a `,`/`;`-introduced https?:// URL
+      // starts fresh fragment state, so later URLs still redact.
+      if (isInUrlFragment(input, offset)) return match;
       const decodedKey = decodeQueryKeyOnce(key);
       if (!isSensitiveAssignmentKey(decodedKey)) return match;
       if (!isSensitiveKey(decodedKey) && isTelemetryKey(decodedKey)) return match;
@@ -211,17 +243,18 @@ export function redact(text: string, extraSecrets: string[] = []): string {
       sqClose: string | undefined,
       uqOpen: string,
       uqValue: string,
+      offset: number,
+      input: string,
     ) => {
-      const openValue = dqValue !== undefined ? (dqOpen as string) : sqValue !== undefined ? (sqOpen as string) : uqOpen;
-      const value =
-        dqValue !== undefined ? dqValue : sqValue !== undefined ? (sqValue as string) : uqValue;
-      const closeValue =
-        dqValue !== undefined
-          ? (dqClose as string)
-          : sqValue !== undefined
-            ? (sqClose as string)
-            : "";
+      const openValue =
+        dqValue !== undefined ? (dqOpen as string) : sqValue !== undefined ? (sqOpen as string) : uqOpen;
+      const value = dqValue !== undefined ? dqValue : sqValue !== undefined ? (sqValue as string) : uqValue;
+      const closeValue = dqValue !== undefined ? (dqClose as string) : sqValue !== undefined ? (sqClose as string) : "";
       if (value === REDACTED || !isSensitiveAssignmentKey(key)) return match;
+      // Fragments are opaque to generic assignments too: skip pairs inside
+      // the current URL's `#` scope. Outside any fragment this is a no-op,
+      // so env/JSON/`;`-separated forms keep redacting.
+      if (isInUrlFragment(input, offset + pre.length + openKey.length)) return match;
       // Sensitive classification first: numerics and boolean-like values
       // never bypass password/secret/token/api-key/credential keys. The only
       // pass-through is exact-key telemetry on segment-only hits

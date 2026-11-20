@@ -125,7 +125,11 @@ if (import.meta.main) {
     input: HARMLESS_PROMPT,
     max_output_tokens: 64,
   });
-  const out = await fetchJson(endpoint, { method: "POST", headers: { ...headers, Authorization: `Bearer ${apiKey}` }, body }, 90_000);
+  const out = await fetchJson(
+    endpoint,
+    { method: "POST", headers: { ...headers, Authorization: `Bearer ${apiKey}` }, body },
+    90_000,
+  );
   const truncated = JSON.stringify(out).slice(0, 500);
   console.error(`[spike] response (truncated): ${truncated}`);
   console.log(JSON.stringify({ ok: true, endpoint, sessionHeaderSent: true }));

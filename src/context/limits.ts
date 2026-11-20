@@ -42,9 +42,6 @@ export class RunBudget {
 
   /** Tightest allowance across per-file, cumulative, and overall budgets. */
   effectiveParseMs(perFileMs: number): number {
-    return Math.max(
-      0,
-      Math.min(perFileMs, this.maxTotalParseMs - this.parseConsumedMs, this.remainingRunMs()),
-    );
+    return Math.max(0, Math.min(perFileMs, this.maxTotalParseMs - this.parseConsumedMs, this.remainingRunMs()));
   }
 }

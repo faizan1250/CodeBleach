@@ -70,9 +70,7 @@ describe("spike catalog base url", () => {
   test("rejects flat model id on the provider and other malformed catalogs", () => {
     expect(() => readBaseUrl(null)).toThrow("catalog is not an object");
     expect(() => readBaseUrl({})).toThrow(`catalog lacks ${FIXED_PROVIDER} provider`);
-    expect(() => readBaseUrl({ [FIXED_PROVIDER]: null })).toThrow(
-      `catalog lacks ${FIXED_PROVIDER} provider`,
-    );
+    expect(() => readBaseUrl({ [FIXED_PROVIDER]: null })).toThrow(`catalog lacks ${FIXED_PROVIDER} provider`);
     expect(() =>
       readBaseUrl({
         [FIXED_PROVIDER]: { [FIXED_MODEL_ID]: { api: { responses: { base_url: "https://x" } } } },
@@ -81,9 +79,9 @@ describe("spike catalog base url", () => {
     expect(() => readBaseUrl({ [FIXED_PROVIDER]: { models: {} } })).toThrow(
       "catalog model record lacks api.responses.base_url",
     );
-    expect(() =>
-      readBaseUrl({ [FIXED_PROVIDER]: { models: { [FIXED_MODEL_ID]: {} } } }),
-    ).toThrow("catalog model record lacks api.responses.base_url");
+    expect(() => readBaseUrl({ [FIXED_PROVIDER]: { models: { [FIXED_MODEL_ID]: {} } } })).toThrow(
+      "catalog model record lacks api.responses.base_url",
+    );
   });
 });
 

@@ -14,14 +14,7 @@ function invalidPathOf(path: string): ReviewerError {
 
 describe("normalizeRepoPath", () => {
   test("passes clean repo-relative paths through", () => {
-    for (const path of [
-      "a.ts",
-      "src/app.ts",
-      "src/my file.ts",
-      'src/qu"ote.ts',
-      "src/tab\tname.ts",
-      "src/unié.ts",
-    ]) {
+    for (const path of ["a.ts", "src/app.ts", "src/my file.ts", 'src/qu"ote.ts', "src/tab\tname.ts", "src/unié.ts"]) {
       expect(normalizeRepoPath(path)).toBe(path);
     }
   });

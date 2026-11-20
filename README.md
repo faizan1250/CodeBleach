@@ -15,8 +15,15 @@ bun install --frozen-lockfile
 ## Check
 
 ```bash
-bun run check   # typecheck + tests
+bun run check         # typecheck + tests
+bun run lint          # Biome lint (errors fail, warnings informational)
+bun run format:check  # Biome format check (non-mutating; CI runs this)
+bun run format        # Biome format write (run before commit if format:check fails)
 ```
+
+Formatter notes: line width 120, double quotes, CRLF line endings (matches the
+line endings committed in this repo; do not convert to LF). The Biome version is
+pinned in `package.json`; run `bun install --frozen-lockfile` after pulling.
 
 ## Review
 
@@ -81,3 +88,7 @@ manual-only, Not-ZDR) runs the same shape against the live model; see
 - Phase 1 plan: `implementation.md`
 - Phase 4 plan: `implementation-phase4.md`
 - Decisions: `docs/adr/` (Phase 4 freeze: `0020-phase4-freeze.md`)
+
+## License
+
+MIT — see [LICENSE](LICENSE).

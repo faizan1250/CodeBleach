@@ -11,16 +11,11 @@ export interface Logger {
   error(msg: string, fields?: Record<string, unknown>): void;
 }
 
-export function createLogger(input: {
-  level: LogLevel;
-  runId: string;
-  secrets?: string[];
-}): Logger {
+export function createLogger(input: { level: LogLevel; runId: string; secrets?: string[] }): Logger {
   const secrets = input.secrets ?? [];
   const emit = (level: LogLevel, msg: string, fields?: Record<string, unknown>): void => {
     if (LEVEL_ORDER[level] < LEVEL_ORDER[input.level]) return;
-    const fieldsOut =
-      fields === undefined ? {} : (sanitizePayload(fields, secrets) as Record<string, unknown>);
+    const fieldsOut = fields === undefined ? {} : (sanitizePayload(fields, secrets) as Record<string, unknown>);
     const line = JSON.stringify({
       ...fieldsOut,
       ts: new Date().toISOString(),

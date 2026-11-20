@@ -53,12 +53,7 @@ export type TargetPick =
   | { status: "not-found" };
 
 export function isRelativeSpecifier(specifier: string): boolean {
-  return (
-    specifier === "." ||
-    specifier === ".." ||
-    specifier.startsWith("./") ||
-    specifier.startsWith("../")
-  );
+  return specifier === "." || specifier === ".." || specifier.startsWith("./") || specifier.startsWith("../");
 }
 
 /** Resolve a relative specifier against the importer; null when it escapes the repo.
@@ -92,10 +87,7 @@ export function candidatePaths(resolvedBase: string): string[] {
 }
 
 /** First candidate present in the head index; non-regular blobs never resolve. */
-export function pickTarget(
-  candidates: readonly string[],
-  headIndex: ReadonlyMap<string, TreeEntry>,
-): TargetPick {
+export function pickTarget(candidates: readonly string[], headIndex: ReadonlyMap<string, TreeEntry>): TargetPick {
   let nonSource: string | null = null;
   for (const candidate of candidates) {
     const entry = headIndex.get(candidate);
@@ -188,11 +180,7 @@ async function loadTarget(path: string, context: ResolveContext): Promise<Target
   return loaded;
 }
 
-function exportedDefinition(
-  target: ParsedTarget,
-  name: string,
-  typeOnly: boolean,
-): Definition | TypeDefinition | null {
+function exportedDefinition(target: ParsedTarget, name: string, typeOnly: boolean): Definition | TypeDefinition | null {
   const aliased = target.localExports.get(name);
   const matches = (candidate: string, exported: boolean): boolean =>
     candidate === name && (exported || aliased === candidate);
@@ -234,11 +222,7 @@ function findDirect(target: ParsedTarget, wanted: string, typeOnly: boolean): De
   return null;
 }
 
-function findUnaliased(
-  target: ParsedTarget,
-  name: string,
-  typeOnly: boolean,
-): Definition | TypeDefinition | null {
+function findUnaliased(target: ParsedTarget, name: string, typeOnly: boolean): Definition | TypeDefinition | null {
   if (typeOnly) {
     for (const type of target.types) {
       if (type.name === name) return type;
@@ -473,14 +457,7 @@ export async function resolveImportsForFile(options: ResolveImportsOptions): Pro
       diagnostics.push(diagnostic(importerPath, ref.sourceSpecifier, "export-not-found"));
       continue;
     }
-    const outcome = await resolveExported(
-      targetPath,
-      wanted,
-      ref.kind === "type-only",
-      context,
-      0,
-      new Set(),
-    );
+    const outcome = await resolveExported(targetPath, wanted, ref.kind === "type-only", context, 0, new Set());
     if (outcome.status === "found") {
       resolved.push({
         importerPath,

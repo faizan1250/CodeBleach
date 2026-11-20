@@ -11,11 +11,12 @@ interface RunResult {
   stderr: string;
 }
 
-async function runCli(args: string[], cwd: string): Promise<RunResult> {
+async function runCli(args: string[], cwd: string, env?: Record<string, string | undefined>): Promise<RunResult> {
   const proc = Bun.spawn(["bun", CLI, ...args], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
+    ...(env === undefined ? {} : { env: { ...process.env, ...env } }),
   });
   const [stdout, stderr, code] = await Promise.all([
     new Response(proc.stdout).text(),
@@ -91,12 +92,20 @@ describe("cli", () => {
   test("normal review with invalid SHAs fails at diff with failed artifact", async () => {
     const { dir, cleanup } = await makeRepo();
     try {
-      const result = await runCli(["review", "--base", "b", "--head", "h"], dir);
+      // Gate-passing dummy creds: the pipeline preflight runs before diff,
+      // so without these the run exits 2 (CONFIG_INVALID) instead of
+      // reaching the diff GIT_FAILED path. No network: the temp dir is not
+      // a git repo, so the diff stage fails before any provider call.
+      const result = await runCli(["review", "--base", "b", "--head", "h"], dir, {
+        OPENCODE_API_KEY: "dummy-key",
+        CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING: "true",
+      });
       expect(result.code).toBe(1);
       expect(result.stderr).toContain("GIT_FAILED");
-      const artifact = JSON.parse(
-        await readFile(join(dir, ".reviewer-out", "run.json"), "utf8"),
-      ) as { status: string; error: { code: string } };
+      const artifact = JSON.parse(await readFile(join(dir, ".reviewer-out", "run.json"), "utf8")) as {
+        status: string;
+        error: { code: string };
+      };
       expect(artifact.status).toBe("failed");
       expect(artifact.error.code).toBe("GIT_FAILED");
     } finally {
@@ -109,9 +118,7 @@ describe("cli", () => {
     try {
       const result = await runCli(["review", "--demo", "--dry-run"], dir);
       expect(result.code).toBe(0);
-      const artifact = JSON.parse(
-        await readFile(join(dir, ".reviewer-out", "run.json"), "utf8"),
-      ) as {
+      const artifact = JSON.parse(await readFile(join(dir, ".reviewer-out", "run.json"), "utf8")) as {
         status: string;
         schemaVersion: number;
         stages: Array<{ name: string; status: string; count?: number }>;
@@ -186,9 +193,9 @@ describe("cli", () => {
       const readRunId = async (): Promise<string> => {
         const result = await runCli(["review", "--demo", "--dry-run"], dir);
         expect(result.code).toBe(0);
-        const artifact = JSON.parse(
-          await readFile(join(dir, ".reviewer-out", "run.json"), "utf8"),
-        ) as { runId: string };
+        const artifact = JSON.parse(await readFile(join(dir, ".reviewer-out", "run.json"), "utf8")) as {
+          runId: string;
+        };
         return artifact.runId;
       };
       expect(await readRunId()).not.toBe(await readRunId());

@@ -1,11 +1,6 @@
 import { FIXED_MODEL_ID } from "../llm/constants.ts";
 import type { Finding } from "../types/finding.ts";
-import type {
-  ReviewBuildResult,
-  ReviewDiagnostic,
-  ReviewStatus,
-  ReviewUsage,
-} from "../types/review.ts";
+import type { ReviewBuildResult, ReviewDiagnostic, ReviewStatus, ReviewUsage } from "../types/review.ts";
 import { getCodeReviewPromptIdentity } from "./prompt.ts";
 
 // Mirrors the Context Engine's 100-diagnostic bound; counts stay exact.

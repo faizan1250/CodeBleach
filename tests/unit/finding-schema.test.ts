@@ -49,12 +49,8 @@ describe("finding schemas", () => {
   });
 
   test("rejects unknown keys", () => {
-    expect(() =>
-      RawFindingSchema.parse({ ...validFinding(), fingerprint: "abc" }),
-    ).toThrow();
-    expect(() =>
-      RawFindingSchema.parse({ ...validFinding(), id: "x", headSha: "y", origin: {} }),
-    ).toThrow();
+    expect(() => RawFindingSchema.parse({ ...validFinding(), fingerprint: "abc" })).toThrow();
+    expect(() => RawFindingSchema.parse({ ...validFinding(), id: "x", headSha: "y", origin: {} })).toThrow();
   });
 
   test("rejects non-positive line numbers", () => {
@@ -63,22 +59,16 @@ describe("finding schemas", () => {
   });
 
   test("rejects endLine below line", () => {
-    expect(() =>
-      RawFindingSchema.parse({ ...validFinding(), line: 10, endLine: 9 }),
-    ).toThrow();
+    expect(() => RawFindingSchema.parse({ ...validFinding(), line: 10, endLine: 9 })).toThrow();
   });
 
   test("rejects evidence endLine below startLine", () => {
-    expect(() =>
-      EvidenceSchema.parse({ ...validEvidence, startLine: 5, endLine: 4 }),
-    ).toThrow();
+    expect(() => EvidenceSchema.parse({ ...validEvidence, startLine: 5, endLine: 4 })).toThrow();
   });
 
   test("rejects overlong title and description", () => {
     expect(() => RawFindingSchema.parse({ ...validFinding(), title: "t".repeat(121) })).toThrow();
-    expect(() =>
-      RawFindingSchema.parse({ ...validFinding(), description: "d".repeat(2001) }),
-    ).toThrow();
+    expect(() => RawFindingSchema.parse({ ...validFinding(), description: "d".repeat(2001) })).toThrow();
   });
 
   test("raw review output requires findings array", () => {

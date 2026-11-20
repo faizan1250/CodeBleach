@@ -47,11 +47,7 @@ async function makeRepo(): Promise<{ dir: string; cleanup: () => Promise<void> }
   }
 }
 
-async function writeAndCommit(
-  dir: string,
-  files: Record<string, string>,
-  message: string,
-): Promise<string> {
+async function writeAndCommit(dir: string, files: Record<string, string>, message: string): Promise<string> {
   for (const [name, content] of Object.entries(files)) {
     const full = join(dir, name);
     await mkdir(dirname(full), { recursive: true });
@@ -120,43 +116,37 @@ describe("cli diff", () => {
     }
   });
 
-  test("normal review without credentials stops at the training gate with diff in artifact", async () => {
+  test("normal review without credentials fails preflight before diff and context", async () => {
     const { dir, cleanup } = await makeRepo();
     try {
       const base = await writeAndCommit(dir, { "src/a.ts": "const a = 1;\n" }, "base");
       const head = await writeAndCommit(dir, { "src/a.ts": "const a = 2;\n" }, "head");
       const out = join(dir, "out");
       // Scrub ambient live credentials: normal tests never touch the network.
-      const result = await runCli(
-        ["review", "--base", base, "--head", head, "--repo", dir, "--out", out],
-        dir,
-        { OPENCODE_API_KEY: "", CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING: "" },
-      );
+      const result = await runCli(["review", "--base", base, "--head", head, "--repo", dir, "--out", out], dir, {
+        OPENCODE_API_KEY: "",
+        CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING: "",
+      });
       expect(result.code).toBe(2);
       expect(result.stderr).toContain("CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING");
       const artifact = JSON.parse(await readFile(join(out, "run.json"), "utf8")) as {
         status: string;
         error: { code: string };
-        stages: Array<{ name: string; status: string }>;
+        stages: Array<{ name: string; status: string; ms: number }>;
         diff: { baseSha: string; headSha: string; files: unknown[] } | null;
         units: Array<{ id: string }>;
-        contextStatus: string;
+        contextStatus: string | null;
         contextDiagnostics: { unitsCreated: number } | null;
       };
       expect(artifact.status).toBe("failed");
       expect(artifact.error.code).toBe("CONFIG_INVALID");
-      expect(artifact.stages).toMatchObject([
-        { name: "config", status: "completed" },
-        { name: "diff", status: "completed" },
-        { name: "context", status: "completed" },
-        { name: "review", status: "failed" },
-      ]);
-      expect(artifact.diff?.baseSha).toBe(base.toLowerCase());
-      expect(artifact.diff?.headSha).toBe(head.toLowerCase());
-      expect(artifact.diff?.files).toHaveLength(1);
-      expect(artifact.units).toHaveLength(1);
-      expect(artifact.contextStatus).toBe("complete");
-      expect(artifact.contextDiagnostics?.unitsCreated).toBe(1);
+      // Preflight runs after config but before diff: no git retrieval, no
+      // context parsing, and the context/review stages never record.
+      expect(artifact.stages).toEqual([{ name: "config", status: "completed", ms: expect.any(Number) }]);
+      expect(artifact.diff).toBeNull();
+      expect(artifact.units).toEqual([]);
+      expect(artifact.contextStatus).toBeNull();
+      expect(artifact.contextDiagnostics).toBeNull();
     } finally {
       await cleanup();
     }

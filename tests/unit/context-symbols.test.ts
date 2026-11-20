@@ -16,11 +16,7 @@ async function definitionsFor(source: string, language: SupportedLanguage = "typ
   }
 }
 
-function fileWith(
-  hunks: ChangedFile["hunks"],
-  commentableLines: number[],
-  path = "src/unit.ts",
-): ChangedFile {
+function fileWith(hunks: ChangedFile["hunks"], commentableLines: number[], path = "src/unit.ts"): ChangedFile {
   return {
     path,
     oldPath: null,

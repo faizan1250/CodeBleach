@@ -5,12 +5,7 @@ import type { Language } from "../types/diff.ts";
 // working tree. Rejects only what the contract forbids: empty, NUL,
 // absolute, and `..` segments.
 export function normalizeRepoPath(path: string): string {
-  if (
-    path.length === 0 ||
-    path.includes("\0") ||
-    path.startsWith("/") ||
-    path.split("/").includes("..")
-  ) {
+  if (path.length === 0 || path.includes("\0") || path.startsWith("/") || path.split("/").includes("..")) {
     throw new ReviewerError({
       code: "PARSE_FAILED",
       message: `invalid repository path ${JSON.stringify(path)}`,

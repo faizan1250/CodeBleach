@@ -6,13 +6,7 @@ import type { MemberResolutionContext } from "./calls.ts";
 import { findTargetDeclaration, snippetAround, targetPublicNames } from "./callers.ts";
 import { candidatePaths, isRelativeSpecifier, pickTarget, resolveRelativePath } from "./imports.ts";
 import { getAdapter } from "./language.ts";
-import type {
-  CallSite,
-  Definition,
-  ExportReference,
-  ImportReference,
-  TypeDefinition,
-} from "./language.ts";
+import type { CallSite, Definition, ExportReference, ImportReference, TypeDefinition } from "./language.ts";
 import type { RunBudget } from "./limits.ts";
 import { ParseCache, callSitesFor } from "./parse-cache.ts";
 import { scoreItem } from "./rank.ts";
@@ -278,7 +272,13 @@ function relativeFileImports(module: TestModule, candidate: string, context: Tes
       if (base === null) continue;
       const pick = pickTarget(candidatePaths(base), context.headIndex);
       if (pick.status !== "found") continue;
-      out.push({ rangeLine: ref.range.startLine, localName: null, kind: ref.kind, importedName: null, pickPath: pick.path });
+      out.push({
+        rangeLine: ref.range.startLine,
+        localName: null,
+        kind: ref.kind,
+        importedName: null,
+        pickPath: pick.path,
+      });
       continue;
     }
     if (ref.localName === null || !isRelativeSpecifier(ref.sourceSpecifier)) continue;
@@ -349,7 +349,10 @@ async function classifyTestFile(
         if (site.root !== entry.localName || site.member === null) continue;
         const outcome = await resolveExportedMember(entry.pickPath, site.member, memberContext);
         if (outcome.status === "found") {
-          if (outcome.targetPath === context.targetPath && targetIdentity(outcome.targetPath, outcome.definition) === context.targetId) {
+          if (
+            outcome.targetPath === context.targetPath &&
+            targetIdentity(outcome.targetPath, outcome.definition) === context.targetId
+          ) {
             return toSite(
               candidate,
               module,
@@ -360,11 +363,26 @@ async function classifyTestFile(
             );
           }
         } else if (outcome.status === "ambiguous") {
-          pushDiagnostic(diagnostics, { filePath: context.targetPath, symbol: context.symbolName, candidate: `${candidate}:${site.member}`, reason: "ambiguous" });
+          pushDiagnostic(diagnostics, {
+            filePath: context.targetPath,
+            symbol: context.symbolName,
+            candidate: `${candidate}:${site.member}`,
+            reason: "ambiguous",
+          });
         } else if (outcome.status === "depth-exceeded") {
-          pushDiagnostic(diagnostics, { filePath: context.targetPath, symbol: context.symbolName, candidate: `${candidate}:${site.member}`, reason: "depth-exceeded" });
+          pushDiagnostic(diagnostics, {
+            filePath: context.targetPath,
+            symbol: context.symbolName,
+            candidate: `${candidate}:${site.member}`,
+            reason: "depth-exceeded",
+          });
         } else if (outcome.status === "cancelled") {
-          pushDiagnostic(diagnostics, { filePath: context.targetPath, symbol: context.symbolName, candidate: `${candidate}:${site.member}`, reason: "parse-cancelled" });
+          pushDiagnostic(diagnostics, {
+            filePath: context.targetPath,
+            symbol: context.symbolName,
+            candidate: `${candidate}:${site.member}`,
+            reason: "parse-cancelled",
+          });
         }
       }
       continue;
@@ -373,7 +391,10 @@ async function classifyTestFile(
     if (wanted === null) continue;
     const outcome = await resolveExportedMember(entry.pickPath, wanted, memberContext);
     if (outcome.status === "found") {
-      if (outcome.targetPath === context.targetPath && targetIdentity(outcome.targetPath, outcome.definition) === context.targetId) {
+      if (
+        outcome.targetPath === context.targetPath &&
+        targetIdentity(outcome.targetPath, outcome.definition) === context.targetId
+      ) {
         return toSite(
           candidate,
           module,
@@ -384,11 +405,26 @@ async function classifyTestFile(
         );
       }
     } else if (outcome.status === "ambiguous") {
-      pushDiagnostic(diagnostics, { filePath: context.targetPath, symbol: context.symbolName, candidate: `${candidate}:${wanted}`, reason: "ambiguous" });
+      pushDiagnostic(diagnostics, {
+        filePath: context.targetPath,
+        symbol: context.symbolName,
+        candidate: `${candidate}:${wanted}`,
+        reason: "ambiguous",
+      });
     } else if (outcome.status === "depth-exceeded") {
-      pushDiagnostic(diagnostics, { filePath: context.targetPath, symbol: context.symbolName, candidate: `${candidate}:${wanted}`, reason: "depth-exceeded" });
+      pushDiagnostic(diagnostics, {
+        filePath: context.targetPath,
+        symbol: context.symbolName,
+        candidate: `${candidate}:${wanted}`,
+        reason: "depth-exceeded",
+      });
     } else if (outcome.status === "cancelled") {
-      pushDiagnostic(diagnostics, { filePath: context.targetPath, symbol: context.symbolName, candidate: `${candidate}:${wanted}`, reason: "parse-cancelled" });
+      pushDiagnostic(diagnostics, {
+        filePath: context.targetPath,
+        symbol: context.symbolName,
+        candidate: `${candidate}:${wanted}`,
+        reason: "parse-cancelled",
+      });
     }
   }
 
@@ -416,7 +452,12 @@ async function classifyTestFile(
               filePath: context.targetPath,
               symbol: context.symbolName,
               candidate: `${candidate}:${root}`,
-              reason: outcome.status === "ambiguous" ? "ambiguous" : outcome.status === "depth-exceeded" ? "depth-exceeded" : "parse-cancelled",
+              reason:
+                outcome.status === "ambiguous"
+                  ? "ambiguous"
+                  : outcome.status === "depth-exceeded"
+                    ? "depth-exceeded"
+                    : "parse-cancelled",
             });
             return null;
           }
@@ -431,12 +472,15 @@ async function classifyTestFile(
               filePath: context.targetPath,
               symbol: context.symbolName,
               candidate: `${candidate}:${root}.${site.member}`,
-              reason: outcome.status === "ambiguous" ? "ambiguous" : outcome.status === "depth-exceeded" ? "depth-exceeded" : "parse-cancelled",
+              reason:
+                outcome.status === "ambiguous"
+                  ? "ambiguous"
+                  : outcome.status === "depth-exceeded"
+                    ? "depth-exceeded"
+                    : "parse-cancelled",
             });
             return null;
           }
-        } else if (binding !== undefined && binding.kind !== "namespace") {
-          continue;
         }
       }
     }
@@ -516,11 +560,7 @@ export async function resolveTestsForSymbol(options: ResolveTestsOptions): Promi
         localExports.set(ref.exportedName, ref.localName);
       }
     }
-    const declaration = findTargetDeclaration(
-      snapshot.definitions,
-      snapshot.types,
-      symbol,
-    );
+    const declaration = findTargetDeclaration(snapshot.definitions, snapshot.types, symbol);
     if (declaration === null) return { tests: [], diagnostics: [] };
     const context: TestContext = {
       reader,
@@ -586,7 +626,12 @@ export async function resolveTestsForSymbol(options: ResolveTestsOptions): Promi
     const ranked = sortTestSites(dedupeTestSites(sites));
     const kept = ranked.slice(0, Math.max(0, maxTests));
     for (const dropped of ranked.slice(Math.max(0, maxTests))) {
-      diagnostics.push({ filePath, symbol: symbol.name, candidate: `${dropped.path}:${dropped.testName ?? "<module>"}`, reason: "cap-reached" });
+      diagnostics.push({
+        filePath,
+        symbol: symbol.name,
+        candidate: `${dropped.path}:${dropped.testName ?? "<module>"}`,
+        reason: "cap-reached",
+      });
     }
     return { tests: kept, diagnostics: dedupeTestDiagnostics(diagnostics) };
   }

@@ -33,7 +33,11 @@ describe("p3-11 pipeline wiring", () => {
     const { dir, cleanup } = await makeRepo();
     const outDir = join(dir, "out");
     try {
-      const baseSha = await writeAndCommit(dir, { "src/a.ts": "export function f(): number {\n  return 1;\n}\n" }, "base");
+      const baseSha = await writeAndCommit(
+        dir,
+        { "src/a.ts": "export function f(): number {\n  return 1;\n}\n" },
+        "base",
+      );
       const headSha = await writeAndCommit(
         dir,
         { "src/a.ts": "export function f(): number {\n  return 2;\n}\n" },
@@ -53,6 +57,7 @@ describe("p3-11 pipeline wiring", () => {
 
       let seen: ReviewUnit[] | null = null;
       const recordingReview = {
+        requiresLlm: false,
         review: (units: ReviewUnit[]) => {
           seen = units;
           return Promise.reject(new ReviewerError({ code: "NOT_IMPLEMENTED", message: "review stub" }));
@@ -98,12 +103,16 @@ describe("p3-11 pipeline wiring", () => {
     try {
       const baseSha = await writeAndCommit(
         dir,
-        { "src/a.ts": "export function f(): number {\n  return 1;\n}\nexport function g(): number {\n  return 1;\n}\n" },
+        {
+          "src/a.ts": "export function f(): number {\n  return 1;\n}\nexport function g(): number {\n  return 1;\n}\n",
+        },
         "base",
       );
       const headSha = await writeAndCommit(
         dir,
-        { "src/a.ts": "export function f(): number {\n  return 2;\n}\nexport function g(): number {\n  return 3;\n}\n" },
+        {
+          "src/a.ts": "export function f(): number {\n  return 2;\n}\nexport function g(): number {\n  return 3;\n}\n",
+        },
         "head",
       );
       const config = ConfigFileSchema.parse({});
@@ -124,10 +133,50 @@ describe("p3-11 pipeline wiring", () => {
     }
   });
 
+  test("repeated builds over imports, callers, and tests are byte-identical", async () => {
+    const { dir, cleanup } = await makeRepo();
+    try {
+      const util = "export function helper(x: number): number {\n  return x + 1;\n}\n";
+      const baseLib =
+        'import { helper } from "./util.ts";\n' + "export function f(x: number): number {\n  return helper(x);\n}\n";
+      const headLib =
+        'import { helper } from "./util.ts";\n' +
+        "export function f(x: number): number {\n  return helper(x + 1);\n}\n";
+      const main = 'import { f } from "./lib.ts";\n' + "export function main(): number {\n  return f(1);\n}\n";
+      const check =
+        'import { f } from "../src/lib.ts";\n' +
+        'import { strict as assert } from "node:assert";\n' +
+        "export function checkF(): void {\n  assert.equal(f(1) > 0, true);\n}\n";
+      const baseSha = await writeAndCommit(
+        dir,
+        { "src/util.ts": util, "src/lib.ts": baseLib, "src/main.ts": main, "tests/check.test.ts": check },
+        "base",
+      );
+      const headSha = await writeAndCommit(
+        dir,
+        { "src/util.ts": util, "src/lib.ts": headLib, "src/main.ts": main, "tests/check.test.ts": check },
+        "head",
+      );
+      const config = ConfigFileSchema.parse({});
+      const diffEngine = new GitDiffEngine({ logger: logger() });
+      const diff = await diffEngine.run({ repoDir: dir, baseSha, headSha, config });
+      const first = await new ContextEngineImpl({ logger: logger() }).build(diff, config, dir);
+      const second = await new ContextEngineImpl({ logger: logger() }).build(diff, config, dir);
+      expect(first.units.length).toBeGreaterThan(0);
+      expect(second.units).toEqual(first.units);
+    } finally {
+      await cleanup();
+    }
+  });
+
   test("empty diff produces no units but stays complete", async () => {
     const { dir, cleanup } = await makeRepo();
     try {
-      const baseSha = await writeAndCommit(dir, { "src/a.ts": "export function f(): number {\n  return 1;\n}\n" }, "base");
+      const baseSha = await writeAndCommit(
+        dir,
+        { "src/a.ts": "export function f(): number {\n  return 1;\n}\n" },
+        "base",
+      );
       const config = ConfigFileSchema.parse({});
       const context = new ContextEngineImpl({ logger: logger() });
       const diffEngine = new GitDiffEngine({ logger: logger() });
@@ -193,7 +242,11 @@ describe("p3-11 pipeline wiring", () => {
   test("explicit rules attach verbatim and worktree edits do not change output", async () => {
     const { dir, cleanup } = await makeRepo();
     try {
-      const baseSha = await writeAndCommit(dir, { "src/a.ts": "export function f(): number {\n  return 1;\n}\n" }, "base");
+      const baseSha = await writeAndCommit(
+        dir,
+        { "src/a.ts": "export function f(): number {\n  return 1;\n}\n" },
+        "base",
+      );
       const headSha = await writeAndCommit(
         dir,
         { "src/a.ts": "export function f(): number {\n  return 2;\n}\n" },
@@ -219,7 +272,11 @@ describe("p3-11 pipeline wiring", () => {
   test("rule-heavy unit skips with mandatory-budget-exceeded under a tiny cap", async () => {
     const { dir, cleanup } = await makeRepo();
     try {
-      const baseSha = await writeAndCommit(dir, { "src/a.ts": "export function f(): number {\n  return 1;\n}\n" }, "base");
+      const baseSha = await writeAndCommit(
+        dir,
+        { "src/a.ts": "export function f(): number {\n  return 1;\n}\n" },
+        "base",
+      );
       const headSha = await writeAndCommit(
         dir,
         { "src/a.ts": "export function f(): number {\n  return 2;\n}\n" },
@@ -245,12 +302,16 @@ describe("p3-11 pipeline wiring", () => {
     try {
       const baseSha = await writeAndCommit(
         dir,
-        { "src/a.ts": "export function f(): number {\n  return 1;\n}\nexport function g(): number {\n  return 1;\n}\n" },
+        {
+          "src/a.ts": "export function f(): number {\n  return 1;\n}\nexport function g(): number {\n  return 1;\n}\n",
+        },
         "base",
       );
       const headSha = await writeAndCommit(
         dir,
-        { "src/a.ts": "export function f(): number {\n  return 2;\n}\nexport function g(): number {\n  return 3;\n}\n" },
+        {
+          "src/a.ts": "export function f(): number {\n  return 2;\n}\nexport function g(): number {\n  return 3;\n}\n",
+        },
         "head",
       );
       const defaults = ConfigFileSchema.parse({});

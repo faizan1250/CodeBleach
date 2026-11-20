@@ -70,11 +70,7 @@ export function decayFactor(refCount: number): number {
   return 1 / (1 + DECAY_STEP * (refs - 1));
 }
 
-export function scoreItem(
-  kind: ContextItem["kind"],
-  proximity: RankProximity,
-  refCount = 1,
-): number {
+export function scoreItem(kind: ContextItem["kind"], proximity: RankProximity, refCount = 1): number {
   return baseWeightForKind(kind) * proximityMultiplier(proximity) * decayFactor(refCount);
 }
 

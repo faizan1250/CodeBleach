@@ -1,13 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { MAX_LLM_MAX_OUTPUT_TOKENS } from "../../src/config/defaults.ts";
 import { ConfigFileSchema, type ResolvedConfig } from "../../src/config/schema.ts";
-import { ReviewerError } from "../../src/core/errors.ts";
+import { ReviewerError, type IncompleteReason } from "../../src/core/errors.ts";
 import type { Logger } from "../../src/core/logger.ts";
-import {
-  API_KEY_ENV,
-  FIXED_MODEL_ID,
-  TRAINING_OPT_IN_ENV,
-} from "../../src/llm/constants.ts";
+import { API_KEY_ENV, FIXED_MODEL_ID, TRAINING_OPT_IN_ENV } from "../../src/llm/constants.ts";
 import { FakeProvider } from "../../src/providers/fake.ts";
 import { OpenCodeProvider } from "../../src/providers/opencode.ts";
 import { ReviewEngineImpl } from "../../src/review/engine.ts";
@@ -104,10 +100,16 @@ function configWith(llm: Record<string, number> = {}): ResolvedConfig {
   return ConfigFileSchema.parse({ llm });
 }
 
-// Mirrors the OpenCodeProvider incomplete envelope message shape (P4-02
-// precedent: reason preserved in the message, never JSON-repaired).
-function incompleteError(reason: string): ReviewerError {
-  return new ReviewerError({ code: "PROVIDER_FAILED", message: `provider response incomplete: ${reason}` });
+// Mirrors the OpenCodeProvider incomplete contract: classification is the
+// typed reason only, never the message text (message keeps the redacted
+// reason for humans). Unknown covers missing and unrecognized reasons.
+function incompleteError(reason: string, message?: string): ReviewerError {
+  const typed: IncompleteReason = reason === "max_output_tokens" || reason === "content_filter" ? reason : "unknown";
+  return new ReviewerError({
+    code: "PROVIDER_FAILED",
+    message: message ?? `provider response incomplete: ${reason}`,
+    incompleteReason: typed,
+  });
 }
 
 describe("review output repair policy", () => {
@@ -141,10 +143,7 @@ describe("review output repair policy", () => {
   });
 
   test("marks the unit partial when repair throws", async () => {
-    const provider = new FakeProvider([
-      { respond: "not json" },
-      { respond: new Error("socket hangup") },
-    ]);
+    const provider = new FakeProvider([{ respond: "not json" }, { respond: new Error("socket hangup") }]);
     const engine = new ReviewEngineImpl({ provider, logger: nullLogger(), env: { ...OPT_IN } });
     await expect(engine.review([unit()], configWith()).then((result) => result.findings)).resolves.toEqual([]);
     expect(provider.calls).toHaveLength(2);
@@ -218,7 +217,9 @@ describe("review output repair policy", () => {
       { respond: incompleteError("max_output_tokens") },
     ]);
     const engine = new ReviewEngineImpl({ provider, logger: nullLogger(), env: { ...OPT_IN } });
-    await expect(engine.review([unit()], configWith({ max_output_tokens: 1000 })).then((result) => result.findings)).resolves.toEqual([]);
+    await expect(
+      engine.review([unit()], configWith({ max_output_tokens: 1000 })).then((result) => result.findings),
+    ).resolves.toEqual([]);
     expect(provider.calls).toHaveLength(2);
   });
 
@@ -229,11 +230,57 @@ describe("review output repair policy", () => {
     expect(provider.calls).toHaveLength(1);
   });
 
+  test("does not escalate unknown incomplete reasons", async () => {
+    const provider = new FakeProvider([{ respond: incompleteError("mystery_reason") }]);
+    const engine = new ReviewEngineImpl({ provider, logger: nullLogger(), env: { ...OPT_IN } });
+    const result = await engine.review([unit()], configWith({ max_output_tokens: 1000 }));
+    expect(result.findings).toEqual([]);
+    expect(provider.calls).toHaveLength(1);
+    expect(result.diagnostics[0]).toMatchObject({ code: "PROVIDER_FAILED", retryable: false });
+  });
+
+  test("escalates on the typed reason regardless of message text", async () => {
+    const provider = new FakeProvider([
+      { respond: incompleteError("max_output_tokens", "provider response incomplete: truncated") },
+      { respond: { findings: [rawFinding()] } },
+    ]);
+    const engine = new ReviewEngineImpl({ provider, logger: nullLogger(), env: { ...OPT_IN } });
+    const { findings } = await engine.review([unit()], configWith({ max_output_tokens: 1000 }));
+    expect(findings).toHaveLength(1);
+    expect(provider.calls).toHaveLength(2);
+  });
+
+  test("ignores cap-like message text without the typed reason", async () => {
+    const capLike = new ReviewerError({
+      code: "PROVIDER_FAILED",
+      message: "provider response incomplete: max_output_tokens",
+    });
+    const provider = new FakeProvider([{ respond: capLike }]);
+    const engine = new ReviewEngineImpl({ provider, logger: nullLogger(), env: { ...OPT_IN } });
+    await expect(
+      engine.review([unit()], configWith({ max_output_tokens: 1000 })).then((result) => result.findings),
+    ).resolves.toEqual([]);
+    expect(provider.calls).toHaveLength(1);
+  });
+
+  test("ignores cap-like message text on unknown reasons", async () => {
+    const provider = new FakeProvider([
+      { respond: incompleteError("unknown", "provider response incomplete: max_output_tokens-ish") },
+    ]);
+    const engine = new ReviewEngineImpl({ provider, logger: nullLogger(), env: { ...OPT_IN } });
+    await expect(
+      engine.review([unit()], configWith({ max_output_tokens: 1000 })).then((result) => result.findings),
+    ).resolves.toEqual([]);
+    expect(provider.calls).toHaveLength(1);
+  });
+
   test("does not escalate when already at the output cap", async () => {
     const provider = new FakeProvider([{ respond: incompleteError("max_output_tokens") }]);
     const engine = new ReviewEngineImpl({ provider, logger: nullLogger(), env: { ...OPT_IN } });
     await expect(
-      engine.review([unit()], configWith({ max_output_tokens: MAX_LLM_MAX_OUTPUT_TOKENS })).then((result) => result.findings),
+      engine
+        .review([unit()], configWith({ max_output_tokens: MAX_LLM_MAX_OUTPUT_TOKENS }))
+        .then((result) => result.findings),
     ).resolves.toEqual([]);
     expect(provider.calls).toHaveLength(1);
   });

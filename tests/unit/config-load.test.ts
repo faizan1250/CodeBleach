@@ -272,10 +272,7 @@ describe("loadConfig", () => {
 
   test("malformed glob fails invalid with a path-specific message", async () => {
     const repoDir = await makeRepo();
-    await writeFile(
-      join(repoDir, ".reviewer.yml"),
-      'version: 1\nignore:\n  paths:\n    - "src/{a,b}.ts"\n',
-    );
+    await writeFile(join(repoDir, ".reviewer.yml"), 'version: 1\nignore:\n  paths:\n    - "src/{a,b}.ts"\n');
     const result = await loadConfig(repoDir);
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("unreachable");

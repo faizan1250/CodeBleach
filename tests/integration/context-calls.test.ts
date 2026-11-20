@@ -167,7 +167,8 @@ describe("context callee discovery from commit snapshots", () => {
 
   test("constructor call resolves to the imported class", async () => {
     const { dir, cleanup, commit } = await setupRepo({
-      "src/app.ts": 'import { Client } from "./client";\nexport function connect(): number {\n  return new Client().fetch();\n}\n',
+      "src/app.ts":
+        'import { Client } from "./client";\nexport function connect(): number {\n  return new Client().fetch();\n}\n',
       "src/client.ts": "export class Client {\n  fetch(): number {\n    return 1;\n  }\n}\n",
     });
     try {
@@ -241,8 +242,7 @@ describe("context callee discovery from commit snapshots", () => {
 
   test("duplicate calls collapse to one callee", async () => {
     const { dir, cleanup, commit } = await setupRepo({
-      "src/a.ts":
-        "export function helper(): void {}\nexport function run(): void {\n  helper();\n  helper();\n}\n",
+      "src/a.ts": "export function helper(): void {}\nexport function run(): void {\n  helper();\n  helper();\n}\n",
     });
     try {
       const { callees, diagnostics } = await resolveCalleesForSymbol({
@@ -269,7 +269,12 @@ describe("context callee discovery from commit snapshots", () => {
         reader: readerFor(dir, commit),
       });
       expect(callees).toEqual([]);
-      expect(diagnostics.map((entry) => entry.reason).sort()).toEqual(["ambiguous", "dynamic", "unresolved", "unresolved"]);
+      expect(diagnostics.map((entry) => entry.reason).sort()).toEqual([
+        "ambiguous",
+        "dynamic",
+        "unresolved",
+        "unresolved",
+      ]);
     } finally {
       await cleanup();
     }
@@ -277,8 +282,7 @@ describe("context callee discovery from commit snapshots", () => {
 
   test("recursive self-calls are flagged without traversal", async () => {
     const { dir, cleanup, commit } = await setupRepo({
-      "src/a.ts":
-        "export function loop(n: number): number {\n  if (n <= 0) return 0;\n  return loop(n - 1);\n}\n",
+      "src/a.ts": "export function loop(n: number): number {\n  if (n <= 0) return 0;\n  return loop(n - 1);\n}\n",
     });
     try {
       const { callees, diagnostics } = await resolveCalleesForSymbol({
@@ -307,9 +311,7 @@ describe("context callee discovery from commit snapshots", () => {
         maxCallees: 1,
       });
       expect(callees.map((entry) => entry.name)).toEqual(["first"]);
-      expect(diagnostics).toEqual([
-        { filePath: "src/a.ts", symbol: "run", callee: "second", reason: "cap-reached" },
-      ]);
+      expect(diagnostics).toEqual([{ filePath: "src/a.ts", symbol: "run", callee: "second", reason: "cap-reached" }]);
     } finally {
       await cleanup();
     }

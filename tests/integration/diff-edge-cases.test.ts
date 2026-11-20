@@ -156,9 +156,7 @@ describe("E02 gitlink 160000 skips without contaminating app.ts", () => {
         },
       ]);
       expect(app?.commentableLines).toEqual([1]);
-      expect(app?.symbols).toEqual([
-        { name: "<module>", kind: "module", startLine: 1, endLine: 1, changedLines: [1] },
-      ]);
+      expect(app?.symbols).toEqual([{ name: "<module>", kind: "module", startLine: 1, endLine: 1, changedLines: [1] }]);
     } finally {
       if (outside !== null) await rm(outside, { recursive: true, force: true });
       await cleanup();
@@ -342,9 +340,7 @@ describe("E05 deletion-only keeps hardcoded hunk and module symbol", () => {
         },
       ]);
       expect(file?.commentableLines).toEqual([1, 2, 3]);
-      expect(file?.symbols).toEqual([
-        { name: "<module>", kind: "module", startLine: 1, endLine: 3, changedLines: [] },
-      ]);
+      expect(file?.symbols).toEqual([{ name: "<module>", kind: "module", startLine: 1, endLine: 3, changedLines: [] }]);
     } finally {
       if (outside !== null) await rm(outside, { recursive: true, force: true });
       await cleanup();

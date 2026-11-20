@@ -38,10 +38,8 @@ const A_HEAD =
   "export function f(x: number): number {\n" +
   "  return helper(x + 1);\n" +
   "}\n";
-const TWO_BASE =
-  "export function f(): number {\n  return 1;\n}\nexport function g(): number {\n  return 2;\n}\n";
-const TWO_HEAD =
-  "export function f(): number {\n  return 10;\n}\nexport function g(): number {\n  return 20;\n}\n";
+const TWO_BASE = "export function f(): number {\n  return 1;\n}\nexport function g(): number {\n  return 2;\n}\n";
+const TWO_HEAD = "export function f(): number {\n  return 10;\n}\nexport function g(): number {\n  return 20;\n}\n";
 
 function outputLimitError(message = "injected output-limit"): ReviewerError {
   return new ReviewerError({
@@ -288,7 +286,7 @@ describe("context transport output-limit diagnostics", () => {
         {
           diff: diffEngine,
           context,
-          review: { review: () => Promise.resolve(emptyReviewResult()) },
+          review: { review: () => Promise.resolve(emptyReviewResult()), requiresLlm: false },
           validation: { validate: () => Promise.resolve([]) },
           publisher: { publish: () => Promise.resolve({ published: 0, skipped: 0, failures: [] }) },
           logger: logger(),

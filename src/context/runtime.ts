@@ -1,13 +1,9 @@
 import { Language, Parser, Query } from "web-tree-sitter";
 import type { Node, QueryMatch, QueryOptions } from "web-tree-sitter";
 import runtimeWasmPath from "web-tree-sitter/tree-sitter.wasm" with { type: "file" };
-import typescriptWasmPath from "@vscode/tree-sitter-wasm/wasm/tree-sitter-typescript.wasm" with {
-  type: "file",
-};
+import typescriptWasmPath from "@vscode/tree-sitter-wasm/wasm/tree-sitter-typescript.wasm" with { type: "file" };
 import tsxWasmPath from "@vscode/tree-sitter-wasm/wasm/tree-sitter-tsx.wasm" with { type: "file" };
-import javascriptWasmPath from "@vscode/tree-sitter-wasm/wasm/tree-sitter-javascript.wasm" with {
-  type: "file",
-};
+import javascriptWasmPath from "@vscode/tree-sitter-wasm/wasm/tree-sitter-javascript.wasm" with { type: "file" };
 import { ReviewerError } from "../core/errors.ts";
 
 export type SupportedLanguage = "typescript" | "tsx" | "javascript";
@@ -90,12 +86,7 @@ export function createParser(language: Language): Parser {
 // timeoutMicros halts early with the matches found so far (not an empty
 // array as the binding docs claim); tiny values therefore yield partial
 // results instead of throwing. Verified empirically against 0.25.10.
-export function queryMatches(
-  language: Language,
-  pattern: string,
-  node: Node,
-  options?: QueryOptions,
-): QueryMatch[] {
+export function queryMatches(language: Language, pattern: string, node: Node, options?: QueryOptions): QueryMatch[] {
   const query = new Query(language, pattern);
   try {
     return query.matches(node, options);

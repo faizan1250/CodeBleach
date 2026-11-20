@@ -2,10 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { ConfigFileSchema, type ResolvedConfig } from "../../src/config/schema.ts";
 import { ReviewerError } from "../../src/core/errors.ts";
 import type { Logger } from "../../src/core/logger.ts";
-import {
-  API_KEY_ENV,
-  TRAINING_OPT_IN_ENV,
-} from "../../src/llm/constants.ts";
+import { API_KEY_ENV, TRAINING_OPT_IN_ENV } from "../../src/llm/constants.ts";
 import {
   CONTEXT_SAFETY_MARGIN_TOKENS,
   MODEL_CONTEXT_TOKENS,
@@ -239,7 +236,9 @@ describe("config load rejects impossible budgets", () => {
   test("rejects zero output and unknown over-ceiling values", () => {
     expect(() => ConfigFileSchema.parse({ llm: { max_output_tokens: 0 } })).toThrow();
     expect(() => ConfigFileSchema.parse({ llm: { max_output_tokens: MODEL_MAX_OUTPUT_TOKENS + 1 } })).toThrow();
-    expect(() => ConfigFileSchema.parse({ llm: { max_review_unit_input_tokens: MODEL_MAX_INPUT_TOKENS + 1 } })).toThrow();
+    expect(() =>
+      ConfigFileSchema.parse({ llm: { max_review_unit_input_tokens: MODEL_MAX_INPUT_TOKENS + 1 } }),
+    ).toThrow();
   });
 
   test("rejects input plus reserved output that cannot fit context", () => {
@@ -329,9 +328,7 @@ describe("provider pre-request enforcement", () => {
   test("rejects prompts that cannot fit context without a request", async () => {
     const provider = new OpenCodeProvider({ env: GATE, version: "0.1.0", fetchFn: neverFetch() });
     // Estimator runs ~0.29 tokens/byte, so ~3.6 MB of text overflows the window.
-    const error = await codeOf(
-      provider.complete({ system: "s", user: "x".repeat(3_600_000), maxTokens: 32768 }),
-    );
+    const error = await codeOf(provider.complete({ system: "s", user: "x".repeat(3_600_000), maxTokens: 32768 }));
     expect(error.code).toBe("CONFIG_INVALID");
     expect(error.message).toContain("context ceiling");
   });

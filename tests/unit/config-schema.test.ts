@@ -68,9 +68,7 @@ describe("config schema", () => {
   test("rejects unknown keys at every level", () => {
     expect(() => ConfigFileSchema.parse({ bogus: true })).toThrow();
     expect(() => ConfigFileSchema.parse({ review: { bogus: true } })).toThrow();
-    expect(() =>
-      ConfigFileSchema.parse({ review: { category_overrides: { bogus: {} } } }),
-    ).toThrow();
+    expect(() => ConfigFileSchema.parse({ review: { category_overrides: { bogus: {} } } })).toThrow();
   });
 
   test("rejects bad thresholds and limits", () => {
@@ -84,16 +82,12 @@ describe("config schema", () => {
   test("rejects duplicate rule ids and empty rule text", () => {
     const rule = { id: "dup", kind: "convention", text: "Be tidy." };
     expect(() => ConfigFileSchema.parse({ rules: [rule, rule] })).toThrow();
-    expect(() =>
-      ConfigFileSchema.parse({ rules: [{ id: "x", kind: "convention", text: "" }] }),
-    ).toThrow();
+    expect(() => ConfigFileSchema.parse({ rules: [{ id: "x", kind: "convention", text: "" }] })).toThrow();
   });
 
   test("rejects unsupported language and rule kind", () => {
     expect(() => ConfigFileSchema.parse({ repository: { language: "python" } })).toThrow();
-    expect(() =>
-      ConfigFileSchema.parse({ rules: [{ id: "x", kind: "nonsense", text: "t" }] }),
-    ).toThrow();
+    expect(() => ConfigFileSchema.parse({ rules: [{ id: "x", kind: "nonsense", text: "t" }] })).toThrow();
   });
 
   test("max_file_size_kb defaults to 500 KB", () => {
@@ -114,9 +108,7 @@ describe("config schema", () => {
 
   test("max_file_size_kb accepts the 26623 KB ceiling", () => {
     expect(MAX_MAX_FILE_SIZE_KB).toBe(26623);
-    expect(ConfigFileSchema.parse({ review: { max_file_size_kb: 26623 } }).review.max_file_size_kb).toBe(
-      26623,
-    );
+    expect(ConfigFileSchema.parse({ review: { max_file_size_kb: 26623 } }).review.max_file_size_kb).toBe(26623);
     const overridden = ConfigFileSchema.parse({
       path_overrides: [{ paths: ["tests/**"], review: { max_file_size_kb: 26623 } }],
     });
@@ -124,9 +116,7 @@ describe("config schema", () => {
   });
 
   test("max_file_size_kb rejects over-max with a field-named error", () => {
-    expect(() => ConfigFileSchema.parse({ review: { max_file_size_kb: 26624 } })).toThrow(
-      /max_file_size_kb.*26623/,
-    );
+    expect(() => ConfigFileSchema.parse({ review: { max_file_size_kb: 26624 } })).toThrow(/max_file_size_kb.*26623/);
     expect(() =>
       ConfigFileSchema.parse({
         path_overrides: [{ paths: ["tests/**"], review: { max_file_size_kb: 26624 } }],

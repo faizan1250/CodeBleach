@@ -135,9 +135,7 @@ describe("review prompt categories", () => {
       unit(),
       configWith({ bugs: true, security: true, performance: false, concurrency: true }),
     );
-    const scope = built.system
-      .split("\n")
-      .find((line) => line.startsWith("In-scope finding categories:"));
+    const scope = built.system.split("\n").find((line) => line.startsWith("In-scope finding categories:"));
     expect(scope).toBeDefined();
     expect(scope as string).not.toContain("performance");
     expect(scope as string).toContain("security");
@@ -165,9 +163,7 @@ describe("review prompt serialization", () => {
     const context = data["context"] as Array<Record<string, unknown>>;
     expect(context[0]).toMatchObject({ kind: "definition", reason: "defines User used below" });
     const rules = data["rules"] as Array<Record<string, unknown>>;
-    expect(rules).toEqual([
-      { id: "no-truthy-auth", kind: "security", text: "Never use truthiness for auth checks." },
-    ]);
+    expect(rules).toEqual([{ id: "no-truthy-auth", kind: "security", text: "Never use truthiness for auth checks." }]);
     expect(built.promptVersion).toBe("code-review-v1");
     expect(built.promptHash).toBe(getCodeReviewPromptIdentity().hash);
   });
@@ -203,9 +199,7 @@ describe("review prompt serialization", () => {
     expect(hostile.system).toBe(clean.system);
     // JSON-escaped inside a string value: present as data, never as structure.
     expect(hostile.user).toContain(evil.split('"').join('\\"'));
-    const payload = JSON.parse(
-      hostile.user.slice(hostile.user.indexOf("{")),
-    ) as Record<string, unknown>;
+    const payload = JSON.parse(hostile.user.slice(hostile.user.indexOf("{"))) as Record<string, unknown>;
     const data = payload["reviewUnit"] as Record<string, unknown>;
     const context = data["context"] as Array<Record<string, unknown>>;
     expect(context[0]?.["text"]).toBe(evil);
@@ -216,8 +210,7 @@ describe("review prompt serialization", () => {
 describe("review prompt redaction", () => {
   const google = `AIzaSynthetic01234567890123456789012345`;
   const slack = `${"xox"}b-123456789012-abcdefghijklmno`;
-  const jwt =
-    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+  const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
 
   test("strips canary secrets from the built request", () => {
     const secretLine = [

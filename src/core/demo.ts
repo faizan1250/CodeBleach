@@ -1,17 +1,5 @@
-import type {
-  ContextEngine,
-  DiffEngine,
-  Publisher,
-  ReviewEngine,
-  ValidationEngine,
-} from "./contracts.ts";
-import type {
-  ChangedFile,
-  ContextBuildResult,
-  Finding,
-  ReviewUnit,
-  ValidatedFinding,
-} from "../types/index.ts";
+import type { ContextEngine, DiffEngine, Publisher, ReviewEngine, ValidationEngine } from "./contracts.ts";
+import type { ChangedFile, ContextBuildResult, Finding, ReviewUnit, ValidatedFinding } from "../types/index.ts";
 
 export const DEMO_BASE_SHA = "demo-base";
 export const DEMO_HEAD_SHA = "demo-head";
@@ -122,6 +110,10 @@ export const demoContextEngine: ContextEngine = {
           unitsWithTruncatedDefinition: 0,
           candidateFilesSkippedByCap: 0,
           queryTimeouts: 0,
+          gitCalls: 0,
+          blobsFetched: 0,
+          blobCacheHits: 0,
+          batchFetches: 0,
           parseCacheHits: 0,
           parseCacheMisses: 0,
           parseCacheEntries: 0,
@@ -178,6 +170,10 @@ export const demoContextEngine: ContextEngine = {
         unitsWithTruncatedDefinition: 0,
         candidateFilesSkippedByCap: 0,
         queryTimeouts: 0,
+        gitCalls: 0,
+        blobsFetched: 0,
+        blobCacheHits: 0,
+        batchFetches: 0,
         parseCacheHits: 0,
         parseCacheMisses: 0,
         parseCacheEntries: 0,
@@ -189,6 +185,8 @@ export const demoContextEngine: ContextEngine = {
 };
 
 export const demoReviewEngine: ReviewEngine = {
+  // Canned and network-free: no consent, key, or preflight needed.
+  requiresLlm: false,
   review: (units) => {
     const findings = units.flatMap((unit) => demoFindings(unit));
     return Promise.resolve({

@@ -145,7 +145,12 @@ describe("p3-f04 parsed snapshot cache", () => {
     const result = await cache.getOrParse(input(COMMIT_A, "src/a.ts", SOURCE_A));
     expect(result.status).toBe("parsed");
     if (result.status !== "parsed") return;
-    const parsed = await parseSource({ source: SOURCE_A, language: "typescript", filePath: "src/a.ts", perFileMs: 2000 });
+    const parsed = await parseSource({
+      source: SOURCE_A,
+      language: "typescript",
+      filePath: "src/a.ts",
+      perFileMs: 2000,
+    });
     expect(parsed.tree).not.toBeNull();
     try {
       if (parsed.tree === null) return;
@@ -167,7 +172,12 @@ describe("p3-f04 parsed snapshot cache", () => {
     const result = await cache.getOrParse(input(COMMIT_A, "src/a.ts", SOURCE_A));
     expect(result.status).toBe("parsed");
     if (result.status !== "parsed") return;
-    const parsed = await parseSource({ source: SOURCE_A, language: "typescript", filePath: "src/a.ts", perFileMs: 2000 });
+    const parsed = await parseSource({
+      source: SOURCE_A,
+      language: "typescript",
+      filePath: "src/a.ts",
+      perFileMs: 2000,
+    });
     expect(parsed.tree).not.toBeNull();
     try {
       if (parsed.tree === null) return;
@@ -183,7 +193,12 @@ describe("p3-f04 parsed snapshot cache", () => {
     const result = await cache.getOrParse(input(COMMIT_A, "src/a.ts", SOURCE_A));
     expect(result.status).toBe("parsed");
     if (result.status !== "parsed") return;
-    const parsed = await parseSource({ source: SOURCE_A, language: "typescript", filePath: "src/a.ts", perFileMs: 2000 });
+    const parsed = await parseSource({
+      source: SOURCE_A,
+      language: "typescript",
+      filePath: "src/a.ts",
+      perFileMs: 2000,
+    });
     expect(parsed.tree).not.toBeNull();
     try {
       if (parsed.tree === null) return;
@@ -191,14 +206,16 @@ describe("p3-f04 parsed snapshot cache", () => {
       const definition = result.snapshot.definitions.find((d) => d.name === "f");
       expect(definition).toBeDefined();
       if (definition === undefined) return;
-      const scoped = adapter.extractCalls(parsed.tree.rootNode, parsed.source).filter(
-        (call) =>
-          call.range.startIndex >= definition.fullRange.startIndex &&
-          call.range.endIndex <= definition.fullRange.endIndex,
-      );
-      expect(callsInRange(result.snapshot.calls, definition.fullRange.startIndex, definition.fullRange.endIndex)).toEqual(
-        scoped,
-      );
+      const scoped = adapter
+        .extractCalls(parsed.tree.rootNode, parsed.source)
+        .filter(
+          (call) =>
+            call.range.startIndex >= definition.fullRange.startIndex &&
+            call.range.endIndex <= definition.fullRange.endIndex,
+        );
+      expect(
+        callsInRange(result.snapshot.calls, definition.fullRange.startIndex, definition.fullRange.endIndex),
+      ).toEqual(scoped);
     } finally {
       parsed.tree?.delete();
     }
@@ -212,6 +229,45 @@ describe("p3-f04 parsed snapshot cache", () => {
     if (second.status !== "parsed") return;
     expect(second.hit).toBe(true);
     expect(cache.stats().entries).toBe(1);
+  });
+
+  test("language separates entries on one commit and path", async () => {
+    const cache = new ParseCache();
+    const ts = await cache.getOrParse(input(COMMIT_A, "src/a.ts", SOURCE_A));
+    const tsx = await cache.getOrParse({ ...input(COMMIT_A, "src/a.ts", SOURCE_A), language: "tsx" });
+    expect(ts.status).toBe("parsed");
+    expect(tsx.status).toBe("parsed");
+    expect(cache.stats()).toMatchObject({ hits: 0, misses: 2, entries: 2 });
+    const tsAgain = await cache.getOrParse(input(COMMIT_A, "src/a.ts", SOURCE_A));
+    expect(tsAgain.status).toBe("parsed");
+    if (tsAgain.status !== "parsed") return;
+    expect(tsAgain.hit).toBe(true);
+  });
+
+  test("parse budget inputs never affect cache identity", async () => {
+    const cache = new ParseCache();
+    const budget = new RunBudget({ maxRunMs: 60_000, maxTotalParseMs: 100_000 });
+    await cache.getOrParse(input(COMMIT_A, "src/a.ts", SOURCE_A));
+    const again = await cache.getOrParse({
+      ...input(COMMIT_A, "src/a.ts", SOURCE_A),
+      perFileMs: 500,
+      runBudget: budget,
+    });
+    expect(again.status).toBe("parsed");
+    if (again.status !== "parsed") return;
+    expect(again.hit).toBe(true);
+    expect(cache.stats()).toMatchObject({ hits: 1, misses: 1, entries: 1 });
+  });
+
+  test("instances never share entries across runs", async () => {
+    const first = new ParseCache();
+    await first.getOrParse(input(COMMIT_A, "src/a.ts", SOURCE_A));
+    const second = new ParseCache();
+    const result = await second.getOrParse(input(COMMIT_A, "src/a.ts", SOURCE_A));
+    expect(result.status).toBe("parsed");
+    if (result.status !== "parsed") return;
+    expect(result.hit).toBe(false);
+    expect(second.stats()).toMatchObject({ hits: 0, misses: 1, entries: 1 });
   });
 
   test("default caps are positive", () => {

@@ -159,15 +159,9 @@ describe("review build result", () => {
   });
 
   test("fails when every unit fails", async () => {
-    const provider = new FakeProvider([
-      { respond: new Error("down-1") },
-      { respond: new Error("down-2") },
-    ]);
+    const provider = new FakeProvider([{ respond: new Error("down-1") }, { respond: new Error("down-2") }]);
     const engine = new ReviewEngineImpl({ provider, logger: nullLogger(), env: { ...OPT_IN } });
-    const result = await engine.review(
-      [unit({ id: "u-1" }), unit({ id: "u-2" })],
-      configWith(),
-    );
+    const result = await engine.review([unit({ id: "u-1" }), unit({ id: "u-2" })], configWith());
     expect(result.status).toBe("failed");
     expect(result.findings).toEqual([]);
     expect(result.unitsSubmitted).toBe(2);
@@ -236,9 +230,7 @@ describe("review build result", () => {
   });
 
   test("keeps cost unknown when usage is known but cost is not reported", async () => {
-    const provider = new FakeProvider([
-      { respond: { findings: [] }, usage: { inputTokens: 12, outputTokens: 3 } },
-    ]);
+    const provider = new FakeProvider([{ respond: { findings: [] }, usage: { inputTokens: 12, outputTokens: 3 } }]);
     const engine = new ReviewEngineImpl({ provider, logger: nullLogger(), env: { ...OPT_IN } });
     const result = await engine.review([unit()], configWith());
     expect(result.usage.inputTokens).toBe(12);

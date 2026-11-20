@@ -58,9 +58,7 @@ export function nameOf(node: Node): string | null {
     case "type_alias_declaration":
     case "enum_declaration": {
       const name = node.childForFieldName("name");
-      return name !== null && (name.type === "identifier" || name.type === "type_identifier")
-        ? name.text
-        : null;
+      return name !== null && (name.type === "identifier" || name.type === "type_identifier") ? name.text : null;
     }
     case "method_definition": {
       // Any spelling (identifier, string, number, computed) is stable text.
@@ -158,12 +156,7 @@ function makeEmitter(source: string, out: RawDefinition[]): Emitter {
 const FUNCTION_VALUES = new Set(["arrow_function", "function_expression"]);
 const CLASS_VALUES = new Set(["class", "class_declaration"]);
 
-function visitEach(
-  parent: Node,
-  scopes: readonly Scope[],
-  source: string,
-  emitter: Emitter,
-): void {
+function visitEach(parent: Node, scopes: readonly Scope[], source: string, emitter: Emitter): void {
   for (const child of namedChildren(parent)) {
     visit(child, scopes, TOP_LEVEL, source, emitter);
   }
@@ -183,29 +176,20 @@ function visitDeclarator(
   if (value === null) return;
   if (FUNCTION_VALUES.has(value.type) || CLASS_VALUES.has(value.type)) {
     const kind = FUNCTION_VALUES.has(value.type) ? "function" : "class";
-    emitter.emit(
-      declarator,
-      headerEndOf(value),
-      {
-        name: varName,
-        kind,
-        container: containerOf(scopes),
-        exported: exp.exported,
-        exportKind: exp.exportKind,
-      },
-    );
+    emitter.emit(declarator, headerEndOf(value), {
+      name: varName,
+      kind,
+      container: containerOf(scopes),
+      exported: exp.exported,
+      exportKind: exp.exportKind,
+    });
     visitEach(value, [...scopes, varName], source, emitter);
   } else if (value.type === "object") {
     visitEach(value, [...scopes, varName], source, emitter);
   }
 }
 
-function visitExportStatement(
-  node: Node,
-  scopes: readonly Scope[],
-  source: string,
-  emitter: Emitter,
-): void {
+function visitExportStatement(node: Node, scopes: readonly Scope[], source: string, emitter: Emitter): void {
   const isDefault = hasAnonymousChild(node, "default");
   const exp: ExportCtx = { exported: true, exportKind: isDefault ? "default" : "named" };
   const declaration = node.childForFieldName("declaration");
@@ -230,13 +214,7 @@ function visitExportStatement(
   }
 }
 
-function visit(
-  node: Node,
-  scopes: readonly Scope[],
-  exp: ExportCtx,
-  source: string,
-  emitter: Emitter,
-): void {
+function visit(node: Node, scopes: readonly Scope[], exp: ExportCtx, source: string, emitter: Emitter): void {
   switch (node.type) {
     case "export_statement":
       visitExportStatement(node, scopes, source, emitter);
@@ -306,11 +284,12 @@ function visit(
     case "enum_declaration": {
       const name = nameOf(node);
       if (name === null) return;
-      const typeKind = node.type === "interface_declaration"
-        ? "interface"
-        : node.type === "type_alias_declaration"
-          ? "type-alias"
-          : "enum";
+      const typeKind =
+        node.type === "interface_declaration"
+          ? "interface"
+          : node.type === "type_alias_declaration"
+            ? "type-alias"
+            : "enum";
       emitter.emit(node, headerEndOf(node), {
         name,
         kind: "type",
@@ -536,10 +515,10 @@ function calleeParts(callee: Node): { text: string; root: string | null; member:
     while (object !== null && object.type === "member_expression") {
       object = object.childForFieldName("object");
     }
-    const root = object !== null &&
-        (object.type === "identifier" || object.type === "this" || object.type === "super")
-      ? object.text
-      : null;
+    const root =
+      object !== null && (object.type === "identifier" || object.type === "this" || object.type === "super")
+        ? object.text
+        : null;
     return { text, root, member: callee.childForFieldName("property")?.text ?? null };
   }
   return { text, root: null, member: null };
@@ -557,8 +536,8 @@ function scopeName(node: Node): string | null {
     case "variable_declarator": {
       const nameNode = node.childForFieldName("name");
       const value = node.childForFieldName("value");
-      const scoped = value !== null &&
-        (FUNCTION_VALUES.has(value.type) || CLASS_VALUES.has(value.type) || value.type === "object");
+      const scoped =
+        value !== null && (FUNCTION_VALUES.has(value.type) || CLASS_VALUES.has(value.type) || value.type === "object");
       return nameNode !== null && nameNode.type === "identifier" && scoped ? nameNode.text : null;
     }
     default:
@@ -604,8 +583,8 @@ export function collectCallSites(root: Node, source: string, target: ResolvedTar
     const info = asCall(visited);
     if (info === null) return;
     const parts = calleeParts(info.callee);
-    const matched = (parts.root !== null && names.has(parts.root)) ||
-      (parts.member !== null && names.has(parts.member));
+    const matched =
+      (parts.root !== null && names.has(parts.root)) || (parts.member !== null && names.has(parts.member));
     if (!matched) return;
     out.push({
       caller: enclosingName(visited, root),

@@ -30,15 +30,9 @@ function parseFailedOf(fn: () => unknown): ReviewerError {
 
 describe("parseNameStatusZ", () => {
   test("maps M/A/D single records", () => {
-    expect(parseNameStatusZ(nul("M", "src/a.ts"))).toEqual([
-      { status: "modified", path: "src/a.ts", oldPath: null },
-    ]);
-    expect(parseNameStatusZ(nul("A", "src/b.ts"))).toEqual([
-      { status: "added", path: "src/b.ts", oldPath: null },
-    ]);
-    expect(parseNameStatusZ(nul("D", "src/c.ts"))).toEqual([
-      { status: "deleted", path: "src/c.ts", oldPath: null },
-    ]);
+    expect(parseNameStatusZ(nul("M", "src/a.ts"))).toEqual([{ status: "modified", path: "src/a.ts", oldPath: null }]);
+    expect(parseNameStatusZ(nul("A", "src/b.ts"))).toEqual([{ status: "added", path: "src/b.ts", oldPath: null }]);
+    expect(parseNameStatusZ(nul("D", "src/c.ts"))).toEqual([{ status: "deleted", path: "src/c.ts", oldPath: null }]);
   });
 
   test("maps T to modified", () => {
@@ -65,9 +59,7 @@ describe("parseNameStatusZ", () => {
   test("preserves spaces, quotes, backslashes, tabs, unicode in paths", () => {
     const paths = ["dir/my file.ts", `we"ird\\name.ts`, "tab\tname.ts", "unicode-caf\u00e9-\u6f22\u5b57.ts"];
     for (const path of paths) {
-      expect(parseNameStatusZ(nul("M", path))).toEqual([
-        { status: "modified", path, oldPath: null },
-      ]);
+      expect(parseNameStatusZ(nul("M", path))).toEqual([{ status: "modified", path, oldPath: null }]);
     }
   });
 
@@ -86,7 +78,12 @@ describe("parseNameStatusZ", () => {
   });
 
   test("rejects unknown statuses including copies", () => {
-    for (const fields of [["X", "a.ts"], ["C100", "o.ts", "n.ts"], ["U", "a.ts"], ["m", "a.ts"]]) {
+    for (const fields of [
+      ["X", "a.ts"],
+      ["C100", "o.ts", "n.ts"],
+      ["U", "a.ts"],
+      ["m", "a.ts"],
+    ]) {
       parseFailedOf(() => parseNameStatusZ(nul(...fields)));
     }
   });
@@ -116,15 +113,11 @@ describe("parseUnifiedDiff sections", () => {
     ].join("\n");
     parseFailedOf(() => parseUnifiedDiff(one, []));
     parseFailedOf(() => parseUnifiedDiff("", [fileMeta({ path: "a.ts" })]));
-    parseFailedOf(() =>
-      parseUnifiedDiff(one, [fileMeta({ path: "a.ts" }), fileMeta({ path: "b.ts" })]),
-    );
+    parseFailedOf(() => parseUnifiedDiff(one, [fileMeta({ path: "a.ts" }), fileMeta({ path: "b.ts" })]));
   });
 
   test("rejects combined merge diffs explicitly", () => {
-    const patch = ["diff --cc a.ts", "index 111..222 100644", "@@@ -1,1 -1,1 +1,1 @@@ bla", ""].join(
-      "\n",
-    );
+    const patch = ["diff --cc a.ts", "index 111..222 100644", "@@@ -1,1 -1,1 +1,1 @@@ bla", ""].join("\n");
     parseFailedOf(() => parseUnifiedDiff(patch, [fileMeta({ path: "a.ts" })]));
   });
 });
@@ -296,9 +289,15 @@ describe("parseUnifiedDiff hunks", () => {
   });
 
   test("preserves CR in CRLF content", () => {
-    const patch = ["diff --git a/a.ts b/a.ts", "--- a/a.ts", "+++ b/a.ts", "@@ -1,1 +1,2 @@", " ctx\r", "+add\r", ""].join(
-      "\n",
-    );
+    const patch = [
+      "diff --git a/a.ts b/a.ts",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -1,1 +1,2 @@",
+      " ctx\r",
+      "+add\r",
+      "",
+    ].join("\n");
     const [file] = parseUnifiedDiff(patch, [fileMeta({ path: "a.ts" })]);
     expect(file?.hunks[0]?.lines).toEqual([
       { kind: "ctx", oldLine: 1, newLine: 1, position: 1, text: "ctx\r" },
@@ -307,15 +306,9 @@ describe("parseUnifiedDiff hunks", () => {
   });
 
   test("treats omitted hunk counts as 1", () => {
-    const patch = [
-      "diff --git a/a.ts b/a.ts",
-      "--- a/a.ts",
-      "+++ b/a.ts",
-      "@@ -5 +5,2 @@",
-      " same",
-      "+extra",
-      "",
-    ].join("\n");
+    const patch = ["diff --git a/a.ts b/a.ts", "--- a/a.ts", "+++ b/a.ts", "@@ -5 +5,2 @@", " same", "+extra", ""].join(
+      "\n",
+    );
     const [file] = parseUnifiedDiff(patch, [fileMeta({ path: "a.ts" })]);
     expect(file?.hunks[0]).toMatchObject({ oldStart: 5, oldLines: 1, newStart: 5, newLines: 2 });
   });
@@ -411,9 +404,7 @@ describe("parseUnifiedDiff hunks", () => {
       "+now",
       "",
     ].join("\n");
-    const [changed] = parseUnifiedDiff(withContent, [
-      fileMeta({ status: "renamed", path: "n.ts", oldPath: "o.ts" }),
-    ]);
+    const [changed] = parseUnifiedDiff(withContent, [fileMeta({ status: "renamed", path: "n.ts", oldPath: "o.ts" })]);
     expect(changed?.hunks).toHaveLength(1);
     expect(changed?.hunks[0]?.lines.map((l) => l.kind)).toEqual(["ctx", "del", "add"]);
   });
@@ -426,15 +417,9 @@ describe("parseUnifiedDiff hunks", () => {
   });
 
   test("rejects hunks consuming too few or too many lines", () => {
-    const tooFew = [
-      "diff --git a/a.ts b/a.ts",
-      "--- a/a.ts",
-      "+++ b/a.ts",
-      "@@ -1,3 +1,3 @@",
-      " a",
-      " b",
-      "",
-    ].join("\n");
+    const tooFew = ["diff --git a/a.ts b/a.ts", "--- a/a.ts", "+++ b/a.ts", "@@ -1,3 +1,3 @@", " a", " b", ""].join(
+      "\n",
+    );
     parseFailedOf(() => parseUnifiedDiff(tooFew, [fileMeta({ path: "a.ts" })]));
 
     const tooMany = [
@@ -487,9 +472,7 @@ describe("parseRawDiffZ", () => {
 describe("parseNumstatZ", () => {
   test("maps text, binary, and renames preserving order", () => {
     const raw = (s: string): Uint8Array => new TextEncoder().encode(s);
-    expect(parseNumstatZ(raw("1\t1\tsrc/a.ts\0"))).toEqual([
-      { path: "src/a.ts", oldPath: null, binary: false },
-    ]);
+    expect(parseNumstatZ(raw("1\t1\tsrc/a.ts\0"))).toEqual([{ path: "src/a.ts", oldPath: null, binary: false }]);
     expect(parseNumstatZ(raw("-\t-\tasset/logo.png\0"))).toEqual([
       { path: "asset/logo.png", oldPath: null, binary: true },
     ]);
