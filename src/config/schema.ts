@@ -8,6 +8,11 @@ import {
   DEFAULT_CONFIDENCE_THRESHOLD,
   DEFAULT_ENABLED,
   DEFAULT_LANGUAGE,
+  DEFAULT_LLM_MAX_CONCURRENT_REQUESTS,
+  DEFAULT_LLM_MAX_OUTPUT_TOKENS,
+  DEFAULT_LLM_MAX_RETRIES,
+  DEFAULT_LLM_MAX_REVIEW_UNIT_INPUT_TOKENS,
+  DEFAULT_LLM_REQUEST_TIMEOUT_MS,
   DEFAULT_MAX_CHANGED_LINES_PER_FILE,
   DEFAULT_MAX_FILE_SIZE_KB,
   DEFAULT_MAX_FINDINGS,
@@ -16,11 +21,21 @@ import {
   DEFAULT_MAX_TOKENS_PER_UNIT,
   DEFAULT_MAX_TOTAL_PARSE_TIME_MS,
   DEFAULT_SEVERITY_THRESHOLD,
+  MAX_LLM_MAX_CONCURRENT_REQUESTS,
+  MAX_LLM_MAX_OUTPUT_TOKENS,
+  MAX_LLM_MAX_RETRIES,
+  MAX_LLM_MAX_REVIEW_UNIT_INPUT_TOKENS,
+  MAX_LLM_REQUEST_TIMEOUT_MS,
   MAX_MAX_FILE_SIZE_KB,
   MAX_MAX_PARSE_TIME_MS,
   MAX_MAX_RUN_TIME_MS,
   MAX_MAX_TOKENS_PER_UNIT,
   MAX_MAX_TOTAL_PARSE_TIME_MS,
+  MIN_LLM_MAX_CONCURRENT_REQUESTS,
+  MIN_LLM_MAX_OUTPUT_TOKENS,
+  MIN_LLM_MAX_RETRIES,
+  MIN_LLM_MAX_REVIEW_UNIT_INPUT_TOKENS,
+  MIN_LLM_REQUEST_TIMEOUT_MS,
   MIN_MAX_PARSE_TIME_MS,
   MIN_MAX_RUN_TIME_MS,
   MIN_MAX_TOKENS_PER_UNIT,
@@ -164,6 +179,42 @@ const ContextSchema = z
 export const ConfigFileSchema = z.strictObject({
   version: z.literal(CONFIG_VERSION).default(CONFIG_VERSION),
   review: ReviewSchema.prefault({}),
+  // Non-secret fixed-model runtime controls (ADR 0016). Strict: no provider,
+  // model, or api_family selectors exist; the target is pinned in code.
+  llm: z
+    .strictObject({
+      request_timeout_ms: z
+        .number()
+        .int()
+        .min(MIN_LLM_REQUEST_TIMEOUT_MS)
+        .max(MAX_LLM_REQUEST_TIMEOUT_MS)
+        .default(DEFAULT_LLM_REQUEST_TIMEOUT_MS),
+      max_output_tokens: z
+        .number()
+        .int()
+        .min(MIN_LLM_MAX_OUTPUT_TOKENS)
+        .max(MAX_LLM_MAX_OUTPUT_TOKENS)
+        .default(DEFAULT_LLM_MAX_OUTPUT_TOKENS),
+      max_retries: z
+        .number()
+        .int()
+        .min(MIN_LLM_MAX_RETRIES)
+        .max(MAX_LLM_MAX_RETRIES)
+        .default(DEFAULT_LLM_MAX_RETRIES),
+      max_concurrent_requests: z
+        .number()
+        .int()
+        .min(MIN_LLM_MAX_CONCURRENT_REQUESTS)
+        .max(MAX_LLM_MAX_CONCURRENT_REQUESTS)
+        .default(DEFAULT_LLM_MAX_CONCURRENT_REQUESTS),
+      max_review_unit_input_tokens: z
+        .number()
+        .int()
+        .min(MIN_LLM_MAX_REVIEW_UNIT_INPUT_TOKENS)
+        .max(MAX_LLM_MAX_REVIEW_UNIT_INPUT_TOKENS)
+        .default(DEFAULT_LLM_MAX_REVIEW_UNIT_INPUT_TOKENS),
+    })
+    .prefault({}),
   ignore: z
     .strictObject({
       // Additive: user entries extend the built-in defaults (merged, deduped).

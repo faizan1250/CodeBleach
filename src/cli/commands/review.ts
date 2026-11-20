@@ -28,6 +28,8 @@ export interface ReviewOptions {
   demo: boolean;
   logLevel: string;
   runId: string;
+  /** Exact key bytes for logger/artifact redaction; never logged itself. */
+  secrets?: string[] | undefined;
 }
 
 const LOG_LEVELS: readonly string[] = ["debug", "info", "warn", "error"];
@@ -72,6 +74,7 @@ export async function runReview(options: ReviewOptions, logger: Logger): Promise
         dryRun: options.dryRun,
         outDir: options.out,
         runId: options.runId,
+        secrets: options.secrets,
       },
     );
     console.log(

@@ -1,8 +1,9 @@
-# OpenCode Go + Muse Spark 1.3 Contributor spike (P4-00)
+# OpenCode Go + Muse Spark 1.3 Contributor spike (P4-00, verified 2026-11-20)
 
-Date: 2026-11-20. Status: **BLOCKED — no live smoke run** (no `OPENCODE_API_KEY`,
-no `CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING=true` in this environment). No endpoint
-is pinned. No provider code exists yet.
+Date: 2026-11-20. Status: **endpoint verified — two live generic smokes succeed**
+(same result during P4-00 review round 2 and the P4-01 re-verify). No provider
+code exists yet; `OPENCODE_RESPONSES_ENDPOINT` is pinned from the authenticated
+`base_url` in P4-01 (ADR 0016).
 
 ## Official docs checked (2026-11-20)
 
@@ -22,56 +23,56 @@ Docs were listed, not fetched, in this offline environment. Re-verify at live-sm
   `opencode-go/muse-spark-1.3-contributor`). API family: OpenAI Responses.
 - Any 403/region/entitlement/privacy denial fails clearly. No model/endpoint/API-family fallback.
 
-## Authenticated catalog request (NOT RUN)
+## Authenticated catalog request (RUN — live 2026-11-20, twice)
 
-Intended: `GET https://opencode.ai/console/api/v1/models` with
-`Authorization: Bearer <OPENCODE_API_KEY>`, then inspect
-`opencode-go.models["muse-spark-1.3-contributor"].api.responses.base_url` plus
-`limit.context` / `limit.input` / `limit.output`. Not run: no key present.
-Model presence in the workspace catalog is therefore **UNVERIFIED**.
+`GET https://opencode.ai/console/api/v1/models` with
+`Authorization: Bearer <OPENCODE_API_KEY>` succeeded. The workspace catalog
+contains `opencode-go.models["muse-spark-1.3-contributor"]` with
+`api.responses.base_url = https://opencode.ai/inference/go/openai/v1`.
+Model presence and workspace entitlement are therefore **VERIFIED**.
 
-## Final Responses endpoint (UNPINNED)
+## Final Responses endpoint (PINNED)
 
-The general-docs candidate `https://opencode.ai/inference/go/openai/v1/responses`
-and any third-party `/zen/go/v1` base are **unverified candidates, not approved**.
-The production constant stays unset until `scripts/opencode-spike.ts` derives the URL
-from the authenticated `base_url` and a harmless live request succeeds.
-`deriveResponsesEndpoint()` (tested) only normalizes that catalog value: a full
-`/openai/v1/responses` suffix is kept as-is, a bare `/openai/v1` stem gains only
-`/responses`, anything else gains the full suffix — the stem never doubles. The
-harness logs the raw catalog `base_url` (not secret) before derivation so the
-real value is on record at live-smoke time.
+`https://opencode.ai/inference/go/openai/v1/responses` — the catalog `base_url`
+plus the Responses path appended exactly once. Proven by a harmless live POST
+(HTTP 200, valid Responses envelope, `model: "muse-spark-1.3-contributor"`
+echoed). The general-docs candidate and any third-party `/zen/go/v1` base are
+retired as candidates, not kept as fallbacks. `deriveResponsesEndpoint()` keeps
+a full `/openai/v1/responses` suffix as-is, gains only `/responses` on a bare
+`/openai/v1` stem, else appends the full suffix — the stem never doubles. The
+harness logs the raw catalog `base_url` (not secret) before derivation.
 
-## Region / entitlement / privacy (UNVERIFIED)
+## Region / entitlement / privacy (VERIFIED as far as callable)
 
-Region eligibility, workspace entitlement, and the "allow paid endpoints that train
-on request data" toggle were not verified (no authenticated call). If the catalog
-or request denies access, Phase 4 stops; no substitution.
+The catalog lists the model and the request is accepted, so region and
+workspace entitlement hold from this environment. The "allow paid endpoints
+that train on request data" toggle must be on for the call to succeed; it is
+owner-operated and CodeBleach never toggles it.
 
-## Training / data-use opt-in (NOT OBTAINED)
+## Training / data-use opt-in (OBTAINED for this environment)
 
 Muse Spark 1.3 Contributor is Not ZDR: prompts/completions may train future Meta
-models. Owner acknowledgement is **not recorded**. The spike harness refuses to run
-without `CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING=true`, and every repository-bearing
-request (P4-02+) must check the same gate before network access. The workspace
-privacy toggle is owner-operated; CodeBleach never enables it.
+models. `CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING=true` is set in this environment;
+the spike harness refuses (exit 2, pre-network) without the exact value, and
+every repository-bearing request (P4-02+) must check the same gate before
+network access. No API key or secret is recorded here.
 
 ## Auth behavior
 
 Key is environment-only (`OPENCODE_API_KEY`), never in config/source/logs/artifacts.
 The harness attaches `Authorization: Bearer` at send time and logs `[REDACTED]`.
-No live auth result to report.
+Live: bearer auth accepted (HTTP 200 on both catalog and inference calls).
 
-## User-Agent / session header (harness-ready, UNPROVEN on wire)
+## User-Agent / session header (PROVEN on wire)
 
 `buildSpikeHeaders()` sends `User-Agent: codebleach/<version>` and one stable opaque
 `x-opencode-session: ses_<id>` per run (reused across retries; no repo paths/SHAs).
-Unit-tested; wire behavior unverified pending live smoke.
+Live: accepted on both calls; no secret leaked into headers.
 
-## Redacted request shape (intended, NOT SENT)
+## Redacted request shape (SENT — generic, no repo content)
 
 ```text
-POST <catalog-derived-responses-url>
+POST https://opencode.ai/inference/go/openai/v1/responses
 Authorization: Bearer [REDACTED]
 Content-Type: application/json
 User-Agent: codebleach/0.1.0
@@ -80,44 +81,53 @@ x-opencode-session: ses_[REDACTED]
 {"model":"muse-spark-1.3-contributor","input":"Reply with exactly the two words: spike ok","max_output_tokens":64}
 ```
 
-No response was received (no live call); no example response to record.
+Redacted response (truncated, 2026-11-20): `status: "incomplete"`,
+`incomplete_details.reason: "max_output_tokens"` — the 64-token cap is consumed
+by reasoning tokens, so no completed text. This confirms the reasoning-token
+hypothesis: Responses `max_output_tokens` covers hidden reasoning plus visible
+JSON, and a small cap yields `incomplete`, not a parse failure. `incomplete` is
+classified separately from parse failure (no JSON repair on truncated output);
+only `max_output_tokens` gets one bounded cap-escalation retry (P4-05).
 
-## Structured output / extraction / limits / usage (UNVERIFIED)
+## Structured output / limits / usage (STILL UNVERIFIED)
 
-Native JSON-schema support, response-text extraction, `limit.*` values, reasoning-token
-accounting (`output_tokens_details.reasoning_tokens`), `usage.cost`,
-`usage.opencode.allowance` / `billing_source`, `incomplete_details.reason` handling,
-timeout/abort/429/`Retry-After` behavior, and the 400/401/403/404/5xx mapping all
-await the live smoke. Starting config defaults (`request_timeout_ms 90000`,
-`max_output_tokens 32768`, `max_retries 2`, `max_concurrent_requests 3`,
-`max_review_unit_input_tokens 64000`) remain hypotheses clamped to authenticated
-`limit.*` at P4-01. `incomplete` is classified separately from parse failure (no
-JSON repair on truncated output); only `max_output_tokens` gets one bounded
-cap-escalation retry.
+Native JSON-schema support, response text extraction on a *completed* response,
+authenticated `limit.*` values, `output_tokens_details.reasoning_tokens`,
+`usage.cost`, `usage.opencode.allowance` / `billing_source`, timeout/abort/
+429/`Retry-After` behavior, and the 400/401/403/404/5xx mapping all await a
+completed live response in P4-02+. Starting config defaults
+(`request_timeout_ms 90000`, `max_output_tokens 32768`, `max_retries 2`,
+`max_concurrent_requests 3`, `max_review_unit_input_tokens 64000`) remain
+hypotheses clamped to authenticated `limit.*` at runtime. The 32K output
+default gives headroom over the old 4K ceiling while staying below the
+third-party-reported 131072 maximum.
 
 ## Tools / execution boundary
 
 The fixed integration is direct inference only: no `tools`/`tool_choice`, no agent
 SDK/session host, no shell/filesystem/web/MCP access, no repository code execution.
 The harness sends only the generic prompt above. Verified by construction in
-`scripts/opencode-spike.ts` (no tool fields exist in the payload builder).
+`scripts/opencode-spike.ts` (no tool fields exist in the payload builder) and by
+the live accepted responses.
 
-## Redaction gap (awareness, fix deferred to P4-02/P4-03)
+## Redaction gap (patterns landed in P4-01, call site pending in P4-02)
 
-Current `src/utils/redact.ts` covers GitHub/AWS/Bearer/`sk-`/PEM + sensitive keys.
-Still missing before any source-bearing call: Google `AIza`, Slack `xox*`, Stripe
-`sk_/rk_/whsec_`, JWT, URL query secrets, quoted `.env`/YAML/JSON forms, generic
-sensitive `key=value`. Pre-send redaction of the serialized payload plus the
-training gate are mandatory before P4-02; nothing source-bearing is sent in P4-00.
+`src/utils/redact.ts` now covers GitHub/AWS/Bearer/`sk-`/PEM plus Google `AIza`,
+Slack `xox*`, Stripe `sk_/rk_/whsec_`, JWT, Basic, URL query secrets, quoted
+`.env`/YAML/JSON forms, and generic sensitive `key=value` (idempotent, telemetry
+keys preserved). The P4-02 provider must still call pre-send redaction on the
+serialized payload plus enforce the training gate — no source-bearing call exists
+until then.
 
 ## Bun compatibility
 
 Spike harness is Bun-native `fetch` + `AbortSignal.timeout`; pure helpers covered by
-`tests/unit/opencode-spike.test.ts` (6 tests, offline, no secrets). Live smoke
-result: **not run — blocked on key + opt-in**.
+`tests/unit/opencode-spike.test.ts` (10 tests, offline, no secrets). Live smoke
+result: **succeeds** (endpoint accepted; output incomplete-due-to-cap as above).
 
-## Blocker
+## Remaining blockers (for P4-02+, not for pinning)
 
-Phase 4 cannot proceed to provider code until the owner provides `OPENCODE_API_KEY`,
-sets `CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING=true`, and the generic smoke at the
-catalog-derived endpoint succeeds. No fallback model/provider is proposed.
+Phase 4 may proceed to provider code against the pinned endpoint. Still open:
+a *completed* (non-incomplete) smoke with a larger cap; usage/cost/allowance
+capture on completion; structured-output support; retry/timeout mapping. No
+model/provider fallback is proposed for any of these.

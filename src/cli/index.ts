@@ -7,6 +7,7 @@ import { runReview } from "./commands/review.ts";
 import { runVersion } from "./commands/version.ts";
 import { ReviewerError } from "../core/errors.ts";
 import { createLogger, type LogLevel } from "../core/logger.ts";
+import { collectLlmSecrets } from "../llm/training-gate.ts";
 
 const USAGE = `codebleach - personal AI PR reviewer
 
@@ -56,7 +57,8 @@ async function runReviewCommand(args: string[]): Promise<number> {
   }
   const level = isLogLevel(parsed.values["log-level"], process.env["REVIEWER_LOG_LEVEL"]);
   const runId = randomUUID();
-  const logger = createLogger({ level, runId });
+  const secrets = collectLlmSecrets(process.env);
+  const logger = createLogger({ level, runId, secrets });
   return runReview(
     {
       base: parsed.values["base"],
@@ -67,6 +69,7 @@ async function runReviewCommand(args: string[]): Promise<number> {
       demo: parsed.values["demo"] ?? false,
       logLevel: level,
       runId,
+      secrets,
     },
     logger,
   );
