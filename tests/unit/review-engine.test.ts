@@ -5,7 +5,7 @@ import { ReviewerError } from "../../src/core/errors.ts";
 import type { Logger } from "../../src/core/logger.ts";
 import { FakeProvider } from "../../src/providers/fake.ts";
 import type { LlmProvider, LlmRequest, LlmResponse } from "../../src/providers/types.ts";
-import { ReviewEngineImpl } from "../../src/review/engine.ts";
+import { ReviewEngineImpl, type ReviewEngineOptions } from "../../src/review/engine.ts";
 import type { ReviewUnit } from "../../src/types/context.ts";
 import type { Rule } from "../../src/types/rules.ts";
 
@@ -308,5 +308,45 @@ describe("review engine orchestration", () => {
     const findings = await engineFor(provider).review([], configWith());
     expect(findings).toEqual([]);
     expect(provider.calls).toHaveLength(0);
+  });
+
+  test("aborts the run when a unit fails with a policy error", async () => {
+    const provider = new FakeProvider([
+      { respond: { findings: [] } },
+      {
+        respond: new ReviewerError({ code: "CONFIG_INVALID", message: "policy violation mid-run" }),
+      },
+    ]);
+    const engine = engineFor(provider);
+    let code: string | undefined;
+    try {
+      await engine.review(
+        [unit({ id: "u-1" }), unit({ id: "u-2" })],
+        configWith({ max_concurrent_requests: 1 }),
+      );
+    } catch (error) {
+      expect(error).toBeInstanceOf(ReviewerError);
+      code = (error as ReviewerError).code;
+    }
+    expect(code).toBe("CONFIG_INVALID");
+    expect(provider.calls).toHaveLength(2);
+  });
+
+  test("returns empty for zero units without the training opt-in", async () => {
+    const provider = new FakeProvider([{ respond: { findings: [] } }]);
+    const findings = await engineFor(provider, {}).review([], configWith());
+    expect(findings).toEqual([]);
+    expect(provider.calls).toHaveLength(0);
+  });
+
+  test("rejects missing options with INTERNAL instead of TypeError", () => {
+    let code: string | undefined;
+    try {
+      new ReviewEngineImpl(undefined as unknown as ReviewEngineOptions);
+    } catch (error) {
+      expect(error).toBeInstanceOf(ReviewerError);
+      code = (error as ReviewerError).code;
+    }
+    expect(code).toBe("INTERNAL");
   });
 });

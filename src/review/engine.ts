@@ -45,7 +45,14 @@ export class ReviewEngineImpl implements ReviewEngine {
   private readonly headSha: string;
 
   constructor(options: ReviewEngineOptions) {
-    const logger = (options as ReviewEngineOptions | null | undefined)?.logger;
+    const opts = options as ReviewEngineOptions | null | undefined;
+    if (opts === null || opts === undefined) {
+      throw new ReviewerError({
+        code: "INTERNAL",
+        message: "ReviewEngineImpl requires options with provider and logger",
+      });
+    }
+    const logger = opts.logger;
     if (
       logger === null ||
       logger === undefined ||
@@ -60,14 +67,14 @@ export class ReviewEngineImpl implements ReviewEngine {
       });
     }
     this.logger = logger;
-    this.provider = (options as ReviewEngineOptions).provider;
-    this.env = (options as ReviewEngineOptions).env ?? process.env;
-    this.headSha = (options as ReviewEngineOptions).headSha ?? "";
+    this.provider = opts.provider;
+    this.env = opts.env ?? process.env;
+    this.headSha = opts.headSha ?? "";
   }
 
   async review(units: ReviewUnit[], config: ResolvedConfig): Promise<Finding[]> {
-    requireTrainingOptIn(this.env);
     if (units.length === 0) return [];
+    requireTrainingOptIn(this.env);
     const limit = Math.max(1, config.llm.max_concurrent_requests);
     const out: Finding[][] = new Array(units.length);
     let next = 0;
@@ -77,7 +84,10 @@ export class ReviewEngineImpl implements ReviewEngine {
         next += 1;
         if (index >= units.length) return;
         const unit = units[index];
-        if (unit === undefined) continue;
+        if (unit === undefined) {
+          out[index] = [];
+          continue;
+        }
         try {
           out[index] = await this.reviewUnit(unit, config);
         } catch (error) {
