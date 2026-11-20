@@ -135,6 +135,19 @@ function isTelemetryKey(key: string): boolean {
 // `?key=value` / `&key=value` in free text; value replaced, key kept for context.
 const URL_QUERY_SECRET_RE = /([?&])([A-Za-z0-9_.\-~%]+)=([^&\s"'<>]+)/g;
 
+// Percent-encoded query names classify on the once-decoded form; the raw
+// capture is always re-emitted. decodeURIComponent runs exactly one pass
+// (`%2521` -> `%21`, never `!`). Malformed sequences (lone/trailing `%`,
+// non-hex like `%ZZ`) fall back to the raw key: never throw, never treat
+// undecodable bytes as sensitive.
+function decodeQueryKeyOnce(key: string): string {
+  try {
+    return decodeURIComponent(key);
+  } catch {
+    return key;
+  }
+}
+
 // `.env` / YAML / JSON / log `KEY=value` / `KEY: value` (optionally quoted).
 // Runs after TOKEN_PATTERNS so structured tokens are already gone. The opening
 // value quote is consumed and the original closing quote stays, so quoted JSON
@@ -167,8 +180,10 @@ export function redact(text: string, extraSecrets: string[] = []): string {
   out = out.replace(
     URL_QUERY_SECRET_RE,
     (match: string, mark: string, key: string, value: string) => {
-      if (value === REDACTED || !isSensitiveAssignmentKey(key)) return match;
-      if (!isSensitiveKey(key) && isTelemetryKey(key)) return match;
+      if (value === REDACTED) return match;
+      const decodedKey = decodeQueryKeyOnce(key);
+      if (!isSensitiveAssignmentKey(decodedKey)) return match;
+      if (!isSensitiveKey(decodedKey) && isTelemetryKey(decodedKey)) return match;
       return `${mark}${key}=[REDACTED]`;
     },
   );
