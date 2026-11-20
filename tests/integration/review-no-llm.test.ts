@@ -95,7 +95,7 @@ describe("p4-09 review --no-llm", () => {
     }
   });
 
-  test("real review without key or opt-in stops before network access", async () => {
+  test("real review without key or opt-in fails preflight before network access", async () => {
     const { dir, base, head, cleanup } = await twoCommitRepo();
     const originalWrite = process.stderr.write.bind(process.stderr);
     let captured = "";
@@ -127,9 +127,16 @@ describe("p4-09 review --no-llm", () => {
       const artifact = JSON.parse(await readFile(join(out, "run.json"), "utf8")) as {
         status: string;
         error: { code: string };
+        stages: Array<{ name: string; status: string; ms: number }>;
+        units: unknown[];
+        contextStatus: string | null;
       };
       expect(artifact.status).toBe("failed");
       expect(artifact.error.code).toBe("CONFIG_INVALID");
+      // Preflight precedes diff and context: only the config stage records.
+      expect(artifact.stages).toEqual([{ name: "config", status: "completed", ms: expect.any(Number) }]);
+      expect(artifact.units).toEqual([]);
+      expect(artifact.contextStatus).toBeNull();
     } finally {
       process.stderr.write = originalWrite;
       await cleanup();

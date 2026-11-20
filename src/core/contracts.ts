@@ -36,6 +36,12 @@ export interface ReviewEngine {
     // code-owned attribution (P4-09) plus caller cancellation (P4-08).
     options?: { signal?: AbortSignal | undefined; headSha?: string | undefined } | undefined,
   ): Promise<ReviewBuildResult>;
+  /**
+   * False for offline/canned engines (demo, --no-llm skips) that never call
+   * the provider. Absent means the engine needs the model: the pipeline runs
+   * the LLM preflight (consent/key/budgets) before diff and context.
+   */
+  readonly requiresLlm?: boolean | undefined;
 }
 
 export interface ValidationEngine {
@@ -84,6 +90,12 @@ export interface PipelineInput {
   /** Single execution id, minted once by the CLI and shared by logger + artifact. */
   runId: string;
   secrets?: string[] | undefined;
+  /**
+   * Per-run environment for the LLM preflight (consent/key checks). Defaults
+   * to process.env; tests pass explicit maps. Ignored when the review engine
+   * declares requiresLlm === false.
+   */
+  env?: Record<string, string | undefined> | undefined;
 }
 
 export type LoadConfigFn = typeof loadConfig;

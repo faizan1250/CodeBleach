@@ -189,6 +189,8 @@ export const demoContextEngine: ContextEngine = {
 };
 
 export const demoReviewEngine: ReviewEngine = {
+  // Canned and network-free: no consent, key, or preflight needed.
+  requiresLlm: false,
   review: (units) => {
     const findings = units.flatMap((unit) => demoFindings(unit));
     return Promise.resolve({

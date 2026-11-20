@@ -78,6 +78,7 @@ describe("p4-09 review wiring", () => {
       const fixture = createFixtureEngines();
       let seen: unknown;
       const recording = {
+        requiresLlm: false,
         review: (units: ReviewUnit[], config: ResolvedConfig, options?: { headSha?: string }) => {
           seen = options?.headSha;
           return fixture.review.review(units, config);
@@ -101,7 +102,7 @@ describe("p4-09 review wiring", () => {
       const summary = await runPipeline(
         {
           ...fixture,
-          review: { review: () => Promise.resolve(skippedReviewResult()) },
+          review: { review: () => Promise.resolve(skippedReviewResult()), requiresLlm: false },
           validation: {
             validate: () => {
               validationCalls += 1;
@@ -161,7 +162,7 @@ describe("p4-09 review wiring", () => {
           },
           logger: nullLogger(),
         },
-        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: false, outDir: base, runId: "wiring-real" },
+        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: false, outDir: base, runId: "wiring-real", env: { CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING: "true", OPENCODE_API_KEY: "dummy-key" } },
       );
       const error = await promise.then(
         () => null,
@@ -206,7 +207,7 @@ describe("p4-09 review wiring", () => {
           },
           logger: nullLogger(),
         },
-        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: base, runId: "wiring-dryrun" },
+        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: base, runId: "wiring-dryrun", env: { CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING: "true", OPENCODE_API_KEY: "dummy-key" } },
       );
       expect(summary.status).toBe("completed");
       expect(summary.stages.map((stage) => [stage.name, stage.status, stage.reason])).toEqual([
@@ -290,7 +291,7 @@ describe("p4-09 review wiring", () => {
       const summary = await runPipeline(
         {
           ...fixture,
-          review: { review: () => Promise.resolve(skippedReviewResult()) },
+          review: { review: () => Promise.resolve(skippedReviewResult()), requiresLlm: false },
           validation: stubValidationEngine,
           publisher: {
             publish: () => {

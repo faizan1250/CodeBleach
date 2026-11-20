@@ -396,7 +396,11 @@ provider + engine built from `config.llm` bounds, one opaque `ses_`-prefixed
 session per run, resolved `diff.headSha` passed per review call for code-owned
 attribution, `--no-llm` offline preview (skipped review `no_llm_flag`,
 validation/publish skipped `review_skipped_no_llm`, exit 0), demo unchanged
-and network-free, live preflight non-ZDR warning. Validation stays
+and network-free, live preflight non-ZDR warning. Resolved by the
+reliability pass (ADR 0025): pipeline LLM preflight right after config —
+consent, key, fixed-model wiring, and usable budgets fail `CONFIG_INVALID`
+before diff and context (offline/canned engines declare
+`requiresLlm: false` and skip it); `--dry-run` preflights identically. Validation stays
 `NOT_IMPLEMENTED` with findings retained in `run.json`: a live `--dry-run`
 completes honestly — validation recorded as skipped
 (`validation_unimplemented`), findings kept unvalidated, publish still
@@ -441,7 +445,7 @@ src/
   diff/                git.ts, parse.ts, positions.ts, filters.ts, paths.ts
   context/             adapters/typescript.ts, parser.ts, search.ts, retrieve.ts, rank.ts, budget.ts
   review/              engine.ts, prompt.ts, normalize.ts, result.ts
-  llm/                 constants.ts, training-gate.ts
+  llm/                 constants.ts, training-gate.ts, preflight.ts
   validate/            engine.ts, deterministic.ts, llm.ts, dedupe.ts
   providers/           types.ts, fake.ts, json.ts, opencode.ts
   github/              client.ts, publish.ts, fingerprint.ts

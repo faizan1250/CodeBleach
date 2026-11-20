@@ -82,6 +82,9 @@ function isIncompleteCapError(error: unknown): boolean {
 
 /** One focused pass, one provider request per ReviewUnit. No batching. */
 export class ReviewEngineImpl implements ReviewEngine {
+  // Live engine: every unit-bearing review calls the provider, so the
+  // pipeline preflights consent/key/budgets before diff and context.
+  readonly requiresLlm = true;
   private readonly provider: LlmProvider;
   private readonly logger: Logger;
   private readonly env: Record<string, string | undefined>;

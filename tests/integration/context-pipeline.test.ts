@@ -53,6 +53,7 @@ describe("p3-11 pipeline wiring", () => {
 
       let seen: ReviewUnit[] | null = null;
       const recordingReview = {
+        requiresLlm: false,
         review: (units: ReviewUnit[]) => {
           seen = units;
           return Promise.reject(new ReviewerError({ code: "NOT_IMPLEMENTED", message: "review stub" }));

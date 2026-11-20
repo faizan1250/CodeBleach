@@ -10,6 +10,7 @@ import type {
   StageResult,
 } from "./contracts.ts";
 import { RUN_ARTIFACT_SCHEMA_VERSION, writeArtifact, type RunArtifact } from "./run-artifact.ts";
+import { requireLlmPreflight } from "../llm/preflight.ts";
 import type {
   DiffResult,
   Finding,
@@ -128,6 +129,16 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
     configSource = loaded.source;
     const resolved = config;
     await persist("running");
+
+    // LLM preflight (ADR 0025): runs that will call the model fail here —
+    // before diff (git spawns) and context (parse over changed files) — on
+    // missing consent/key or unusable budgets. Offline/canned review engines
+    // (requiresLlm === false) skip it. Engine/provider gates stay as
+    // defense-in-depth; no new stage is recorded, so a preflight failure
+    // leaves stages at [config completed].
+    if (deps.review.requiresLlm !== false) {
+      requireLlmPreflight({ config: resolved, env: input.env });
+    }
 
     const diffResult = await runStage(
       "diff",

@@ -228,7 +228,7 @@ describe("p3-f03 git query timeouts", () => {
         {
           diff: diffEngine,
           context,
-          review: { review: () => Promise.resolve(emptyReviewResult()) },
+          review: { review: () => Promise.resolve(emptyReviewResult()), requiresLlm: false },
           validation: { validate: () => Promise.resolve([]) },
           publisher: { publish: () => Promise.resolve({ published: 0, skipped: 0, failures: [] }) },
           logger: logger(),

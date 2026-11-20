@@ -148,6 +148,8 @@ export function createFixtureEngines(options: FixtureOptions = {}): FixtureEngin
       },
     },
     review: {
+      // Fixture review never touches the network: canned findings only.
+      requiresLlm: false,
       review: (units) => {
         maybeFail(order, "review", options);
         return Promise.resolve({

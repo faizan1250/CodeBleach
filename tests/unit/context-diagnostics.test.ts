@@ -344,7 +344,7 @@ describe("p3-f02 partial diagnostics", () => {
         {
           diff: diffEngine,
           context,
-          review: { review: () => Promise.resolve(emptyReviewResult()) },
+          review: { review: () => Promise.resolve(emptyReviewResult()), requiresLlm: false },
           validation: { validate: () => Promise.resolve([]) },
           publisher: { publish: () => Promise.resolve({ published: 0, skipped: 0, failures: [] }) },
           logger: logger(),
