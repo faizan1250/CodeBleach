@@ -152,6 +152,74 @@ describe("redact pre-send canaries", () => {
   });
 });
 
+describe("redact spaced and escaped quoted values", () => {
+  test("redacts spaced double-quoted values with balanced quotes", () => {
+    expect(redact('PASSWORD="correct horse battery staple"')).toBe('PASSWORD="[REDACTED]"');
+  });
+
+  test("redacts spaced single-quoted values with balanced quotes", () => {
+    expect(redact("API_KEY='secret value with spaces'")).toBe("API_KEY='[REDACTED]'");
+  });
+
+  test("redacts quoted values across env/json/yaml/ts forms", () => {
+    expect(redact('{"password": "a b c", "user": "bob"}')).toBe(
+      '{"password":"[REDACTED]", "user": "bob"}',
+    );
+    expect(redact('password: "hunter two"')).toBe('password:"[REDACTED]"');
+    expect(redact('const password = "hunter two"')).toBe('const password="[REDACTED]"');
+    expect(redact('USER=bob PASSWORD="correct horse battery staple" TOKEN=abc123')).toBe(
+      'USER=bob PASSWORD="[REDACTED]" TOKEN=[REDACTED]',
+    );
+  });
+
+  test("redacts escaped-quote values without leaking", () => {
+    expect(redact('PASSWORD=\\"secret\\"')).toBe('PASSWORD=\\"[REDACTED]\\"');
+    const spaced = redact('PASSWORD=\\"correct horse battery\\"');
+    expect(spaced).toBe('PASSWORD=\\"[REDACTED]\\"');
+    expect(spaced).not.toContain("correct");
+  });
+
+  test("leaves quoted prose and guarded values alone", () => {
+    expect(redact('cache key="some prose with spaces"')).toBe('cache key="some prose with spaces"');
+    expect(redact('message: "hello world"')).toBe('message: "hello world"');
+    expect(redact('MY_SECRET="12345"')).toBe('MY_SECRET="12345"');
+    expect(redact('password="true"')).toBe('password="true"');
+  });
+
+  test("spaced redaction is idempotent", () => {
+    const sample = 'PASSWORD="correct horse battery staple" TOKEN=abc123';
+    expect(redact(redact(sample))).toBe(redact(sample));
+  });
+});
+
+describe("redact uri and cloud key coverage", () => {
+  test("redacts mongodb/redis/db urls even without embedded credentials", () => {
+    expect(redact("MONGODB_URI=mongodb://app:hunter2@host/db")).toBe("MONGODB_URI=[REDACTED]");
+    expect(redact("MONGODB_URI=mongodb://localhost:27017/app")).toBe("MONGODB_URI=[REDACTED]");
+    expect(redact("PROD_MONGODB_URI=mongodb://localhost:27017/app")).toBe(
+      "PROD_MONGODB_URI=[REDACTED]",
+    );
+    expect(redact("REDIS_URL=redis://localhost:6379")).toBe("REDIS_URL=[REDACTED]");
+    expect(redact("DB_URL=postgres://app:hunter2@db:5432/app")).toBe("DB_URL=[REDACTED]");
+  });
+
+  test("redacts azure account keys bare and in connection strings", () => {
+    expect(redact("AccountKey=c2VjcmV0a2V5dm9ybGQ=")).toBe("AccountKey=[REDACTED]");
+    expect(redact("accountKey=c2VjcmV0a2V5dm9ybGQ=")).toBe("accountKey=[REDACTED]");
+    const conn = redact(
+      "DefaultEndpointsProtocol=https;AccountName=x;AccountKey=s3cr3t-value",
+    );
+    expect(conn).toBe("DefaultEndpointsProtocol=https;AccountName=x;AccountKey=[REDACTED]");
+    expect(conn).not.toContain("s3cr3t-value");
+  });
+
+  test("redacts ado-style server connection strings with no partial leak", () => {
+    const out = redact("ConnectionString=Server=h;User ID=u;Password=s3cr3t-value");
+    expect(out).not.toContain("s3cr3t-value");
+    expect(out).toBe("ConnectionString=[REDACTED];User ID=u;Password=[REDACTED]");
+  });
+});
+
 describe("sanitizePayload", () => {
   test("redacts nested strings and arrays", () => {
     const out = sanitizePayload(
@@ -265,6 +333,45 @@ describe("sanitizePayload", () => {
       totalTokens: 15,
     };
     expect(sanitizePayload(payload)).toEqual(payload);
+  });
+
+  test("drops mongodb/redis/accountkey/db-url keys", () => {
+    expect(
+      sanitizePayload({
+        MONGODB_URI: "mongodb://app:hunter2@host/db",
+        REDIS_URL: "redis://localhost:6379",
+        DB_URL: "postgres://app:hunter2@db:5432/app",
+        AccountKey: "s3cr3t-value",
+        nested: { accountKey: "s3cr3t-value", keep: "yes" },
+      }),
+    ).toEqual({
+      MONGODB_URI: "[REDACTED]",
+      REDIS_URL: "[REDACTED]",
+      DB_URL: "[REDACTED]",
+      AccountKey: "[REDACTED]",
+      nested: { accountKey: "[REDACTED]", keep: "yes" },
+    });
+  });
+
+  test("keeps synthetic secrets out of request/error/diagnostic/artifact shapes", () => {
+    const spaced = "correct horse battery staple";
+    const connSecret = "s3cr3t-value";
+    const request = {
+      system: "prompt",
+      user: redact(`diff line PASSWORD="${spaced}" plus MONGODB_URI=mongodb://a:${connSecret}@h/d`),
+    };
+    const err = sanitizePayload({ err: new Error(`boom PASSWORD="${spaced}" at AccountKey=${connSecret}`) });
+    const diagnostics = sanitizePayload({ password: spaced, note: "plain" });
+    const artifact = sanitizePayload({
+      units: [{ file: "a.ts", diff: `PASSWORD="${spaced}"` }],
+      config: { MONGODB_URI: `mongodb://a:${connSecret}@h/d` },
+    });
+    for (const surface of [request, err, diagnostics, artifact]) {
+      const serialized = JSON.stringify(surface);
+      expect(serialized).not.toContain(spaced);
+      expect(serialized).not.toContain(connSecret);
+    }
+    expect(JSON.stringify(request)).toContain("[REDACTED]");
   });
 
   test("redacts sensitive key variants across separators and casing", () => {

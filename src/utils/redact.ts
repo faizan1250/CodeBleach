@@ -39,6 +39,10 @@ const SENSITIVE_KEYS: ReadonlySet<string> = new Set([
   "signingkey",
   "webhooksecret",
   "databaseurl",
+  "dburl",
+  "mongodburi",
+  "redisurl",
+  "accountkey",
   "connectionstring",
   "opencodeapikey",
 ]);
@@ -54,6 +58,10 @@ const SENSITIVE_SUFFIXES: readonly string[] = [
   "signingkey",
   "webhooksecret",
   "databaseurl",
+  "dburl",
+  "mongodburi",
+  "redisurl",
+  "accountkey",
   "connectionstring",
 ];
 
@@ -110,9 +118,16 @@ const URL_QUERY_SECRET_RE = /([?&])([A-Za-z0-9_.\-~%]+)=([^&\s"'<>]+)/g;
 // Runs after TOKEN_PATTERNS so structured tokens are already gone. The opening
 // value quote is consumed and the original closing quote stays, so quoted JSON
 // keeps balanced quotes; `]` stays in the value class so a second pass sees
-// the full `[REDACTED]` sentinel and stops.
+// the full `[REDACTED]` sentinel and stops. Quoted values may contain spaces
+// (`PASSWORD="correct horse battery staple"`); an optional backslash before
+// the quotes covers escaped `\"secret\"` forms. Only sensitive keys redact,
+// so quoted prose under other keys is untouched. Known limits (by design, not
+// bugs): infix names (`X_MONGODB_URI_BACKUP`) and affixed shapes like
+// `MY_API_KEY_SUFFIX` match no rule; bare `key` alone stays non-sensitive.
+// No pattern set detects every secret shape — this is layered redaction,
+// not a universal-detection claim.
 const ASSIGNMENT_SECRET_RE =
-  /(^|[\s{,;("'])(["']?)([A-Za-z0-9_.-]+)(["']?)\s*([:=])\s*(["']?)([^"'\s,};&]+)/gim;
+  /(^|[\s{,;("'])(["']?)([A-Za-z0-9_.-]+)(["']?)\s*([:=])\s*(?:(\\?")((?:\\.|[^"\\])*?)(\\?")|(\\?')((?:\\.|[^'\\])*?)(\\?')|(["']?)([^"'\s,};&]+))/gim;
 
 /** Replace exact secrets (longest first) and known token patterns with [REDACTED]. */
 export function redact(text: string, extraSecrets: string[] = []): string {
@@ -145,16 +160,31 @@ export function redact(text: string, extraSecrets: string[] = []): string {
       key: string,
       closeKey: string,
       sep: string,
-      openValue: string,
-      value: string,
+      dqOpen: string | undefined,
+      dqValue: string | undefined,
+      dqClose: string | undefined,
+      sqOpen: string | undefined,
+      sqValue: string | undefined,
+      sqClose: string | undefined,
+      uqOpen: string,
+      uqValue: string,
     ) => {
+      const openValue = dqValue !== undefined ? (dqOpen as string) : sqValue !== undefined ? (sqOpen as string) : uqOpen;
+      const value =
+        dqValue !== undefined ? dqValue : sqValue !== undefined ? (sqValue as string) : uqValue;
+      const closeValue =
+        dqValue !== undefined
+          ? (dqClose as string)
+          : sqValue !== undefined
+            ? (sqClose as string)
+            : "";
       if (value === REDACTED || !isSensitiveAssignmentKey(key)) return match;
       if (NON_SECRET_VALUES.test(value)) return match;
       // Whole-key hits (password, api_key, ...) always redact, even for
       // numeric-only values; the alpha guard stays for segment-only hits
       // (MY_SECRET, tokenCount) to preserve numeric telemetry.
       if (!isSensitiveKey(key) && !/[A-Za-z]/.test(value)) return match;
-      return `${pre}${openKey}${key}${closeKey}${sep}${openValue}[REDACTED]`;
+      return `${pre}${openKey}${key}${closeKey}${sep}${openValue}[REDACTED]${closeValue}`;
     },
   );
   return out;
