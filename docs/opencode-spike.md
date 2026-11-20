@@ -1,9 +1,10 @@
 # OpenCode Go + Muse Spark 1.3 Contributor spike (P4-00, verified 2026-11-20)
 
 Date: 2026-11-20. Status: **endpoint verified — two live generic smokes succeed**
-(same result during P4-00 review round 2 and the P4-01 re-verify). No provider
-code exists yet; `OPENCODE_RESPONSES_ENDPOINT` is pinned from the authenticated
-`base_url` in P4-01 (ADR 0016).
+(same result during P4-00 review round 2 and the P4-01 re-verify). Provider
+code has landed since P4-02 (`src/providers/opencode.ts`); the endpoint below
+is pinned in `src/llm/constants.ts` from the authenticated catalog `base_url`
+(ADR 0016).
 
 ## Official docs checked (2026-11-20)
 
@@ -139,7 +140,7 @@ Spike harness is Bun-native `fetch` + `AbortSignal.timeout`; pure helpers covere
 `tests/unit/opencode-spike.test.ts` (10 tests, offline, no secrets). Live smoke
 result: **succeeds** (endpoint accepted; output incomplete-due-to-cap as above).
 
-## P4-10 close-out (2026-11-20, no live calls)
+## P4-10 close-out (2026-11-20)
 
 Phase 4 is frozen (ADR 0020). The endpoint above is pinned in
 `src/llm/constants.ts`; structured-output-off text path, response-text
@@ -155,17 +156,22 @@ The recorded quality signal is the deterministic mock seeded-bug smoke
 line with verbatim evidence, clean control silent, fingerprint stable. It
 proves the prompt→parse→normalize pipeline, not model bug-detection
 capability — no live model finding is claimed.
-No live seeded-bug smoke was run; no secrets or raw prompts/responses were committed.
+One live seeded-bug smoke run completed during P4 hardening (status
+`complete`, usage in 2710 / out 1033 / reasoning 1003 / cost 0, zero
+findings cited — live path proven, no detection claim; ledger item 1).
+No secrets or raw prompts/responses were committed.
 The P4-00 record above is unchanged.
 
 ## Verification ledger (P4 hardening)
 
 Each item carries exactly one evidence class. Mock transport is never cited
-as live proof, and the mock seeded-bug smoke is never cited as model
-bug-detection proof.
+as live proof, the mock seeded-bug smoke is never cited as model
+bug-detection proof, and zero findings on a single live run are never cited
+as detection proof — one sample proves the path, not capability.
 
-1. Live authenticated, verified (P4-00, two generic smokes 2026-11-20):
-   catalog `api.responses.base_url` for `opencode-go` /
+1. Live, executed:
+   - Generic (P4-00, two smokes 2026-11-20): catalog
+   `api.responses.base_url` for `opencode-go` /
    `muse-spark-1.3-contributor`; pinned Responses endpoint (path appended
    exactly once); bearer auth accepted (HTTP 200 on catalog + inference);
    `User-Agent: codebleach/<version>` and one stable opaque
@@ -174,6 +180,13 @@ bug-detection proof.
    `incomplete: max_output_tokens` at a 64-token cap — reasoning consumption
    of the output cap observed live, and the incomplete-vs-parse-failure
    split grounded in that observation.
+   - Seeded-bug (P4 hardening, one run 2026-11-20):
+   `tests/live/review-live-smoke.test.ts` (`CODEBLEACH_LIVE_SMOKE=1`,
+   manual-only under Not-ZDR terms, ADR 0023) returned status `complete`
+   with usage input 2710 / output 1033 / reasoning 1003 / cost 0 and zero
+   findings cited. Proven: the live seeded-bug path completes end to end,
+   and usage/cost capture works on a completed response. Not proven: model
+   bug-detection capability (n=1, zero findings, no detection claim).
 
 2. Mock transport, verified (`tests/unit/opencode-provider.test.ts`,
    `tests/unit/review-result.test.ts`, `tests/unit/review-deadlines.test.ts`):
@@ -196,18 +209,17 @@ bug-detection proof.
    network-free paths.
 
 4. Not verified anywhere: any authenticated `limit.*` value;
-   completed-response prose text beyond parsed findings (one completed live
-   seeded-bug smoke run, P4 hardening 2026-11-20, returned status complete
-   with usage input 2710 / output 1033 / reasoning 1003 / cost 0 and zero
-   findings cited — path proven, no detection claim); native JSON-schema
+   completed-response prose text beyond parsed findings; native JSON-schema
    structured output against this endpoint; `allowance`/`billing_source`
    beyond diagnostic `raw` (parsed but unasserted, unsurfaced); any live
-   model-identified defect.
+   model-identified defect. (The single completed live seeded-bug run is
+   ledger item 1, not evidence for anything listed here.)
 
-5. Deferred (explicitly not attempted in Phase 4): completed live smoke
-   with a larger cap; live usage/cost/allowance capture on completion;
-   structured-output support; runtime catalog tightening of local limits (local
-   hard limits govern unless a verified source is plumbed in, ADR 0022).
+5. Deferred (explicitly not attempted in Phase 4): broader
+   completed-response sampling beyond the single seeded-bug run; live
+   allowance capture on completion; structured-output support; runtime
+   catalog tightening of local limits (local hard limits govern unless a
+   verified source is plumbed in, ADR 0022).
    Correction (P4 hardening, ADR 0023): the live seeded-bug smoke harness
    now exists (`tests/live/review-live-smoke.test.ts`, `CODEBLEACH_LIVE_SMOKE=1`,
    manual-only under Not-ZDR terms); single-sample runs prove the live path,
@@ -216,14 +228,17 @@ bug-detection proof.
 ## Remaining blockers (current status, P4 hardening)
 
 Phase 4 shipped against the pinned endpoint with mock-transport coverage.
-Still open, live-only or deferred: a *completed* (non-incomplete) live
-smoke with a larger cap — no completed-response text, usage, cost,
-allowance, or billing-source value has ever been observed live;
-authenticated `limit.*` values (local hard limits govern per ADR 0022;
-validated catalog metadata could only tighten them); structured-output
-support (decided off, never probed against this endpoint); live seeded-bug
-smoke harness exists but runs manual-only under Not-ZDR terms (ADR 0023;
-one completed run observed, zero findings cited — no detection claim).
+Still open, live-only or deferred: broader completed-response sampling
+beyond the single live seeded-bug run — that run observed usage in 2710 /
+out 1033 / reasoning 1003 / cost 0 with zero findings, so usage/cost
+capture on completion is proven once, not characterized; completed-response
+prose text beyond parsed findings; allowance / billing-source values beyond
+diagnostic `raw`; authenticated `limit.*` values (local hard limits govern
+per ADR 0022; validated catalog metadata could only tighten them);
+structured-output support (decided off, never probed against this
+endpoint). Live seeded-bug smoke harness exists but runs manual-only under
+Not-ZDR terms (ADR 0023); single-sample runs prove the live path, not
+model bug-detection capability.
 Covered by mock transport, not live: retry/timeout/abort/`Retry-After`
 mapping, status-code mapping, and the incomplete-vs-parse-failure split
 with one bounded cap escalation. No model/provider fallback is proposed
