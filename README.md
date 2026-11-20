@@ -70,8 +70,10 @@ bun test tests/integration/review-seeded-smoke.test.ts
 
 A synthetic seeded defect plus a clean control run through the real prompt,
 provider parsing, and normalization with a scripted provider: no network, no
-key, no training opt-in needed. No live seeded-bug smoke was run in Phase 4
-(synthetic prompts may still train future models under the Not-ZDR terms).
+key, no training opt-in needed. An opt-in live counterpart
+(`tests/live/review-live-smoke.test.ts`, `CODEBLEACH_LIVE_SMOKE=1`,
+manual-only, Not-ZDR) runs the same shape against the live model; see
+`docs/live-smoke.md`. Neither smoke is a precision/recall benchmark.
 
 ## Docs
 

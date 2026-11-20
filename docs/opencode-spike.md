@@ -195,18 +195,23 @@ bug-detection proof.
    fingerprint stable); `--no-llm` preview and `--demo --dry-run`
    network-free paths.
 
-4. Not verified anywhere: any authenticated `limit.*` value; any
-   completed-response text, usage, cost, allowance, or billing-source value
-   observed live; native JSON-schema structured output against this
-   endpoint; `allowance`/`billing_source` beyond diagnostic `raw` (parsed
-   but unasserted, unsurfaced); any live model-identified defect — no live
-   seeded-bug review was ever run.
+4. Not verified anywhere: any authenticated `limit.*` value;
+   completed-response prose text beyond parsed findings (one completed live
+   seeded-bug smoke run, P4 hardening 2026-11-20, returned status complete
+   with usage input 2710 / output 1033 / reasoning 1003 / cost 0 and zero
+   findings cited — path proven, no detection claim); native JSON-schema
+   structured output against this endpoint; `allowance`/`billing_source`
+   beyond diagnostic `raw` (parsed but unasserted, unsurfaced); any live
+   model-identified defect.
 
 5. Deferred (explicitly not attempted in Phase 4): completed live smoke
    with a larger cap; live usage/cost/allowance capture on completion;
-   structured-output support; live seeded-bug smoke (Not-ZDR training
-   terms, ADR 0020); runtime catalog tightening of local limits (local
+   structured-output support; runtime catalog tightening of local limits (local
    hard limits govern unless a verified source is plumbed in, ADR 0022).
+   Correction (P4 hardening, ADR 0023): the live seeded-bug smoke harness
+   now exists (`tests/live/review-live-smoke.test.ts`, `CODEBLEACH_LIVE_SMOKE=1`,
+   manual-only under Not-ZDR terms); single-sample runs prove the live path,
+   not model bug-detection capability.
 
 ## Remaining blockers (current status, P4 hardening)
 
@@ -217,7 +222,8 @@ allowance, or billing-source value has ever been observed live;
 authenticated `limit.*` values (local hard limits govern per ADR 0022;
 validated catalog metadata could only tighten them); structured-output
 support (decided off, never probed against this endpoint); live seeded-bug
-smoke (deferred under Not-ZDR terms per ADR 0020, not merely pending).
+smoke harness exists but runs manual-only under Not-ZDR terms (ADR 0023;
+one completed run observed, zero findings cited — no detection claim).
 Covered by mock transport, not live: retry/timeout/abort/`Retry-After`
 mapping, status-code mapping, and the incomplete-vs-parse-failure split
 with one bounded cap escalation. No model/provider fallback is proposed
