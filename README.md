@@ -18,6 +18,26 @@ bun install --frozen-lockfile
 bun run check   # typecheck + tests
 ```
 
+## Review
+
+```bash
+# Live review (sends repo code to Muse Spark 1.3 Contributor)
+OPENCODE_API_KEY=... CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING=true \
+  bun run src/cli/index.ts review --base <sha> --head <sha> --dry-run
+
+# Offline preview: diff + context only, no model calls, no key needed
+bun run src/cli/index.ts review --base <sha> --head <sha> --dry-run --no-llm
+```
+
+Muse Spark 1.3 Contributor is not zero-data-retention: prompts/completions
+may train future models. Live review requires `OPENCODE_API_KEY` plus the
+explicit `CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING=true` opt-in (and the
+workspace training-data toggle). `--dry-run` alone still calls the model;
+add `--no-llm` for a network-free preview that records review/validation as
+skipped and exits 0. Findings are validated in Phase 5; until then a live
+run ends at the validation stub with review results retained in
+`.reviewer-out/run.json`.
+
 ## Demo (offline, no network or secrets)
 
 ```bash
