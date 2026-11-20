@@ -102,8 +102,8 @@ describe("review prompt instructions", () => {
       "findings",
       "evidence",
       "quote",
-      "ruleId",
-      "introducedByPr",
+      "ruleid",
+      "introducedbypr",
       "confidence",
       "style",
     ]) {
@@ -114,13 +114,15 @@ describe("review prompt instructions", () => {
   test("empty findings are valid and model metadata is code-owned", () => {
     const template = loadCodeReviewTemplate().toLowerCase();
     expect(template).toContain("findings");
-    expect(template).toContain("no finding");
+    expect(template).toContain("zero findings");
   });
 });
 
 describe("review prompt categories", () => {
   test("maps every enabled config category and never invents convention", () => {
-    const all = enabledFindingCategories(configWith({}));
+    const all = enabledFindingCategories(
+      configWith({ bugs: true, security: true, performance: true, concurrency: true }),
+    );
     expect(all).toContain("bug");
     expect(all).toContain("security");
     expect(all).toContain("performance");
@@ -199,12 +201,15 @@ describe("review prompt serialization", () => {
       configWith({}),
     );
     expect(hostile.system).toBe(clean.system);
-    expect(hostile.user).toContain(evil);
+    // JSON-escaped inside a string value: present as data, never as structure.
+    expect(hostile.user).toContain(evil.split('"').join('\\"'));
     const payload = JSON.parse(
       hostile.user.slice(hostile.user.indexOf("{")),
     ) as Record<string, unknown>;
     const data = payload["reviewUnit"] as Record<string, unknown>;
-    expect(JSON.stringify(data)).toContain(evil);
+    const context = data["context"] as Array<Record<string, unknown>>;
+    expect(context[0]?.["text"]).toBe(evil);
+    expect(context[0]?.["reason"]).toBe(evil);
   });
 });
 
