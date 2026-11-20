@@ -213,9 +213,13 @@ describe("review engine orchestration", () => {
     await tick();
     await tick();
     expect(provider.calls).toHaveLength(3);
+    provider.resolveNext();
+    await tick();
+    await tick();
+    expect(provider.calls).toHaveLength(4);
+    expect(provider.maxInFlight).toBeLessThanOrEqual(2);
     provider.resolveAllReverse();
     await pending;
-    expect(provider.maxInFlight).toBeLessThanOrEqual(2);
   });
 
   test("skips over-budget units without provider calls", async () => {
@@ -235,7 +239,7 @@ describe("review engine orchestration", () => {
       ],
     });
     const provider = new FakeProvider([{ respond: { findings: [rawFinding()] } }]);
-    const findings = await engineFor(provider).review([big], configWith());
+    const findings = await engineFor(provider).review([big], configWith({ max_review_unit_input_tokens: 2000 }));
     expect(provider.calls).toHaveLength(0);
     expect(findings).toEqual([]);
   });
@@ -258,7 +262,10 @@ describe("review engine orchestration", () => {
       ],
     });
     const provider = new FakeProvider([{ respond: { findings: [rawFinding()] } }]);
-    const findings = await engineFor(provider).review([big, unit({ id: "u-small" })], configWith());
+    const findings = await engineFor(provider).review(
+      [big, unit({ id: "u-small" })],
+      configWith({ max_review_unit_input_tokens: 2000 }),
+    );
     expect(provider.calls).toHaveLength(1);
     expect(findings).toHaveLength(1);
     expect(findings[0]!.origin.unitId).toBe("u-small");
