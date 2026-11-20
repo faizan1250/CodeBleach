@@ -60,7 +60,20 @@ abbrevs; the CLI resolves each to a full commit SHA via
 `INVALID_INPUT`; missing objects are `GIT_FAILED` with a fetch hint.
 Exit codes: `0` ok, `1` Git/parse failure, `2` config/usage error.
 
+## Quality smoke (deterministic, offline)
+
+```bash
+bun test tests/integration/review-seeded-smoke.test.ts
+```
+
+A synthetic seeded defect plus a clean control run through the real prompt,
+provider parsing, and normalization with a scripted provider: no network, no
+key, no training opt-in needed. No live seeded-bug smoke was run in Phase 4
+(synthetic prompts may still train future models under the Not-ZDR terms).
+
 ## Docs
 
 - Architecture: `systemdesign.md`
 - Phase 1 plan: `implementation.md`
+- Phase 4 plan: `implementation-phase4.md`
+- Decisions: `docs/adr/` (Phase 4 freeze: `0020-phase4-freeze.md`)
