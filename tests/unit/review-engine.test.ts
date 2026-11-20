@@ -151,7 +151,7 @@ async function tick(): Promise<void> {
 describe("review engine orchestration", () => {
   test("sends one prompt-v1 request per unit and returns empty findings", async () => {
     const provider = new FakeProvider([{ respond: { findings: [] } }]);
-    const findings = await engineFor(provider).review([unit()], configWith());
+    const { findings } = await engineFor(provider).review([unit()], configWith());
     expect(findings).toEqual([]);
     expect(provider.calls).toHaveLength(1);
     const call = provider.calls[0]!;
@@ -171,13 +171,13 @@ describe("review engine orchestration", () => {
     ]);
     const engine = engineFor(provider);
     const input = unit();
-    const [first] = await engine.review([input], configWith());
+    const [first] = (await engine.review([input], configWith())).findings;
     expect(first!.symbol).toBe("check");
     expect(first!.origin).toEqual({ pass: "code-review-v1", unitId: input.id });
     expect(first!.headSha).toBe("head-abc");
     expect(first!.id).toMatch(/^[0-9a-f-]{36}$/);
     expect(first!.fingerprint).toMatch(/^[0-9a-f]{40}$/);
-    const [second] = await engine.review([input], configWith());
+    const [second] = (await engine.review([input], configWith())).findings;
     expect(second!.fingerprint).toBe(first!.fingerprint);
     expect(second!.id).not.toBe(first!.id);
   });
@@ -195,7 +195,7 @@ describe("review engine orchestration", () => {
     await tick();
     expect(provider.calls).toHaveLength(3);
     provider.resolveAllReverse();
-    const findings = await pending;
+    const { findings } = await pending;
     expect(findings.map((finding) => finding.title)).toEqual(["finding-1", "finding-2", "finding-3"]);
     expect(findings.map((finding) => finding.origin.unitId)).toEqual(["u-1", "u-2", "u-3"]);
   });
@@ -239,7 +239,7 @@ describe("review engine orchestration", () => {
       ],
     });
     const provider = new FakeProvider([{ respond: { findings: [rawFinding()] } }]);
-    const findings = await engineFor(provider).review([big], configWith({ max_review_unit_input_tokens: 2000 }));
+    const { findings } = await engineFor(provider).review([big], configWith({ max_review_unit_input_tokens: 2000 }));
     expect(provider.calls).toHaveLength(0);
     expect(findings).toEqual([]);
   });
@@ -262,7 +262,7 @@ describe("review engine orchestration", () => {
       ],
     });
     const provider = new FakeProvider([{ respond: { findings: [rawFinding()] } }]);
-    const findings = await engineFor(provider).review(
+    const { findings } = await engineFor(provider).review(
       [big, unit({ id: "u-small" })],
       configWith({ max_review_unit_input_tokens: 2000 }),
     );
@@ -284,7 +284,7 @@ describe("review engine orchestration", () => {
       id: "u-bad",
       symbol: { name: "bad", kind: "function", startLine: 8, endLine: 14, changedLines: [9] },
     });
-    const findings = await engineFor(provider).review([good, bad], configWith());
+    const { findings } = await engineFor(provider).review([good, bad], configWith());
     expect(findings.map((finding) => finding.title)).toEqual(["good bug"]);
     expect(findings[0]!.origin.unitId).toBe("u-good");
   });
@@ -305,7 +305,7 @@ describe("review engine orchestration", () => {
 
   test("returns empty without provider calls for zero units", async () => {
     const provider = new FakeProvider([{ respond: { findings: [] } }]);
-    const findings = await engineFor(provider).review([], configWith());
+    const { findings } = await engineFor(provider).review([], configWith());
     expect(findings).toEqual([]);
     expect(provider.calls).toHaveLength(0);
   });
@@ -334,7 +334,7 @@ describe("review engine orchestration", () => {
 
   test("returns empty for zero units without the training opt-in", async () => {
     const provider = new FakeProvider([{ respond: { findings: [] } }]);
-    const findings = await engineFor(provider, {}).review([], configWith());
+    const { findings } = await engineFor(provider, {}).review([], configWith());
     expect(findings).toEqual([]);
     expect(provider.calls).toHaveLength(0);
   });

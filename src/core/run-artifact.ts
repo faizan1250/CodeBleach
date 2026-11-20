@@ -10,6 +10,11 @@ import type {
   ReviewUnit,
   ValidatedFinding,
 } from "../types/index.ts";
+import type {
+  ReviewDiagnostic,
+  ReviewStatus,
+  ReviewUsage,
+} from "../types/review.ts";
 import type { ConfigSource, StageResult } from "./contracts.ts";
 
 export const RUN_ARTIFACT_SCHEMA_VERSION = 1;
@@ -36,6 +41,15 @@ export interface RunArtifact {
   contextStatus: "complete" | "partial" | "failed" | null;
   contextDiagnostics: ContextBuildDiagnostics | null;
   findings: Finding[];
+  reviewStatus: ReviewStatus | null;
+  reviewPromptVersion: string | null;
+  reviewPromptHash: string | null;
+  reviewModel: string | null;
+  reviewUnitsSubmitted: number | null;
+  reviewUnitsReviewed: number | null;
+  reviewUnitsFailed: number | null;
+  reviewUsage: ReviewUsage | null;
+  reviewDiagnostics: ReviewDiagnostic[] | null;
   validated: ValidatedFinding[];
   publishResult: PublishResult | null;
   error?: SerializedError | undefined;

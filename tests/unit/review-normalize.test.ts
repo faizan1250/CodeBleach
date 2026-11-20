@@ -277,7 +277,7 @@ describe("engine normalization", () => {
       env: { ...OPT_IN },
       headSha: "head-abc",
     });
-    const findings = await engine.review([unit()], configWith());
+    const { findings } = await engine.review([unit()], configWith());
     expect(findings).toHaveLength(1);
     expect(findings[0]?.title).toBe("Real bug here");
     expect(findings[0]?.file).toBe("src/auth.ts");
@@ -293,7 +293,7 @@ describe("engine normalization", () => {
       env: { ...OPT_IN },
       headSha: "head-abc",
     });
-    await expect(engine.review([unit()], configWith())).resolves.toEqual([]);
+    await expect(engine.review([unit()], configWith()).then((result) => result.findings)).resolves.toEqual([]);
   });
 
   test("ids differ between runs while fingerprints stay stable", async () => {
@@ -307,8 +307,8 @@ describe("engine normalization", () => {
       env: { ...OPT_IN },
       headSha: "head-abc",
     });
-    const first = await engine.review([unit()], configWith());
-    const second = await engine.review([unit()], configWith());
+    const first = (await engine.review([unit()], configWith())).findings;
+    const second = (await engine.review([unit()], configWith())).findings;
     expect(first[0]?.fingerprint).toBe(second[0]?.fingerprint);
     expect(first[0]?.id).not.toBe(second[0]?.id);
   });
@@ -328,7 +328,7 @@ describe("engine normalization", () => {
       env: { ...OPT_IN },
       headSha: "head-abc",
     });
-    const [finding] = await engine.review([unit({ id: "u-9" })], configWith());
+    const [finding] = (await engine.review([unit({ id: "u-9" })], configWith())).findings;
     expect(provider.calls).toHaveLength(2);
     expect(finding?.headSha).toBe("head-abc");
     expect(finding?.origin).toEqual({ pass: "code-review-v1", unitId: "u-9" });
