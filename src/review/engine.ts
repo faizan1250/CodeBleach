@@ -160,6 +160,20 @@ export class ReviewEngineImpl implements ReviewEngine {
       const limit = Math.max(1, config.llm.max_concurrent_requests);
       const out: UnitOutcome[] = new Array(units.length);
       let next = 0;
+      // First fatal wins: recorded once, then the internal stage aborts so
+      // in-flight provider calls cancel and queued units never start. The
+      // caller's signal is never touched. Siblings drain via allSettled
+      // below; the stored error is rethrown only after every worker lands.
+      let fatalError: unknown;
+      const hasFatal = (): boolean => fatalError !== undefined;
+      const throwIfFatal = (): void => {
+        if (fatalError !== undefined) throw fatalError;
+      };
+      const failFast = (error: unknown): void => {
+        if (fatalError !== undefined) return;
+        fatalError = error;
+        if (!stage.signal.aborted) stage.abort(error);
+      };
       const stopped = (): "cancelled" | "deadline" | null => {
         if (callerSignal?.aborted === true) return "cancelled";
         if (deadlineFired || stage.signal.aborted) return "deadline";
@@ -167,25 +181,50 @@ export class ReviewEngineImpl implements ReviewEngine {
       };
       const workers = Array.from({ length: Math.min(limit, units.length) }, async () => {
         for (;;) {
-          if (stopped() !== null) return;
+          if (hasFatal() || stopped() !== null) return;
           const index = next;
           next += 1;
           if (index >= units.length) return;
+          // A fatal landing between claim and start leaves the slot empty;
+          // the post-drain rethrow discards all partial worker state.
+          if (hasFatal()) return;
           const unit = units[index];
           if (unit === undefined) {
             out[index] = { ok: true, findings: [], diagnostics: [], usage: emptyReviewUsage() };
             continue;
           }
           try {
-            out[index] = await this.reviewUnit(unit, config, stage.signal, stopped, headSha);
+            const outcome = await this.reviewUnit(
+              unit,
+              config,
+              stage.signal,
+              stopped,
+              headSha,
+              throwIfFatal,
+            );
+            // A sibling's fatal discards even a successful late outcome.
+            if (hasFatal()) return;
+            out[index] = outcome;
           } catch (error) {
             // Policy errors abort the whole run; per-unit failures stay partial.
-            if (error instanceof ReviewerError && error.code === "CONFIG_INVALID") throw error;
+            if (error instanceof ReviewerError && error.code === "CONFIG_INVALID") {
+              // A run already stopped by caller/deadline keeps its stop
+              // outcome; only the first live fatal aborts the stage.
+              if (!hasFatal() && stopped() === null) failFast(error);
+              else if (!hasFatal()) {
+                out[index] = this.unitFailure(unit, error, emptyReviewUsage(), stopCode(stopped()));
+              }
+              return;
+            }
+            if (hasFatal()) return;
             out[index] = this.unitFailure(unit, error, emptyReviewUsage(), stopCode(stopped()));
           }
         }
       });
-      await Promise.all(workers);
+      // Drain every worker before leaving: aborted siblings must land so no
+      // provider call outlives the rejection and the timer clears exactly once.
+      await Promise.allSettled(workers);
+      if (fatalError !== undefined) throw fatalError;
       // Units never claimed after a stop keep stable order with a skip diagnostic.
       for (let index = 0; index < units.length; index += 1) {
         if (out[index] === undefined) {
@@ -212,6 +251,7 @@ export class ReviewEngineImpl implements ReviewEngine {
     signal: AbortSignal,
     stopped: () => StopReason,
     headSha: string,
+    throwIfFatal: () => void,
   ): Promise<UnitOutcome> {
     const built = buildReviewPrompt(unit, config);
     // Pre-request enforcement: the effective input ceiling is the configured
@@ -246,7 +286,10 @@ export class ReviewEngineImpl implements ReviewEngine {
     const usage = emptyReviewUsage();
     const firstMax = config.llm.max_output_tokens;
     try {
+      // A sibling's fatal between claim and send must not start new work.
+      throwIfFatal();
       const first = await this.completeUnit(unit, built, config, firstMax, usage, signal, headSha);
+      throwIfFatal();
       return { ok: true, findings: first.findings, diagnostics: first.diagnostics, usage };
     } catch (error) {
       if (error instanceof ReviewerError && error.code === "CONFIG_INVALID") throw error;
@@ -265,6 +308,8 @@ export class ReviewEngineImpl implements ReviewEngine {
       const escalated = Math.min(MODEL_MAX_OUTPUT_TOKENS, firstMax * 2, capByContext);
       if (escalated <= firstMax) return this.unitFailure(unit, error, usage, "REVIEW_OUTPUT_INCOMPLETE");
       usage.incompleteRetries += 1;
+      // Escalation is a second provider call; never starts after a fatal.
+      throwIfFatal();
       try {
         const second = await this.completeUnit(unit, built, config, escalated, usage, signal, headSha);
         return { ok: true, findings: second.findings, diagnostics: second.diagnostics, usage };
