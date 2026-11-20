@@ -14,11 +14,16 @@ const TOKEN_PATTERNS: RegExp[] = [
   /Bearer\s+[A-Za-z0-9\-._~+/=]+/g,
   /Basic\s+[A-Za-z0-9+/=]{8,}/g,
   /sk-[A-Za-z0-9_-]{8,}/g,
+  // DB connection strings with embedded credentials (user:pass@host). The
+  // `@` requirement keeps credential-less `postgres://localhost/db` prose
+  // intact; assigned forms are covered by the DATABASE_URL key rules below.
+  /\b(postgres(ql)?|mysql|mariadb|mongodb(\+srv)?|rediss?|amqp|sqlserver):\/\/[^/\s"'<>]*@[^\s"'<>]+/g,
 ];
 
 const SENSITIVE_KEYS: ReadonlySet<string> = new Set([
   "token",
   "password",
+  "passwd",
   "secret",
   "authorization",
   "privatekey",
@@ -28,11 +33,29 @@ const SENSITIVE_KEYS: ReadonlySet<string> = new Set([
   "authtoken",
   "accesstoken",
   "refreshtoken",
+  "accesskey",
+  "credential",
+  "credentials",
+  "signingkey",
+  "webhooksecret",
+  "databaseurl",
+  "connectionstring",
   "opencodeapikey",
 ]);
 
 // Normalized suffixes covering prefixed variants such as OPENCODE_API_KEY.
-const SENSITIVE_SUFFIXES: readonly string[] = ["apikey", "apisecret", "apitoken"];
+const SENSITIVE_SUFFIXES: readonly string[] = [
+  "apikey",
+  "apisecret",
+  "apitoken",
+  "accesskey",
+  "credential",
+  "credentials",
+  "signingkey",
+  "webhooksecret",
+  "databaseurl",
+  "connectionstring",
+];
 
 function normalizeKey(key: string): string {
   return key.toLowerCase().replace(/[\s_-]/g, "");

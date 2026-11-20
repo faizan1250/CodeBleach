@@ -62,6 +62,37 @@ describe("redact pre-send canaries", () => {
     expect(redact("auth Basic dXNlcjpwYXNzd29yZA== end")).toBe("auth [REDACTED] end");
   });
 
+  test("redacts database connection strings with credentials", () => {
+    expect(redact("connect postgres://app:hunter2@db.internal:5432/appdb now")).toBe(
+      "connect [REDACTED] now",
+    );
+    expect(redact("u mysql://app:hunter2@db:3306/app end")).toBe("u [REDACTED] end");
+    expect(redact("u mongodb+srv://app:hunter2@cluster0.x/app end")).toBe("u [REDACTED] end");
+  });
+
+  test("leaves credential-less database urls in prose alone", () => {
+    expect(redact("uses postgres://localhost/mydb locally")).toBe(
+      "uses postgres://localhost/mydb locally",
+    );
+  });
+
+  test("redacts database-url and phase-4 assignment keys", () => {
+    expect(redact("DATABASE_URL=postgres://app:hunter2@db:5432/app")).toBe(
+      "DATABASE_URL=[REDACTED]",
+    );
+    expect(redact("DATABASE_URL=postgres://localhost/mydb")).toBe("DATABASE_URL=[REDACTED]");
+    expect(redact("PROD_DATABASE_URL=postgres://localhost/mydb")).toBe(
+      "PROD_DATABASE_URL=[REDACTED]",
+    );
+    expect(redact("access_key=hunter2")).toBe("access_key=[REDACTED]");
+    expect(redact("access_key=12345678")).toBe("access_key=[REDACTED]");
+    expect(redact("credential: hunter2")).toBe("credential:[REDACTED]");
+    expect(redact("signing_key=hunter2")).toBe("signing_key=[REDACTED]");
+    expect(redact("webhook_secret=hunter2")).toBe("webhook_secret=[REDACTED]");
+    expect(redact("passwd=hunter2")).toBe("passwd=[REDACTED]");
+    expect(redact("connectionString: hunter2")).toBe("connectionString:[REDACTED]");
+  });
+
   test("redacts secrets in url query strings", () => {
     expect(redact("https://x.test/cb?api_key=SECRET123&b=1")).toBe(
       "https://x.test/cb?api_key=[REDACTED]&b=1",
@@ -98,6 +129,8 @@ describe("redact pre-send canaries", () => {
       "MY_SECRET=hunter2",
       '{"api_key": "abc123"}',
       "auth Basic dXNlcjpwYXNzd29yZA== end",
+      "connect postgres://app:hunter2@db.internal:5432/appdb now",
+      "DATABASE_URL=postgres://localhost/mydb",
     ];
     for (const sample of samples) {
       expect(redact(redact(sample))).toBe(redact(sample));
@@ -108,6 +141,8 @@ describe("redact pre-send canaries", () => {
     expect(redact("usage inputTokens: 10 outputTokens: 5")).toBe(
       "usage inputTokens: 10 outputTokens: 5",
     );
+    expect(redact("database: myapp")).toBe("database: myapp");
+    expect(redact("url=https://example.com/x")).toBe("url=https://example.com/x");
     expect(redact("max_tokens: 50 max_tokens_per_unit: 12000")).toBe(
       "max_tokens: 50 max_tokens_per_unit: 12000",
     );
@@ -150,6 +185,23 @@ describe("sanitizePayload", () => {
     expect(sanitizePayload({ tokenCount: 3, nested: { MY_SECRET: "x" } })).toEqual({
       tokenCount: 3,
       nested: { MY_SECRET: "[REDACTED]" },
+    });
+  });
+
+  test("drops database-url and credential keys", () => {
+    expect(
+      sanitizePayload({
+        DATABASE_URL: "postgres://app:hunter2@db:5432/app",
+        nested: { credential: "x", credentials: "y", signingKey: "z", access_key: "k" },
+      }),
+    ).toEqual({
+      DATABASE_URL: "[REDACTED]",
+      nested: {
+        credential: "[REDACTED]",
+        credentials: "[REDACTED]",
+        signingKey: "[REDACTED]",
+        access_key: "[REDACTED]",
+      },
     });
   });
 
