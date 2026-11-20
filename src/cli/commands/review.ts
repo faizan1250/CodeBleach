@@ -193,6 +193,14 @@ async function runEngines(
     );
     if (options.noLlm && !options.demo) {
       console.log("offline preview: no model review or validation occurred (--no-llm)");
+    } else if (options.dryRun && !options.demo) {
+      // --dry-run alone still calls the model; only --no-llm is offline.
+      const validation = summary.stages.find((stage) => stage.name === "validation");
+      if (validation?.status === "skipped") {
+        console.log(
+          `dry-run: live model review ran; validation skipped (${validation.reason ?? "skipped"}); findings unvalidated, nothing published`,
+        );
+      }
     }
     return 0;
   } catch (error) {

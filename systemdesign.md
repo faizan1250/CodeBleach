@@ -341,7 +341,7 @@ Behavior: missing file → defaults. Invalid file → `ConfigError` (CLI exit 2)
 
 Optional `review.max_file_size_kb` (default 500 KB, absolute ceiling 26623 KB, ADRs 0007, 0009) is measured from the head-commit blob; over-limit files skip with `"too-large"`. An accepted blob plus its 1-byte growth sentinel must fit the 26 MiB per-stream blob-read cap, so values above the ceiling are rejected at config load. Configured glob fields are validated against the documented `*`/`**`/`**/`/`?` subset at load time.
 
-Optional `context` time limits bound the Context Engine (Phase 3): `max_run_time_ms` (default 120000, 5000–600000) is the overall wall-clock deadline, `max_parse_time_ms` (default 2000, 100–30000) caps one file parse, `max_total_parse_time_ms` (default 30000, 1000–180000) caps cumulative parsing. Config load rejects `max_parse_time_ms > max_total_parse_time_ms > max_run_time_ms` violations as `CONFIG_INVALID`. Optional `llm` controls tune the fixed-model integration (Phase 4, ADR 0016): `request_timeout_ms` (default 90000, 1000–600000), `max_output_tokens` (default 32768), `max_retries` (default 2, 0–5), `max_concurrent_requests` (default 3, 1–10), `max_review_unit_input_tokens` (default 64000, per-unit ceiling), `review_timeout_ms` (default 600000, 1000–3600000, overall review wall-clock deadline, ADR 0018). There are no `provider`/`model`/`api_family` selectors: the target is pinned in code (`src/llm/constants.ts`), unknown `llm.*` keys are rejected, and token ceilings are clamped to the authenticated model limits at runtime. Phase 1–3 configuration files load unchanged with `llm` defaults applied.
+Optional `context` time limits bound the Context Engine (Phase 3): `max_run_time_ms` (default 120000, 5000–600000) is the overall wall-clock deadline, `max_parse_time_ms` (default 2000, 100–30000) caps one file parse, `max_total_parse_time_ms` (default 30000, 1000–180000) caps cumulative parsing. Config load rejects `max_parse_time_ms > max_total_parse_time_ms > max_run_time_ms` violations as `CONFIG_INVALID`. Optional `llm` controls tune the fixed-model integration (Phase 4, ADR 0016): `request_timeout_ms` (default 90000, 1000–600000), `max_output_tokens` (default 32768), `max_retries` (default 2, 0–5), `max_concurrent_requests` (default 3, 1–10), `max_review_unit_input_tokens` (default 64000, per-unit ceiling), `review_timeout_ms` (default 600000, 1000–3600000, overall review wall-clock deadline, ADR 0018). There are no `provider`/`model`/`api_family` selectors: the target is pinned in code (`src/llm/constants.ts`), unknown `llm.*` keys are rejected. Token ceilings are enforced pre-request against conservative local hard limits (`src/llm/limits.ts`): the P4-00 catalog read verified only `api.responses.base_url`, so no `limit.*` was ever authenticated and no runtime catalog tightening exists — validated catalog metadata could only lower these bounds, never raise them (ADR 0022). Config load rejects input+output+margin combinations that cannot fit the local context window as `CONFIG_INVALID`; oversized units skip with `INPUT_BUDGET_EXCEEDED` diagnostics and impossible requests are rejected before any network touch, never silently truncated. Phase 1–3 configuration files load unchanged with `llm` defaults applied.
 
 ---
 
@@ -396,9 +396,12 @@ provider + engine built from `config.llm` bounds, one opaque `ses_`-prefixed
 session per run, resolved `diff.headSha` passed per review call for code-owned
 attribution, `--no-llm` offline preview (skipped review `no_llm_flag`,
 validation/publish skipped `review_skipped_no_llm`, exit 0), demo unchanged
-and network-free, live preflight non-ZDR warning, validation still
-`NOT_IMPLEMENTED` with findings retained in `run.json`. Still
-open: Go allowance/billing-source surfacing beyond `raw`.
+and network-free, live preflight non-ZDR warning. Validation stays
+`NOT_IMPLEMENTED` with findings retained in `run.json`: a live `--dry-run`
+completes honestly — validation recorded as skipped
+(`validation_unimplemented`), findings kept unvalidated, publish still
+skipped `dry-run` — while a non-dry-run live run still fails at the stub.
+Still open: Go allowance/billing-source surfacing beyond `raw`.
 
 **Prompt-injection & secrets (applies to all LLM calls):** wrap code in delimited blocks and state it is untrusted data; reviewer prompt contains no secrets; no tool access for the model beyond what's strictly needed; redact secrets (regex + entropy) and skip `.env*`, `*.pem`, key files before sending; discard any finding whose output tries to change instructions/format; never execute anything suggested by the model.
 
@@ -455,7 +458,7 @@ evals/                 cases/, run.ts   (Phase 8)
 ## 11. Testing & evaluation
 
 - **Unit:** diff parsing (fixtures incl. rename/binary/deleted/no-newline), position mapping, symbol mapping, config, finding schema, dedupe, fingerprinting, redaction.
-- **Integration:** pipeline with `FakeProvider` + fixture repos (git repos built in tmp dirs); Octokit with recorded/mocked responses; opt-in live OpenCode test (`LIVE=1`).
+- **Integration:** pipeline with `FakeProvider` + fixture repos (git repos built in tmp dirs); Octokit with recorded/mocked responses; deterministic offline seeded-bug smoke plus an opt-in live seeded-bug smoke (`tests/live/review-live-smoke.test.ts`, `CODEBLEACH_LIVE_SMOKE=1`, manual-only, Not-ZDR per ADR 0023).
 - **Eval (Phase 8):** `evals/cases/*` = `{repo fixture, base, head, expected: [{file, line±n, category}] | []}`. Mix real historical bug-fix PRs (reverse them to reintroduce bugs), synthetic seeded bugs, and **clean PRs** (must yield zero findings). Metrics: precision, recall, false-positive rate, duplicate rate, tokens/cost/latency per PR. Gate: prompt/config changes must not drop precision; commit eval baselines and compare in CI (manually triggered, since it costs money). Prioritize precision.
 
 ---

@@ -47,7 +47,8 @@ context:
 
 # Fixed-model runtime controls (OpenCode Go + muse-spark-1.3-contributor only).
 # No provider/model/api_family selectors exist — the target is pinned in code.
-# Token ceilings are starting defaults, clamped to the model limits at runtime.
+# Token ceilings are local safety bounds enforced before any request
+# (see src/llm/limits.ts); no model limit.* was ever authenticated.
 # review_timeout_ms is the overall review wall-clock deadline (all units,
 # retries, and repairs); per-request timeout stays request_timeout_ms.
 llm:

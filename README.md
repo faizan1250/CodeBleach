@@ -35,8 +35,10 @@ explicit `CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING=true` opt-in (and the
 workspace training-data toggle). `--dry-run` alone still calls the model;
 add `--no-llm` for a network-free preview that records review/validation as
 skipped and exits 0. Findings are validated in Phase 5; until then a live
-run ends at the validation stub with review results retained in
-`.reviewer-out/run.json`.
+`--dry-run` completes with validation recorded as skipped
+(`validation_unimplemented`), findings retained unvalidated in
+`.reviewer-out/run.json`, and nothing published. Without `--dry-run` a live
+run still ends at the validation stub with `NOT_IMPLEMENTED`.
 
 ## Demo (offline, no network or secrets)
 
@@ -68,8 +70,10 @@ bun test tests/integration/review-seeded-smoke.test.ts
 
 A synthetic seeded defect plus a clean control run through the real prompt,
 provider parsing, and normalization with a scripted provider: no network, no
-key, no training opt-in needed. No live seeded-bug smoke was run in Phase 4
-(synthetic prompts may still train future models under the Not-ZDR terms).
+key, no training opt-in needed. An opt-in live counterpart
+(`tests/live/review-live-smoke.test.ts`, `CODEBLEACH_LIVE_SMOKE=1`,
+manual-only, Not-ZDR) runs the same shape against the live model; see
+`docs/live-smoke.md`. Neither smoke is a precision/recall benchmark.
 
 ## Docs
 

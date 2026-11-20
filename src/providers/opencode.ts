@@ -2,7 +2,6 @@ import {
   DEFAULT_LLM_MAX_OUTPUT_TOKENS,
   DEFAULT_LLM_MAX_RETRIES,
   DEFAULT_LLM_REQUEST_TIMEOUT_MS,
-  MAX_LLM_MAX_OUTPUT_TOKENS,
   MAX_LLM_MAX_RETRIES,
 } from "../config/defaults.ts";
 import { ReviewerError } from "../core/errors.ts";
@@ -11,7 +10,14 @@ import {
   OPENCODE_RESPONSES_ENDPOINT,
   resolveModelId,
 } from "../llm/constants.ts";
+import {
+  CONTEXT_SAFETY_MARGIN_TOKENS,
+  MODEL_CONTEXT_TOKENS,
+  MODEL_MAX_OUTPUT_TOKENS,
+  resolveCatalogLimits,
+} from "../llm/limits.ts";
 import { requireTrainingOptIn } from "../llm/training-gate.ts";
+import { estimateTokens } from "../utils/tokens.ts";
 import { redact } from "../utils/redact.ts";
 import type { LlmProvider, LlmRequest, LlmResponse } from "./types.ts";
 
@@ -30,7 +36,14 @@ export interface OpenCodeProviderOptions {
   maxRetries?: number | undefined;
   timeoutMs?: number | undefined;
   fetchFn?: typeof fetch | undefined;
-  sleep?: ((ms: number) => Promise<void>) | undefined;
+  sleep?: ((ms: number, signal?: AbortSignal) => Promise<void>) | undefined;
+  /**
+   * Already-fetched, verified catalog limit metadata for the fixed model.
+   * Validated by resolveCatalogLimits; valid values can only tighten the local
+   * hard ceilings, never widen them. Absent (the current state: P4-00 verified
+   * base_url only) means local hard limits govern.
+   */
+  modelLimits?: unknown | undefined;
 }
 
 function mintSessionId(): string {
@@ -66,6 +79,28 @@ function parseRetryAfterMs(header: string | null): number | undefined {
   return undefined;
 }
 
+// Default backoff sleep: resolves after ms, rejects promptly on abort with the
+// timer cleared and the listener removed. Never outlives the backoff window.
+function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted === true) {
+    return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+  }
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(onTimeout, ms);
+    function onTimeout(): void {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }
+    function onAbort(): void {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted === true) onAbort();
+  });
+}
+
 type AttemptOutcome =
   | { kind: "ok"; response: LlmResponse }
   | { kind: "error"; error: ReviewerError; waitMs: number };
@@ -82,7 +117,9 @@ export class OpenCodeProvider implements LlmProvider {
   private readonly maxRetries: number;
   private readonly defaultTimeoutMs: number;
   private readonly fetchFn: typeof fetch;
-  private readonly sleepFn: (ms: number) => Promise<void>;
+  private readonly sleepFn: (ms: number, signal?: AbortSignal) => Promise<void>;
+  private readonly outputCeiling: number;
+  private readonly contextCeiling: number;
 
   constructor(options: OpenCodeProviderOptions = {}) {
     this.env = options.env ?? process.env;
@@ -94,12 +131,27 @@ export class OpenCodeProvider implements LlmProvider {
       options.maxRetries === undefined || !Number.isFinite(options.maxRetries)
         ? DEFAULT_LLM_MAX_RETRIES
         : Math.min(MAX_LLM_MAX_RETRIES, Math.max(0, Math.floor(options.maxRetries)));
+    this.outputCeiling = MODEL_MAX_OUTPUT_TOKENS;
+    this.contextCeiling = MODEL_CONTEXT_TOKENS;
+    // No catalog fetch exists at runtime; this validates caller-supplied
+    // metadata only. Malformed metadata fails closed, never silently ignored.
+    if (options.modelLimits !== undefined) {
+      const resolved = resolveCatalogLimits(options.modelLimits);
+      if (!resolved.ok) {
+        throw new ReviewerError({
+          code: "CONFIG_INVALID",
+          message: `invalid modelLimits: ${resolved.reason}`,
+        });
+      }
+      this.outputCeiling = Math.min(this.outputCeiling, resolved.limits.maxOutputTokens);
+      this.contextCeiling = Math.min(this.contextCeiling, resolved.limits.contextTokens);
+    }
     this.defaultTimeoutMs =
       options.timeoutMs === undefined || !Number.isFinite(options.timeoutMs)
         ? DEFAULT_LLM_REQUEST_TIMEOUT_MS
         : options.timeoutMs;
     this.fetchFn = options.fetchFn ?? fetch;
-    this.sleepFn = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    this.sleepFn = options.sleep ?? abortableSleep;
   }
 
   async complete(request: LlmRequest, signal?: AbortSignal): Promise<LlmResponse> {
@@ -122,10 +174,31 @@ export class OpenCodeProvider implements LlmProvider {
     const timeoutMs = Number.isFinite(requestedTimeout)
       ? Math.max(1, requestedTimeout)
       : DEFAULT_LLM_REQUEST_TIMEOUT_MS;
-    const maxTokens = Math.min(
-      MAX_LLM_MAX_OUTPUT_TOKENS,
-      Math.max(1, Math.floor(request.maxTokens ?? DEFAULT_LLM_MAX_OUTPUT_TOKENS)),
-    );
+    // Pre-request ceilings: reject impossible requests before any network
+    // touch. Output counts against the context window, so both bounds apply.
+    const requestedMax = request.maxTokens ?? DEFAULT_LLM_MAX_OUTPUT_TOKENS;
+    if (!Number.isInteger(requestedMax) || requestedMax <= 0) {
+      throw new ReviewerError({
+        code: "CONFIG_INVALID",
+        message: `invalid maxTokens ${String(request.maxTokens)}: must be a positive integer`,
+      });
+    }
+    if (requestedMax > this.outputCeiling) {
+      throw new ReviewerError({
+        code: "CONFIG_INVALID",
+        message: `maxTokens ${requestedMax} exceeds the output ceiling ${this.outputCeiling}`,
+      });
+    }
+    const estimatedInput = estimateTokens(`${request.system}\n${request.user}`);
+    if (estimatedInput + requestedMax + CONTEXT_SAFETY_MARGIN_TOKENS > this.contextCeiling) {
+      throw new ReviewerError({
+        code: "CONFIG_INVALID",
+        message:
+          `request does not fit the ${this.contextCeiling}-token context ceiling: ` +
+          `estimated input ${estimatedInput} + reserved output ${requestedMax} + margin ${CONTEXT_SAFETY_MARGIN_TOKENS} exceeds it`,
+      });
+    }
+    const maxTokens = requestedMax;
     // Pre-send redaction: secrets in source context become [REDACTED], never sent.
     // temperature/jsonSchema omitted: unverified against this endpoint, never guessed.
     const body = JSON.stringify({
@@ -151,7 +224,13 @@ export class OpenCodeProvider implements LlmProvider {
     for (let attempt = 0; ; attempt += 1) {
       if (signal?.aborted) throw abortError();
       if (attempt > 0) {
-        await this.sleepFn(waitMs);
+        try {
+          await this.sleepFn(waitMs, signal);
+        } catch (error) {
+          // Abort during backoff rejects promptly; a non-abort sleep failure propagates unchanged.
+          if (signal?.aborted) throw abortError();
+          throw error;
+        }
         // Cancel landing in the backoff window must not fire another POST.
         if (signal?.aborted) throw abortError();
       }
