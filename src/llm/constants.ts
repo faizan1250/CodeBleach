@@ -4,7 +4,6 @@ import { ReviewerError } from "../core/errors.ts";
 // There is no provider/model/endpoint/API-family fallback (ADR 0015);
 // P4-02 owns the transport behind LlmProvider.
 export const FIXED_PROVIDER = "opencode-go";
-export const FIXED_MODEL_DISPLAY_NAME = "Muse Spark 1.3 Contributor";
 export const FIXED_MODEL_ID = "muse-spark-1.3-contributor";
 
 // Key is environment-only, never config/source/log/artifact (ADR 0016).

@@ -126,7 +126,11 @@ export function redact(text: string, extraSecrets: string[] = []): string {
       value: string,
     ) => {
       if (value === REDACTED || !isSensitiveAssignmentKey(key)) return match;
-      if (!/[A-Za-z]/.test(value) || NON_SECRET_VALUES.test(value)) return match;
+      if (NON_SECRET_VALUES.test(value)) return match;
+      // Whole-key hits (password, api_key, ...) always redact, even for
+      // numeric-only values; the alpha guard stays for segment-only hits
+      // (MY_SECRET, tokenCount) to preserve numeric telemetry.
+      if (!isSensitiveKey(key) && !/[A-Za-z]/.test(value)) return match;
       return `${pre}${openKey}${key}${closeKey}${sep}${openValue}[REDACTED]`;
     },
   );
@@ -170,7 +174,13 @@ function sanitizeValue(value: unknown, extraSecrets: string[], seen: WeakSet<obj
   } else {
     const out: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value)) {
-      out[key] = isSensitiveKey(key) ? REDACTED : sanitizeValue(entry, extraSecrets, seen);
+      // Whole-key hits drop any value; segment-only hits (MY_SECRET) drop
+      // string values to match redact(), keeping non-strings for telemetry.
+      if (isSensitiveKey(key) || (typeof entry === "string" && hasSensitiveSegment(key))) {
+        out[key] = REDACTED;
+      } else {
+        out[key] = sanitizeValue(entry, extraSecrets, seen);
+      }
     }
     result = out;
   }

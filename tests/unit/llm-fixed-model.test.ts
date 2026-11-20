@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
   API_KEY_ENV,
-  FIXED_MODEL_DISPLAY_NAME,
   FIXED_MODEL_ID,
   FIXED_PROVIDER,
   OPENCODE_CATALOG_BASE_URL,
@@ -21,7 +20,6 @@ describe("fixed model contract", () => {
     expect(FIXED_PROVIDER).toBe("opencode-go");
     expect(FIXED_MODEL_ID).toBe("muse-spark-1.3-contributor");
     expect(FIXED_MODEL_ID).not.toContain("/");
-    expect(FIXED_MODEL_DISPLAY_NAME).toBe("Muse Spark 1.3 Contributor");
   });
 
   test("pins endpoint derived from the authenticated catalog base url", () => {

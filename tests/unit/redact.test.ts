@@ -78,6 +78,17 @@ describe("redact pre-send canaries", () => {
     expect(redact("OPENCODE_API_KEY=dummy")).toBe("OPENCODE_API_KEY=[REDACTED]");
   });
 
+  test("redacts numeric-only values under whole-sensitive keys", () => {
+    expect(redact("password: 123456")).toBe("password:[REDACTED]");
+    expect(redact("api_key=12345678")).toBe("api_key=[REDACTED]");
+    expect(redact('{"token": "987654"}')).toBe('{"token":"[REDACTED]"}');
+  });
+
+  test("leaves segment-only numeric values alone", () => {
+    expect(redact("tokenCount: 12345")).toBe("tokenCount: 12345");
+    expect(redact("MY_SECRET=hunter2")).toBe("MY_SECRET=[REDACTED]");
+  });
+
   test("redaction is idempotent", () => {
     const samples = [
       "key AIzaSyD12345678901234567890123456789012 end",
@@ -131,6 +142,14 @@ describe("sanitizePayload", () => {
         secret: "[REDACTED]",
         keep: "yes",
       },
+    });
+  });
+
+  test("drops string values under segment-sensitive keys, keeps telemetry numerics", () => {
+    expect(sanitizePayload({ MY_SECRET: "hunter2" })).toEqual({ MY_SECRET: "[REDACTED]" });
+    expect(sanitizePayload({ tokenCount: 3, nested: { MY_SECRET: "x" } })).toEqual({
+      tokenCount: 3,
+      nested: { MY_SECRET: "[REDACTED]" },
     });
   });
 
