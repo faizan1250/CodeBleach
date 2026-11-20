@@ -458,7 +458,7 @@ evals/                 cases/, run.ts   (Phase 8)
 ## 11. Testing & evaluation
 
 - **Unit:** diff parsing (fixtures incl. rename/binary/deleted/no-newline), position mapping, symbol mapping, config, finding schema, dedupe, fingerprinting, redaction.
-- **Integration:** pipeline with `FakeProvider` + fixture repos (git repos built in tmp dirs); Octokit with recorded/mocked responses; opt-in live OpenCode test (`LIVE=1`).
+- **Integration:** pipeline with `FakeProvider` + fixture repos (git repos built in tmp dirs); Octokit with recorded/mocked responses; deterministic offline seeded-bug smoke (no `LIVE=`-gated live OpenCode test exists — live seeded-bug smoke deferred per ADR 0020, Not-ZDR).
 - **Eval (Phase 8):** `evals/cases/*` = `{repo fixture, base, head, expected: [{file, line±n, category}] | []}`. Mix real historical bug-fix PRs (reverse them to reintroduce bugs), synthetic seeded bugs, and **clean PRs** (must yield zero findings). Metrics: precision, recall, false-positive rate, duplicate rate, tokens/cost/latency per PR. Gate: prompt/config changes must not drop precision; commit eval baselines and compare in CI (manually triggered, since it costs money). Prioritize precision.
 
 ---

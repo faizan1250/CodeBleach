@@ -89,18 +89,29 @@ JSON, and a small cap yields `incomplete`, not a parse failure. `incomplete` is
 classified separately from parse failure (no JSON repair on truncated output);
 only `max_output_tokens` gets one bounded cap-escalation retry (P4-05).
 
-## Structured output / limits / usage (STILL UNVERIFIED)
+## Structured output / limits / usage (P4-00 snapshot — superseded, see ledger)
+
+> P4-00 perspective, 2026-11-20. The list below is the historical record of
+> what the two generic live smokes left unverified. Current status per item is
+> in the [verification ledger](#verification-ledger-p4-hardening); nothing
+> below is current on its own.
 
 Native JSON-schema support, response text extraction on a *completed* response,
 authenticated `limit.*` values, `output_tokens_details.reasoning_tokens`,
 `usage.cost`, `usage.opencode.allowance` / `billing_source`, timeout/abort/
-429/`Retry-After` behavior, and the 400/401/403/404/5xx mapping all await a
+429/`Retry-After` behavior, and the 400/401/403/404/5xx mapping all awaited a
 completed live response in P4-02+. Starting config defaults
 (`request_timeout_ms 90000`, `max_output_tokens 32768`, `max_retries 2`,
-`max_concurrent_requests 3`, `max_review_unit_input_tokens 64000`) remain
-hypotheses clamped to authenticated `limit.*` at runtime. The 32K output
-default gives headroom over the old 4K ceiling while staying below the
-third-party-reported 131072 maximum.
+`max_concurrent_requests 3`, `max_review_unit_input_tokens 64000`) were then
+hypotheses against limits no live call had yet authenticated.
+
+Correction (P4 hardening, ADR 0022): no runtime clamp to authenticated
+`limit.*` was ever implemented, and none exists — `limit.*` was never
+observed, so ceilings are enforced pre-request against conservative local
+hard limits (`src/llm/limits.ts`) and impossible requests fail closed, never
+silently truncated. The 32K output default gives headroom over the old 4K
+ceiling while staying below the third-party-reported 131072 maximum; that
+maximum is a safety bound, not an account guarantee.
 
 ## Tools / execution boundary
 
@@ -110,14 +121,17 @@ The harness sends only the generic prompt above. Verified by construction in
 `scripts/opencode-spike.ts` (no tool fields exist in the payload builder) and by
 the live accepted responses.
 
-## Redaction gap (patterns landed in P4-01, call site pending in P4-02)
+## Redaction gap (patterns landed in P4-01, call site landed in P4-02)
 
 `src/utils/redact.ts` now covers GitHub/AWS/Bearer/`sk-`/PEM plus Google `AIza`,
 Slack `xox*`, Stripe `sk_/rk_/whsec_`, JWT, Basic, URL query secrets, quoted
 `.env`/YAML/JSON forms, and generic sensitive `key=value` (idempotent, telemetry
-keys preserved). The P4-02 provider must still call pre-send redaction on the
-serialized payload plus enforce the training gate — no source-bearing call exists
-until then.
+keys preserved). The P4-02 provider calls pre-send redaction on the serialized
+payload (`src/providers/opencode.ts`, instructions/input redacted with key
+bytes) and the prompt builder redacts pre-serialize
+(`src/review/prompt.ts` `sanitizePayload`), with the training gate enforced
+pre-network — no source-bearing call exists without both. Pattern coverage is
+pinned by `tests/unit/redact.test.ts`, not by the list above.
 
 ## Bun compatibility
 
@@ -129,18 +143,82 @@ result: **succeeds** (endpoint accepted; output incomplete-due-to-cap as above).
 
 Phase 4 is frozen (ADR 0020). The endpoint above is pinned in
 `src/llm/constants.ts`; structured-output-off text path, response-text
-extraction, usage/cost/allowance capture, timeout/abort/`Retry-After`, and the
-400/401/403/404/429/5xx mapping are covered by mock-transport provider tests
-(`tests/unit/opencode-provider.test.ts`), so no further live probing was done.
+extraction, input/output/reasoning-token and provider-reported-cost capture,
+timeout/abort/`Retry-After`, and the 400/401/403/404/429/5xx mapping are
+covered by mock-transport provider tests
+(`tests/unit/opencode-provider.test.ts`, `tests/unit/review-result.test.ts`).
+`allowance`/`billing_source` are parsed into diagnostic `raw` only, asserted
+by no test, and not surfaced beyond `raw` (still open). No further live
+probing was done.
 The recorded quality signal is the deterministic mock seeded-bug smoke
 (`tests/integration/review-seeded-smoke.test.ts`): seeded defect found at its
-line with verbatim evidence, clean control silent, fingerprint stable. No live
-seeded-bug smoke was run; no secrets or raw prompts/responses were committed.
+line with verbatim evidence, clean control silent, fingerprint stable. It
+proves the prompt→parse→normalize pipeline, not model bug-detection
+capability — no live model finding is claimed.
+No live seeded-bug smoke was run; no secrets or raw prompts/responses were committed.
 The P4-00 record above is unchanged.
 
-## Remaining blockers (for P4-02+, not for pinning)
+## Verification ledger (P4 hardening)
 
-Phase 4 may proceed to provider code against the pinned endpoint. Still open:
-a *completed* (non-incomplete) smoke with a larger cap; usage/cost/allowance
-capture on completion; structured-output support; retry/timeout mapping. No
-model/provider fallback is proposed for any of these.
+Each item carries exactly one evidence class. Mock transport is never cited
+as live proof, and the mock seeded-bug smoke is never cited as model
+bug-detection proof.
+
+1. Live authenticated, verified (P4-00, two generic smokes 2026-11-20):
+   catalog `api.responses.base_url` for `opencode-go` /
+   `muse-spark-1.3-contributor`; pinned Responses endpoint (path appended
+   exactly once); bearer auth accepted (HTTP 200 on catalog + inference);
+   `User-Agent: codebleach/<version>` and one stable opaque
+   `x-opencode-session` accepted on the wire; direct-inference-only
+   boundary (no `tools`/`tool_choice`, no agent host, no repo execution);
+   `incomplete: max_output_tokens` at a 64-token cap — reasoning consumption
+   of the output cap observed live, and the incomplete-vs-parse-failure
+   split grounded in that observation.
+
+2. Mock transport, verified (`tests/unit/opencode-provider.test.ts`,
+   `tests/unit/review-result.test.ts`, `tests/unit/review-deadlines.test.ts`):
+   structured-output-off text path (`output_text` + output-item walk);
+   input/output/reasoning-token and provider-reported-`cost` capture;
+   refusal / `incomplete` / `failed` / malformed classification without
+   retry; 400/401/403/404 non-retryable and 408/429/`>=500` retryable
+   mapping; `Retry-After` seconds + HTTP-date parsing clamped to 30 s;
+   capped exponential backoff; per-request timeout; abort before send,
+   mid-backoff against the real timer, and mid-flight; pre-send payload
+   redaction with key bytes; training-gate and missing-key refusal
+   pre-network.
+
+3. Offline, verified (no network, no key, no opt-in):
+   `tests/unit/opencode-spike.test.ts` (endpoint derivation, header
+   builder, catalog `base_url` reader, opt-in predicate);
+   `tests/integration/review-seeded-smoke.test.ts` (FakeProvider scripted
+   defect at its line with verbatim evidence, clean control silent,
+   fingerprint stable); `--no-llm` preview and `--demo --dry-run`
+   network-free paths.
+
+4. Not verified anywhere: any authenticated `limit.*` value; any
+   completed-response text, usage, cost, allowance, or billing-source value
+   observed live; native JSON-schema structured output against this
+   endpoint; `allowance`/`billing_source` beyond diagnostic `raw` (parsed
+   but unasserted, unsurfaced); any live model-identified defect — no live
+   seeded-bug review was ever run.
+
+5. Deferred (explicitly not attempted in Phase 4): completed live smoke
+   with a larger cap; live usage/cost/allowance capture on completion;
+   structured-output support; live seeded-bug smoke (Not-ZDR training
+   terms, ADR 0020); runtime catalog tightening of local limits (local
+   hard limits govern unless a verified source is plumbed in, ADR 0022).
+
+## Remaining blockers (current status, P4 hardening)
+
+Phase 4 shipped against the pinned endpoint with mock-transport coverage.
+Still open, live-only or deferred: a *completed* (non-incomplete) live
+smoke with a larger cap — no completed-response text, usage, cost,
+allowance, or billing-source value has ever been observed live;
+authenticated `limit.*` values (local hard limits govern per ADR 0022;
+validated catalog metadata could only tighten them); structured-output
+support (decided off, never probed against this endpoint); live seeded-bug
+smoke (deferred under Not-ZDR terms per ADR 0020, not merely pending).
+Covered by mock transport, not live: retry/timeout/abort/`Retry-After`
+mapping, status-code mapping, and the incomplete-vs-parse-failure split
+with one bounded cap escalation. No model/provider fallback is proposed
+for any of these.
