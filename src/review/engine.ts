@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { MAX_LLM_MAX_OUTPUT_TOKENS } from "../config/defaults.ts";
 import type { ResolvedConfig } from "../config/schema.ts";
 import type { ReviewEngine } from "../core/contracts.ts";
 import { ReviewerError } from "../core/errors.ts";
@@ -9,6 +10,7 @@ import type { LlmProvider } from "../providers/types.ts";
 import { RawReviewOutputSchema, type Finding, type RawFinding } from "../types/finding.ts";
 import type { ReviewUnit } from "../types/context.ts";
 import { buildReviewPrompt, CODE_REVIEW_PROMPT_VERSION, isPromptWithinBudget } from "./prompt.ts";
+import type { BuiltReviewPrompt } from "./prompt.ts";
 
 export interface ReviewEngineOptions {
   provider: LlmProvider;
@@ -18,6 +20,14 @@ export interface ReviewEngineOptions {
   headSha?: string | undefined;
 }
 
+// P4-05: Responses `incomplete` is not a parse failure and is never
+// JSON-repaired. Only `max_output_tokens` gets one bounded cap escalation per
+// unit; the provider preserves the reason in the message, which is the
+// contract matched on here.
+function isIncompleteCapError(error: unknown): boolean {
+  if (!(error instanceof ReviewerError) || error.code !== "PROVIDER_FAILED") return false;
+  return /provider response incomplete/i.test(error.message) && error.message.includes("max_output_tokens");
+}
 // Provisional P4-04 fingerprint: sha1(file + symbol + category + title).
 // P4-06 hardens path/ruleId handling; any algorithm change needs an ADR.
 function fingerprintFor(raw: RawFinding, symbol: string): string {
@@ -111,12 +121,49 @@ export class ReviewEngineImpl implements ReviewEngine {
       this.logger.warn("review unit skipped", { unitId: unit.id, reason: "input-budget-exceeded" });
       return [];
     }
+    const firstMax = config.llm.max_output_tokens;
+    try {
+      return await this.completeUnit(unit, built, config, firstMax);
+    } catch (error) {
+      if (error instanceof ReviewerError && error.code === "CONFIG_INVALID") throw error;
+      // One bounded cap escalation for max_output_tokens only; every other
+      // failure (refusal, other incomplete reasons, malformed output after
+      // its single repair) stays partial with no further attempt.
+      if (!isIncompleteCapError(error)) return this.partial(unit, error);
+      const escalated = Math.min(MAX_LLM_MAX_OUTPUT_TOKENS, firstMax * 2);
+      if (escalated <= firstMax) return this.partial(unit, error, "output-incomplete");
+      try {
+        return await this.completeUnit(unit, built, config, escalated);
+      } catch (escalatedError) {
+        if (escalatedError instanceof ReviewerError && escalatedError.code === "CONFIG_INVALID") {
+          throw escalatedError;
+        }
+        return this.partial(unit, escalatedError, "output-incomplete");
+      }
+    }
+  }
+
+  private partial(unit: ReviewUnit, error: unknown, reason?: string): Finding[] {
+    this.logger.warn("review unit failed", {
+      unitId: unit.id,
+      code: error instanceof ReviewerError ? error.code : "UNKNOWN",
+      ...(reason === undefined ? {} : { reason }),
+    });
+    return [];
+  }
+
+  private async completeUnit(
+    unit: ReviewUnit,
+    built: BuiltReviewPrompt,
+    config: ResolvedConfig,
+    maxTokens: number,
+  ): Promise<Finding[]> {
     const output = await completeJson(
       this.provider,
       {
         system: built.system,
         user: built.user,
-        maxTokens: config.llm.max_output_tokens,
+        maxTokens,
         timeoutMs: config.llm.request_timeout_ms,
       },
       RawReviewOutputSchema,

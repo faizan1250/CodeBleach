@@ -4,6 +4,16 @@ import type { LlmProvider, LlmRequest } from "./types.ts";
 
 const FENCED_BLOCK = /^\s*```(?:json)?\s*\n?([\s\S]*?)\n?\s*```\s*$/;
 
+// Bound the untrusted snippets appended to a repair request; the original
+// request payload is resent intact so the model keeps full context.
+const REPAIR_ERROR_CHARS = 2000;
+const REPAIR_RESPONSE_CHARS = 4000;
+
+function truncateSnippet(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}...[truncated ${text.length - maxChars} chars]`;
+}
+
 /** Strip a Markdown fence only when it wraps the entire response. */
 function unfence(text: string): string {
   return text.match(FENCED_BLOCK)?.[1] ?? text;
@@ -56,7 +66,7 @@ async function repair<T>(
     user:
       `${request.user}\n\nThe previous response was invalid. ` +
       `Fix it and reply with valid JSON only.\n\n` +
-      `Errors:\n${errorText}\n\nInvalid response:\n${originalText}`,
+      `Errors:\n${truncateSnippet(errorText, REPAIR_ERROR_CHARS)}\n\nInvalid response:\n${truncateSnippet(originalText, REPAIR_RESPONSE_CHARS)}`,
   });
   const attempt = tryParseJson(unfence(retry.text));
   if (!attempt.parsed) {
