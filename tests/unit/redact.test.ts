@@ -524,4 +524,102 @@ describe("sanitizePayload", () => {
       list: [{ REFRESH_TOKEN: "[REDACTED]" }],
     });
   });
+
+  test("drops containers under segment-sensitive keys whole-value", () => {
+    expect(sanitizePayload({ DB_PASSWORD: ["hunter2"] })).toEqual({ DB_PASSWORD: "[REDACTED]" });
+    expect(sanitizePayload({ DB_PASSWORD: { value: "hunter2" } })).toEqual({
+      DB_PASSWORD: "[REDACTED]",
+    });
+    expect(sanitizePayload({ MY_SECRET: { nested: { deep: "hunter2" } } })).toEqual({
+      MY_SECRET: "[REDACTED]",
+    });
+    expect(sanitizePayload({ DB_TOKEN: [["a"], [{ value: "b" }]] })).toEqual({
+      DB_TOKEN: "[REDACTED]",
+    });
+    expect(sanitizePayload({ MY_SECRET: { value: "a", data: "b" } })).toEqual({
+      MY_SECRET: "[REDACTED]",
+    });
+    expect(sanitizePayload({ DB_PASSWORD: ["hunter2", "benign", 123, { v: "x" }, true] })).toEqual(
+      { DB_PASSWORD: "[REDACTED]" },
+    );
+  });
+
+  test("drops numeric/boolean containers under segment keys, keeps benign recursion", () => {
+    expect(sanitizePayload({ DB_PASSWORD: [123456] })).toEqual({ DB_PASSWORD: "[REDACTED]" });
+    expect(sanitizePayload({ DB_PASSWORD: { retry: true } })).toEqual({
+      DB_PASSWORD: "[REDACTED]",
+    });
+    expect(sanitizePayload({ MY_SECRET: { count: 42, flag: false } })).toEqual({
+      MY_SECRET: "[REDACTED]",
+    });
+    expect(
+      sanitizePayload({ config: { port: 5432, nested: { MY_SECRET: "x", keep: "yes" } } }),
+    ).toEqual({ config: { port: 5432, nested: { MY_SECRET: "[REDACTED]", keep: "yes" } } });
+  });
+
+  test("container redaction is idempotent and leak-free serialized", () => {
+    const once = sanitizePayload({
+      DB_PASSWORD: ["hunter2"],
+      nested: { MY_SECRET: { value: "hunter2" } },
+    });
+    expect(once).toEqual({ DB_PASSWORD: "[REDACTED]", nested: { MY_SECRET: "[REDACTED]" } });
+    expect(sanitizePayload(once)).toEqual(once);
+    expect(JSON.stringify(once)).not.toContain("hunter2");
+  });
+
+  test("redacts leading-acronym keys on object path", () => {
+    for (const key of [
+      "DBPassword",
+      "DBToken",
+      "DBSecret",
+      "APISecret",
+      "AWSSecret",
+      "HTTPAuthToken",
+      "OAuthClientSecret",
+    ]) {
+      expect(sanitizePayload({ [key]: "hunter2" })).toEqual({ [key]: "[REDACTED]" });
+      expect(sanitizePayload({ [key]: ["hunter2"] })).toEqual({ [key]: "[REDACTED]" });
+      expect(sanitizePayload({ [key]: { value: "hunter2" } })).toEqual({ [key]: "[REDACTED]" });
+    }
+  });
+
+  test("redacts leading-acronym keys on text and query paths", () => {
+    for (const key of [
+      "DBPassword",
+      "DBToken",
+      "DBSecret",
+      "APISecret",
+      "AWSSecret",
+      "HTTPAuthToken",
+      "OAuthClientSecret",
+    ]) {
+      expect(redact(`${key}=hunter2`)).toBe(`${key}=[REDACTED]`);
+      expect(redact(`https://x.test/cb?${key}=hunter2&b=1`)).toBe(
+        `https://x.test/cb?${key}=[REDACTED]&b=1`,
+      );
+    }
+  });
+
+  test("leaves ordinary acronym-adjacent identifiers alone", () => {
+    expect(
+      sanitizePayload({
+        DB: "x",
+        database: "myapp",
+        APIClient: "y",
+        HTTPClient: "z",
+        AWSRegion: "us-east-1",
+        dbHost: "localhost",
+      }),
+    ).toEqual({
+      DB: "x",
+      database: "myapp",
+      APIClient: "y",
+      HTTPClient: "z",
+      AWSRegion: "us-east-1",
+      dbHost: "localhost",
+    });
+    expect(redact("database: myapp")).toBe("database: myapp");
+    expect(redact("APIClient=y")).toBe("APIClient=y");
+    expect(redact("dbHost=localhost")).toBe("dbHost=localhost");
+  });
 });

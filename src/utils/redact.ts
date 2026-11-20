@@ -97,7 +97,11 @@ const SENSITIVE_SEGMENTS: ReadonlySet<string> = new Set([
 ]);
 
 function hasSensitiveSegment(key: string): boolean {
-  const segments = key.split(/[_\-.]+/).flatMap((part) => part.split(/(?<=[a-z0-9])(?=[A-Z])/));
+  // Split on separators plus lower->Upper and acronym boundaries (DB|Password,
+  // HTTP|Auth|Token) so leading-acronym keys classify without broad DB/API rules.
+  // Single-token all-caps concatenations (DBPASSWORD) have no boundary and stay
+  // non-sensitive by design.
+  const segments = key.split(/[_\-.]+/).flatMap((part) => part.split(/(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/));
   return segments.some((segment) => {
     const normalized = segment.toLowerCase();
     if (SENSITIVE_SEGMENTS.has(normalized)) return true;
@@ -245,23 +249,16 @@ function sanitizeValue(value: unknown, extraSecrets: string[], seen: WeakSet<obj
   } else {
     const out: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value)) {
-      // Whole-key hits drop any value type (strings, numerics, booleans);
-      // segment-only hits drop primitives except exact-key telemetry
-      // (tokenCount) and recurse into containers. Mirrors redact().
+      // Whole-key and segment-only hits drop the entire value (any type);
+      // never recurse under a sensitive parent. Only exact-key telemetry
+      // on segment-only hits passes through. Mirrors redact().
       if (isSensitiveKey(key)) {
         out[key] = REDACTED;
       } else if (hasSensitiveSegment(key)) {
         if (isTelemetryKey(key)) {
           out[key] = sanitizeValue(entry, extraSecrets, seen);
-        } else if (
-          typeof entry === "string" ||
-          typeof entry === "number" ||
-          typeof entry === "boolean" ||
-          entry === null
-        ) {
-          out[key] = REDACTED;
         } else {
-          out[key] = sanitizeValue(entry, extraSecrets, seen);
+          out[key] = REDACTED;
         }
       } else {
         out[key] = sanitizeValue(entry, extraSecrets, seen);
