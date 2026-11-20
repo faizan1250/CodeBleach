@@ -33,6 +33,79 @@ describe("redact", () => {
   });
 });
 
+describe("redact pre-send canaries", () => {
+  test("redacts google api keys", () => {
+    expect(redact("key AIzaSyD12345678901234567890123456789012 end")).toBe("key [REDACTED] end");
+  });
+
+  test("redacts slack tokens", () => {
+    // Split literals: push protection rejects real-format token shapes.
+    const bot = `${"xox"}b-123456789012-abcdefghijklmno`;
+    const user = `${"xox"}p-abcDEF123456789`;
+    expect(redact(`t ${bot} end`)).toBe("t [REDACTED] end");
+    expect(redact(`t ${user} end`)).toBe("t [REDACTED] end");
+  });
+
+  test("redacts stripe keys", () => {
+    expect(redact("k sk_live_abcDEF123456789 end")).toBe("k [REDACTED] end");
+    expect(redact("k rk_test_xyz789ABCDEF end")).toBe("k [REDACTED] end");
+    expect(redact("w whsec_abcDEF123456 end")).toBe("w [REDACTED] end");
+  });
+
+  test("redacts jwts", () => {
+    const jwt =
+      "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+    expect(redact(`auth ${jwt} end`)).toBe("auth [REDACTED] end");
+  });
+
+  test("redacts basic auth values", () => {
+    expect(redact("auth Basic dXNlcjpwYXNzd29yZA== end")).toBe("auth [REDACTED] end");
+  });
+
+  test("redacts secrets in url query strings", () => {
+    expect(redact("https://x.test/cb?api_key=SECRET123&b=1")).toBe(
+      "https://x.test/cb?api_key=[REDACTED]&b=1",
+    );
+    expect(redact("https://x.test/cb?a=1&token=SECRET123")).toBe(
+      "https://x.test/cb?a=1&token=[REDACTED]",
+    );
+  });
+
+  test("redacts generic sensitive assignments in env/yaml/json forms", () => {
+    expect(redact("MY_SECRET=hunter2")).toBe("MY_SECRET=[REDACTED]");
+    expect(redact("password: hunter2")).toBe("password:[REDACTED]");
+    expect(redact('{"api_key": "abc123"}')).toBe('{"api_key":"[REDACTED]"}');
+    expect(redact("OPENCODE_API_KEY=dummy")).toBe("OPENCODE_API_KEY=[REDACTED]");
+  });
+
+  test("redaction is idempotent", () => {
+    const samples = [
+      "key AIzaSyD12345678901234567890123456789012 end",
+      `t ${"xox"}b-123456789012-abcdefghijklmno end`,
+      "k sk_live_abcDEF123456789 end",
+      "https://x.test/cb?api_key=SECRET123&b=1",
+      "MY_SECRET=hunter2",
+      '{"api_key": "abc123"}',
+      "auth Basic dXNlcjpwYXNzd29yZA== end",
+    ];
+    for (const sample of samples) {
+      expect(redact(redact(sample))).toBe(redact(sample));
+    }
+  });
+
+  test("leaves telemetry and unrelated syntax alone", () => {
+    expect(redact("usage inputTokens: 10 outputTokens: 5")).toBe(
+      "usage inputTokens: 10 outputTokens: 5",
+    );
+    expect(redact("max_tokens: 50 max_tokens_per_unit: 12000")).toBe(
+      "max_tokens: 50 max_tokens_per_unit: 12000",
+    );
+    expect(redact('{"a":1,"password":"hunter2","b":2}')).toBe(
+      '{"a":1,"password":"[REDACTED]","b":2}',
+    );
+  });
+});
+
 describe("sanitizePayload", () => {
   test("redacts nested strings and arrays", () => {
     const out = sanitizePayload(
