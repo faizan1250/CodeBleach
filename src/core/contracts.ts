@@ -32,7 +32,9 @@ export interface ReviewEngine {
   review(
     units: ReviewUnit[],
     config: ResolvedConfig,
-    options?: { signal?: AbortSignal | undefined } | undefined,
+    // Mirrors ReviewCallOptions in src/review/engine.ts: per-call headSha for
+    // code-owned attribution (P4-09) plus caller cancellation (P4-08).
+    options?: { signal?: AbortSignal | undefined; headSha?: string | undefined } | undefined,
   ): Promise<ReviewBuildResult>;
 }
 

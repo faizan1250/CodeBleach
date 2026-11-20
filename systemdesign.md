@@ -221,10 +221,12 @@ export interface ReviewUnitDiff {
   originalHunkCount: number; includedHunkCount: number;
   omittedHunkCount: number; truncated: boolean;
 }
-// P3-11 wiring (ADR 0013) + P3 hardening (ADR 0014): ContextEngine.build
-// returns ContextBuildResult so token/deadline omissions are explicit; the
-// pipeline passes result.units to the still-stubbed Review Engine
-// (NOT_IMPLEMENTED) and persists units + status + diagnostics in run.json.
+// P4-09 wiring (ADR 0019): ContextEngine.build returns ContextBuildResult so
+// token/deadline omissions are explicit; the pipeline passes result.units to
+// the real ReviewEngine with the resolved diff headSha (or records an explicit
+// skipped review for --no-llm) and persists units + status + diagnostics in
+// run.json. The complete DiffResult stays in the artifact as the authoritative
+// diff. Validation still throws NOT_IMPLEMENTED until Phase 5.
 // The complete DiffResult stays in the artifact as the authoritative diff.
 // Status gains "failed" (zero units + retrieval failure); diagnostics gains
 // ContextDiagnostic[] plus parseCacheHits/Misses/Entries (filesParsed counts
@@ -388,7 +390,14 @@ by P4-07 (ADR 0017): completed-response usage/cost/reasoning capture
 persistence. Resolved by P4-08 (ADR 0018): provider-reported transport-retry counts
 (`LlmResponse.retries`, exhausted-error `retries`, `usage.retries` distinct
 from repairs), the overall `review_timeout_ms` stage deadline, and
-deadline/caller abort propagation with partial-result preservation. Still
+deadline/caller abort propagation with partial-result preservation. Resolved
+by P4-09 (ADR 0019): CLI/pipeline composition — one config load, fixed
+provider + engine built from `config.llm` bounds, one opaque `ses_`-prefixed
+session per run, resolved `diff.headSha` passed per review call for code-owned
+attribution, `--no-llm` offline preview (skipped review `no_llm_flag`,
+validation/publish skipped `review_skipped_no_llm`, exit 0), demo unchanged
+and network-free, live preflight non-ZDR warning, validation still
+`NOT_IMPLEMENTED` with findings retained in `run.json`. Still
 open: Go allowance/billing-source surfacing beyond `raw`.
 
 **Prompt-injection & secrets (applies to all LLM calls):** wrap code in delimited blocks and state it is untrusted data; reviewer prompt contains no secrets; no tool access for the model beyond what's strictly needed; redact secrets (regex + entropy) and skip `.env*`, `*.pem`, key files before sending; discard any finding whose output tries to change instructions/format; never execute anything suggested by the model.
