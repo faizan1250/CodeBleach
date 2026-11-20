@@ -121,10 +121,9 @@ Per-run parse cache (`src/context/parse-cache.ts`): one extraction bundle per `(
 Partial behavior: `ContextBuildResult.status` is `complete` (no issues) | `partial` (issues with units produced, or deadline/budget with zero units) | `failed` (zero units plus a retrieval-failure diagnostic; cap-only, budget-only, or parse-cancelled-only diagnostics stay `partial`). A transport `transport-output-limit` diagnostic is fatal only when zero usable units remain (otherwise `partial` with preserved context); it never completes and never converts every failure to fatal. Engine diagnostics (`ContextDiagnostic{stage, path, symbol?, code, reason}`, stages `snapshot | parse | import | caller | callee | test`) are bounded (max 100, key-deduped) and carry static codes (`cap-reached | budget-exceeded | parse-cancelled | timeout | transport-output-limit | deadline` plus per-stage `*-failed` fallbacks) plus path/symbol truncated to 200 chars — never messages, source text, or file content. Partial/failed runs still persist `run.json` with units + diagnostics verbatim (redacted by `sanitizePayload`).
 
 ### 4.3 Review Engine (`src/review`)
-- **MVP: one agent, one pass per ReviewUnit** with a single focused prompt (bugs, null handling, security, regressions). Add specialized passes (security, concurrency, perf) as separate prompt files only if evals show recall gaps. Separate agents are justified only when a pass needs different tools/context or different models for cost; not before.
+- **MVP: one agent, one pass per ReviewUnit** with a single focused prompt (bugs, null handling, security, regressions). One unit maps to one provider request (plus bounded transport retries, one JSON repair, one `max_output_tokens` cap escalation); never batch units or split a semantic unit. Add specialized passes (security, concurrency, perf) as separate prompt files only if evals show recall gaps. Separate agents are justified only when a pass needs different tools/context or different models for cost; not before.
 - Input: `ReviewUnit` (diff hunks with line numbers, symbol, context items, rules).
-- Output: `RawReviewOutput` (Zod). The LLM never produces ids, SHAs or fingerprints — code adds them.
-- Batch small units per call to save tokens; split large ones. Bounded concurrency (default 3).
+- Output: `ReviewBuildResult` (ADR 0017) — `status` (`complete | partial | failed | skipped`), code-owned `Finding[]` (ids, `sha1(file + symbol + category + normalized title)` fingerprints, head SHA, symbol, origin), bounded redacted per-unit diagnostics, and usage (`requests/retries/repairRequests/incompleteRetries`, tokens/cost only when the provider reports them). Model output passes strict `RawReviewOutput` (Zod) validation first; the LLM never produces ids, SHAs or fingerprints. A failed unit never erases findings from successful ones. Bounded concurrency (default 3), stable result order.
 - Prompt rules: report only issues introduced by the PR; cite exact code in `evidence`; use only provided context; say nothing if no confirmed bug (`findings: []` is a valid answer); untrusted code goes inside delimited blocks and is declared as data.
 
 ### 4.4 Validation Engine (`src/validate`)
@@ -255,6 +254,23 @@ export interface Finding extends RawFinding {   // produced by code
   origin: { pass: string; unitId: string };
 }
 
+// ---- Review result (ADR 0017) ----
+export type ReviewStatus = "complete" | "partial" | "failed" | "skipped";
+export interface ReviewUsage {   // tokens/cost present only when the provider reports them
+  requests: number; retries: number; repairRequests: number; incompleteRetries: number;
+  inputTokens?: number; outputTokens?: number; reasoningTokens?: number; totalTokens?: number;
+  costUsd?: number; costKnown: boolean;
+}
+export interface ReviewDiagnostic {
+  stage: "provider" | "prompt" | "parse" | "normalize" | "unit";
+  code: string; message: string; unitId?: string; retryable: boolean;
+}
+export interface ReviewBuildResult {
+  status: ReviewStatus; findings: Finding[]; diagnostics: ReviewDiagnostic[]; usage: ReviewUsage;
+  unitsSubmitted: number; unitsReviewed: number; unitsFailed: number;
+  promptVersion: string; promptHash: string; model: string;
+}
+
 // ---- Validation ----
 export interface CheckResult { name: string; passed: boolean; detail?: string }
 export interface ValidatedFinding {
@@ -334,7 +350,12 @@ export interface LlmRequest {
   jsonSchema?: object;            // from z.toJSONSchema(...)
   model?: string; maxTokens?: number; temperature?: number; timeoutMs?: number;
 }
-export interface LlmResponse { text: string; parsed?: unknown; usage?: { inputTokens: number; outputTokens: number }; model: string; raw?: unknown }
+export interface LlmResponse {
+  text: string; parsed?: unknown;
+  usage?: { inputTokens: number; outputTokens: number; reasoningTokens?: number };
+  costUsd?: number;            // provider-reported charge only, never estimated
+  model: string; raw?: unknown;
+}
 export interface LlmProvider {
   readonly name: string;
   readonly capabilities: { structuredOutput: boolean; streaming: boolean };
@@ -358,9 +379,12 @@ surface is direct OpenCode Go OpenAI Responses at
 `muse-spark-1.3-contributor`, bearer `OPENCODE_API_KEY`, CodeBleach User-Agent,
 and one stable opaque `x-opencode-session` per run. No tools, no SDK/agent
 host, no repository execution. Every model request requires exact
-`CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING=true` (Not-ZDR gate, pre-network). Still
-open for P4-02+: completed-response usage/cost/allowance capture, native
-structured-output support, and retry/timeout mapping.
+`CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING=true` (Not-ZDR gate, pre-network). Resolved
+by P4-07 (ADR 0017): completed-response usage/cost/reasoning capture
+(`usage.{input,output,reasoning}Tokens`, provider-reported `costUsd`), the
+`ReviewBuildResult` status/usage/diagnostics contract, and redacted `run.json`
+persistence. Still open for P4-08+: provider-reported transport-retry counts,
+Go allowance/billing-source surfacing beyond `raw`, and retry/timeout mapping.
 
 **Prompt-injection & secrets (applies to all LLM calls):** wrap code in delimited blocks and state it is untrusted data; reviewer prompt contains no secrets; no tool access for the model beyond what's strictly needed; redact secrets (regex + entropy) and skip `.env*`, `*.pem`, key files before sending; discard any finding whose output tries to change instructions/format; never execute anything suggested by the model.
 
@@ -403,7 +427,7 @@ src/
   validate/            engine.ts, deterministic.ts, llm.ts, dedupe.ts
   providers/           types.ts, fake.ts, opencode.ts
   github/              client.ts, publish.ts, fingerprint.ts
-  types/               diff.ts context.ts finding.ts validation.ts provider.ts index.ts
+  types/               diff.ts context.ts finding.ts review.ts validation.ts provider.ts index.ts
   utils/               tokens.ts, redact.ts, spawn.ts, glob.ts
 tests/{unit,integration,fixtures}/
 evals/                 cases/, run.ts   (Phase 8)
@@ -445,7 +469,7 @@ evals/                 cases/, run.ts   (Phase 8)
 | 1 Foundation | Bun/TS repo, types, config loader, CLI, logger, errors, provider interface, walking-skeleton pipeline with fakes, CI | `bun test` + typecheck green; `review --dry-run` produces `run.json` via fakes |
 | 2 Diff Engine | deterministic git diff → `DiffResult` with positions, filters, skip reasons, one synthetic module symbol per eligible file | Fixture diffs map to correct lines/positions/symbols; identical output under hostile Git config |
 | 3 Context Engine | TS adapter, definitions, callers, callees, tests, ranking, budget | `ReviewUnit`s for a fixture repo contain expected items within budget |
-| 4 Review Engine | OpenCode spike → provider, prompts, Zod parse, repair retry | Seeded-bug fixtures yield findings; garbage output handled |
+| 4 Review Engine | OpenCode spike → provider, prompts, Zod parse, repair retry, result/usage/artifact | Seeded-bug fixtures yield findings; garbage output handled |
 | 5 Validation | Deterministic checks, dedupe, optional LLM check | Hallucinated file/line/evidence rejected in tests |
 | 6 Repo awareness | Rules → prompt, path overrides, inferred conventions + cache | Explicit rules affect prompts; inferred never overrides |
 | 7 GitHub | Octokit publisher, workflow, dedupe markers, SHA recheck | Real PR gets correct inline comments, no dupes on re-push |

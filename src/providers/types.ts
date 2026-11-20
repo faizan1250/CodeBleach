@@ -8,10 +8,18 @@ export interface LlmRequest {
   timeoutMs?: number | undefined;
 }
 
+export interface LlmUsage {
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens?: number | undefined;
+}
+
 export interface LlmResponse {
   text: string;
   parsed?: unknown;
-  usage?: { inputTokens: number; outputTokens: number } | undefined;
+  usage?: LlmUsage | undefined;
+  /** Provider-reported charge in USD; present only when the API reports it. */
+  costUsd?: number | undefined;
   model: string;
   raw?: unknown;
 }

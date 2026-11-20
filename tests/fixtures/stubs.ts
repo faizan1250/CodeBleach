@@ -10,9 +10,11 @@ import type {
 } from "../../src/core/contracts.ts";
 import { ConfigFileSchema, type ResolvedConfig } from "../../src/config/schema.ts";
 import { ok, err } from "../../src/core/result.ts";
+import { emptyReviewUsage } from "../../src/review/result.ts";
 import type {
   DiffResult,
   Finding,
+  ReviewBuildResult,
   ReviewUnit,
   ValidatedFinding,
 } from "../../src/types/index.ts";
@@ -33,6 +35,22 @@ export interface FixtureEngines {
   loadConfig: LoadConfigFn;
   order: string[];
   config: ResolvedConfig;
+}
+
+/** Deterministic empty review result for tests that only exercise other stages. */
+export function emptyReviewResult(): ReviewBuildResult {
+  return {
+    status: "complete",
+    findings: [],
+    diagnostics: [],
+    usage: emptyReviewUsage(),
+    unitsSubmitted: 0,
+    unitsReviewed: 0,
+    unitsFailed: 0,
+    promptVersion: "test-pass",
+    promptHash: "test-hash",
+    model: "test-model",
+  };
 }
 
 function maybeFail(order: string[], stage: StageName, options: FixtureOptions): void {
@@ -130,9 +148,16 @@ export function createFixtureEngines(options: FixtureOptions = {}): FixtureEngin
       },
     },
     review: {
-      review: () => {
+      review: (units) => {
         maybeFail(order, "review", options);
-        return Promise.resolve([finding]);
+        return Promise.resolve({
+          ...emptyReviewResult(),
+          findings: [finding],
+          usage: { ...emptyReviewUsage(), requests: 1 },
+          unitsSubmitted: units.length,
+          unitsReviewed: units.length,
+          unitsFailed: 0,
+        });
       },
     },
     validation: {

@@ -19,6 +19,7 @@ import type {
   ValidatedFinding,
 } from "../types/index.ts";
 import type { ContextBuildDiagnostics } from "../types/context.ts";
+import type { ReviewBuildResult } from "../types/review.ts";
 
 function toReviewerError(error: unknown, stage: string): ReviewerError {
   if (error instanceof ReviewerError) return error;
@@ -42,6 +43,7 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
   let contextStatus: "complete" | "partial" | "failed" | null = null;
   let contextDiagnostics: ContextBuildDiagnostics | null = null;
   let findings: Finding[] = [];
+  let reviewResult: ReviewBuildResult | null = null;
   let validated: ValidatedFinding[] = [];
   let publishResult: PublishResult | null = null;
 
@@ -62,6 +64,15 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
       contextStatus,
       contextDiagnostics,
       findings,
+      reviewStatus: reviewResult?.status ?? null,
+      reviewPromptVersion: reviewResult?.promptVersion ?? null,
+      reviewPromptHash: reviewResult?.promptHash ?? null,
+      reviewModel: reviewResult?.model ?? null,
+      reviewUnitsSubmitted: reviewResult?.unitsSubmitted ?? null,
+      reviewUnitsReviewed: reviewResult?.unitsReviewed ?? null,
+      reviewUnitsFailed: reviewResult?.unitsFailed ?? null,
+      reviewUsage: reviewResult?.usage ?? null,
+      reviewDiagnostics: reviewResult?.diagnostics ?? null,
       validated,
       publishResult,
       ...(failure === undefined
@@ -136,11 +147,13 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
     contextDiagnostics = contextResult.diagnostics;
     await persist("running");
 
-    findings = await runStage(
+    const result = await runStage(
       "review",
       () => deps.review.review(contextResult.units, resolved),
-      (result) => result.length,
+      (value) => value.findings.length,
     );
+    findings = result.findings;
+    reviewResult = result;
     await persist("running");
 
     const validatedList = await runStage(

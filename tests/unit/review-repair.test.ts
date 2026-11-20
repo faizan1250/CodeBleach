@@ -114,21 +114,21 @@ describe("review output repair policy", () => {
   test("accepts empty findings without repair", async () => {
     const provider = new FakeProvider([{ respond: { findings: [] } }]);
     const engine = new ReviewEngineImpl({ provider, logger: nullLogger(), env: { ...OPT_IN } });
-    await expect(engine.review([unit()], configWith())).resolves.toEqual([]);
+    await expect(engine.review([unit()], configWith()).then((result) => result.findings)).resolves.toEqual([]);
     expect(provider.calls).toHaveLength(1);
   });
 
   test("parses markdown-fenced json without repair", async () => {
     const provider = new FakeProvider([{ respond: '```json\n{"findings":[]}\n```' }]);
     const engine = new ReviewEngineImpl({ provider, logger: nullLogger(), env: { ...OPT_IN } });
-    await expect(engine.review([unit()], configWith())).resolves.toEqual([]);
+    await expect(engine.review([unit()], configWith()).then((result) => result.findings)).resolves.toEqual([]);
     expect(provider.calls).toHaveLength(1);
   });
 
   test("repairs malformed json exactly once", async () => {
     const provider = new FakeProvider([{ respond: "not json" }, { respond: { findings: [rawFinding()] } }]);
     const engine = new ReviewEngineImpl({ provider, logger: nullLogger(), env: { ...OPT_IN } });
-    const findings = await engine.review([unit()], configWith());
+    const { findings } = await engine.review([unit()], configWith());
     expect(findings).toHaveLength(1);
     expect(provider.calls).toHaveLength(2);
   });
@@ -136,7 +136,7 @@ describe("review output repair policy", () => {
   test("discards the unit when repair fails", async () => {
     const provider = new FakeProvider([{ respond: "garbage" }, { respond: "still garbage" }]);
     const engine = new ReviewEngineImpl({ provider, logger: nullLogger(), env: { ...OPT_IN } });
-    await expect(engine.review([unit()], configWith())).resolves.toEqual([]);
+    await expect(engine.review([unit()], configWith()).then((result) => result.findings)).resolves.toEqual([]);
     expect(provider.calls).toHaveLength(2);
   });
 
@@ -146,7 +146,7 @@ describe("review output repair policy", () => {
       { respond: new Error("socket hangup") },
     ]);
     const engine = new ReviewEngineImpl({ provider, logger: nullLogger(), env: { ...OPT_IN } });
-    await expect(engine.review([unit()], configWith())).resolves.toEqual([]);
+    await expect(engine.review([unit()], configWith()).then((result) => result.findings)).resolves.toEqual([]);
     expect(provider.calls).toHaveLength(2);
   });
 
@@ -156,7 +156,7 @@ describe("review output repair policy", () => {
       { respond: { findings: [rawFinding()] } },
     ]);
     const engine = new ReviewEngineImpl({ provider, logger: nullLogger(), env: { ...OPT_IN }, headSha: "head-abc" });
-    const [finding] = await engine.review([unit({ id: "u-9" })], configWith());
+    const [finding] = (await engine.review([unit({ id: "u-9" })], configWith())).findings;
     expect(provider.calls).toHaveLength(2);
     expect(finding!.fingerprint).toMatch(/^[0-9a-f]{40}$/);
     expect(finding!.fingerprint).not.toBe("deadbeef");
@@ -184,7 +184,7 @@ describe("review output repair policy", () => {
     for (const invalid of variants) {
       const provider = new FakeProvider([{ respond: { findings: [invalid] } }, { respond: { findings: [invalid] } }]);
       const engine = new ReviewEngineImpl({ provider, logger: nullLogger(), env: { ...OPT_IN } });
-      await expect(engine.review([unit()], configWith())).resolves.toEqual([]);
+      await expect(engine.review([unit()], configWith()).then((result) => result.findings)).resolves.toEqual([]);
       expect(provider.calls).toHaveLength(2);
     }
   });
@@ -194,7 +194,7 @@ describe("review output repair policy", () => {
       { respond: new ReviewerError({ code: "PROVIDER_FAILED", message: "provider refused the request: no" }) },
     ]);
     const engine = new ReviewEngineImpl({ provider, logger: nullLogger(), env: { ...OPT_IN } });
-    await expect(engine.review([unit()], configWith())).resolves.toEqual([]);
+    await expect(engine.review([unit()], configWith()).then((result) => result.findings)).resolves.toEqual([]);
     expect(provider.calls).toHaveLength(1);
   });
 
@@ -204,7 +204,7 @@ describe("review output repair policy", () => {
       { respond: { findings: [rawFinding()] } },
     ]);
     const engine = new ReviewEngineImpl({ provider, logger: nullLogger(), env: { ...OPT_IN } });
-    const findings = await engine.review([unit()], configWith({ max_output_tokens: 1000 }));
+    const { findings } = await engine.review([unit()], configWith({ max_output_tokens: 1000 }));
     expect(findings).toHaveLength(1);
     expect(provider.calls).toHaveLength(2);
     expect(provider.calls[0]?.maxTokens).toBe(1000);
@@ -218,14 +218,14 @@ describe("review output repair policy", () => {
       { respond: incompleteError("max_output_tokens") },
     ]);
     const engine = new ReviewEngineImpl({ provider, logger: nullLogger(), env: { ...OPT_IN } });
-    await expect(engine.review([unit()], configWith({ max_output_tokens: 1000 }))).resolves.toEqual([]);
+    await expect(engine.review([unit()], configWith({ max_output_tokens: 1000 })).then((result) => result.findings)).resolves.toEqual([]);
     expect(provider.calls).toHaveLength(2);
   });
 
   test("does not escalate incomplete for other reasons", async () => {
     const provider = new FakeProvider([{ respond: incompleteError("content_filter") }]);
     const engine = new ReviewEngineImpl({ provider, logger: nullLogger(), env: { ...OPT_IN } });
-    await expect(engine.review([unit()], configWith())).resolves.toEqual([]);
+    await expect(engine.review([unit()], configWith()).then((result) => result.findings)).resolves.toEqual([]);
     expect(provider.calls).toHaveLength(1);
   });
 
@@ -233,7 +233,7 @@ describe("review output repair policy", () => {
     const provider = new FakeProvider([{ respond: incompleteError("max_output_tokens") }]);
     const engine = new ReviewEngineImpl({ provider, logger: nullLogger(), env: { ...OPT_IN } });
     await expect(
-      engine.review([unit()], configWith({ max_output_tokens: MAX_LLM_MAX_OUTPUT_TOKENS })),
+      engine.review([unit()], configWith({ max_output_tokens: MAX_LLM_MAX_OUTPUT_TOKENS })).then((result) => result.findings),
     ).resolves.toEqual([]);
     expect(provider.calls).toHaveLength(1);
   });
@@ -244,7 +244,7 @@ describe("review output repair policy", () => {
       { respond: { findings: [rawFinding({ title: "second bug" })] } },
     ]);
     const engine = new ReviewEngineImpl({ provider, logger: nullLogger(), env: { ...OPT_IN } });
-    const findings = await engine.review(
+    const { findings } = await engine.review(
       [unit({ id: "u-1" }), unit({ id: "u-2" })],
       configWith({ max_concurrent_requests: 1 }),
     );
@@ -279,7 +279,7 @@ describe("review output repair policy", () => {
     }) as unknown as typeof fetch;
     const provider = new OpenCodeProvider({ env: { ...GATE }, version: "0.1.0", fetchFn });
     const engine = new ReviewEngineImpl({ provider, logger: nullLogger(), env: { ...GATE } });
-    const findings = await engine.review([unit()], configWith());
+    const { findings } = await engine.review([unit()], configWith());
     expect(findings).toHaveLength(1);
     expect(seen).toHaveLength(2);
     const sessions = seen.map((call) => (call.init.headers as Record<string, string>)["x-opencode-session"]);

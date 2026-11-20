@@ -31,7 +31,7 @@ describe("demo engines", () => {
     expect(units[0]?.file.commentableLines).toEqual(diff.files[0]?.commentableLines);
     expect(units[0]?.symbol).toBe(diff.files[0]?.symbols[0]);
 
-    const findings = await demoReviewEngine.review(units, config);
+    const findings = (await demoReviewEngine.review(units, config)).findings;
     expect(findings).toHaveLength(2);
 
     const validated = await demoValidationEngine.validate(findings, diff, units, config);
@@ -73,7 +73,7 @@ describe("demo engines", () => {
     const lines = diff.files.flatMap((file) => file.hunks.flatMap((hunk) => hunk.lines.map((l) => l.text)));
     const built = await demoContextEngine.build(diff, config, ".");
     const units = built.units;
-    const findings = await demoReviewEngine.review(units, config);
+    const findings = (await demoReviewEngine.review(units, config)).findings;
     const validated = await demoValidationEngine.validate(findings, diff, units, config);
     const accepted = validated.filter((v) => v.status === "accepted");
     const rejected = validated.filter((v) => v.status === "rejected");
@@ -101,7 +101,7 @@ describe("demo engines", () => {
     });
     const built = await demoContextEngine.build(diff, config, ".");
     const units = built.units;
-    const findings = await demoReviewEngine.review(units, config);
+    const findings = (await demoReviewEngine.review(units, config)).findings;
     const validated = await demoValidationEngine.validate(findings, diff, units, config);
     const addedByFile = new Map(
       diff.files.map((file) => [

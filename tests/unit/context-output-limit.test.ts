@@ -10,6 +10,7 @@ import { ContextEngineImpl } from "../../src/context/engine.ts";
 import { isGitOutputLimit, isGitTimeout, SnapshotReader } from "../../src/context/snapshot.ts";
 import { GitDiffEngine } from "../../src/diff/git.ts";
 import { git, makeRepo } from "../helpers/git-repo.ts";
+import { emptyReviewResult } from "../fixtures/stubs.ts";
 
 function logger() {
   return createLogger({ level: "error", runId: "cb-output-limit-test" });
@@ -287,7 +288,7 @@ describe("context transport output-limit diagnostics", () => {
         {
           diff: diffEngine,
           context,
-          review: { review: () => Promise.resolve([]) },
+          review: { review: () => Promise.resolve(emptyReviewResult()) },
           validation: { validate: () => Promise.resolve([]) },
           publisher: { publish: () => Promise.resolve({ published: 0, skipped: 0, failures: [] }) },
           logger: logger(),

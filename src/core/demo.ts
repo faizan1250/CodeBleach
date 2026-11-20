@@ -189,7 +189,27 @@ export const demoContextEngine: ContextEngine = {
 };
 
 export const demoReviewEngine: ReviewEngine = {
-  review: (units) => Promise.resolve(units.flatMap((unit) => demoFindings(unit))),
+  review: (units) => {
+    const findings = units.flatMap((unit) => demoFindings(unit));
+    return Promise.resolve({
+      status: "complete" as const,
+      findings,
+      diagnostics: [],
+      usage: {
+        requests: 0,
+        retries: 0,
+        repairRequests: 0,
+        incompleteRetries: 0,
+        costKnown: false,
+      },
+      unitsSubmitted: units.length,
+      unitsReviewed: units.length,
+      unitsFailed: 0,
+      promptVersion: "demo",
+      promptHash: "demo",
+      model: "demo",
+    });
+  },
 };
 
 export const demoValidationEngine: ValidationEngine = {
