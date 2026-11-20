@@ -42,9 +42,9 @@ describe("logger", () => {
 
   test("redacts secrets from message and fields", () => {
     captureStderr();
-    const logger = createLogger({ level: "debug", runId: "run-1", secrets: ["s3cr3t"] });
-    logger.info("using s3cr3t now", { token: "s3cr3t", deep: { password: "plain" } });
-    expect(captured).not.toContain("s3cr3t");
+    const logger = createLogger({ level: "debug", runId: "run-1", secrets: ["s3cr3t-value"] });
+    logger.info("using s3cr3t-value now", { token: "s3cr3t-value", deep: { password: "plain" } });
+    expect(captured).not.toContain("s3cr3t-value");
     expect(captured).toContain("[REDACTED]");
   });
 

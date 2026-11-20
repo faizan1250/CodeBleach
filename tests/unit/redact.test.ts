@@ -3,11 +3,50 @@ import { redact, sanitizePayload } from "../../src/utils/redact.ts";
 
 describe("redact", () => {
   test("replaces exact secrets longest-first", () => {
-    expect(redact("ab abc", ["ab", "abc"])).toBe("[REDACTED] [REDACTED]");
+    expect(redact("abcdefgh abcdefghi", ["abcdefgh", "abcdefghi"])).toBe(
+      "[REDACTED] [REDACTED]",
+    );
   });
 
   test("ignores empty secrets", () => {
     expect(redact("hello", [""])).toBe("hello");
+  });
+
+  test("ignores below-minimum literals, keeps ordinary words intact", () => {
+    // Below the 8-char floor: no blind replacement, even as substrings.
+    expect(redact("context", ["x"])).toBe("context");
+    expect(redact("context content extra", ["x"])).toBe("context content extra");
+    expect(redact("ab abc", ["ab", "abc"])).toBe("ab abc");
+    expect(redact("hello ab world", ["ab"])).toBe("hello ab world");
+    expect(redact("token ab12cd here", ["ab12cd"])).toBe("token ab12cd here");
+  });
+
+  test("applies blind replacement at the 8-char minimum", () => {
+    expect(redact("key abcdefgh end", ["abcdefgh"])).toBe("key [REDACTED] end");
+    expect(redact("abcdefgh and abcdefgh", ["abcdefgh"])).toBe("[REDACTED] and [REDACTED]");
+  });
+
+  test("redacts long keys blindly across occurrences", () => {
+    const key = "opaque-live-key-9f8e7d6c5b4a";
+    expect(redact(`using ${key} twice: ${key} end`, [key])).toBe(
+      "using [REDACTED] twice: [REDACTED] end",
+    );
+  });
+
+  test("sensitive assignments redact regardless of value length", () => {
+    expect(redact("OPENCODE_API_KEY=x", ["x"])).toBe("OPENCODE_API_KEY=[REDACTED]");
+    expect(redact("PASSWORD=x", ["x"])).toBe("PASSWORD=[REDACTED]");
+    expect(redact('{"api_key": "x"}', ["x"])).toBe('{"api_key":"[REDACTED]"}');
+    expect(redact("https://x.test/cb?api_key=x&b=1", ["x"])).toBe(
+      "https://x.test/cb?api_key=[REDACTED]&b=1",
+    );
+  });
+
+  test("auth headers stay protected for short values", () => {
+    expect(redact("auth Bearer x end", ["x"])).toBe("auth [REDACTED] end");
+    expect(redact("saw OPENCODE_API_KEY=x in context text", ["x"])).toBe(
+      "saw OPENCODE_API_KEY=[REDACTED] in context text",
+    );
   });
 
   test("redacts github tokens", () => {

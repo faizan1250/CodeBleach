@@ -166,10 +166,23 @@ function decodeQueryKeyOnce(key: string): string {
 const ASSIGNMENT_SECRET_RE =
   /(^|[\s{,;("'])(["']?)([A-Za-z0-9_.-]+)(["']?)\s*([:=])\s*(?:(\\?")((?:\\.|[^"\\])*?)(\\?")|(\\?')((?:\\.|[^'\\])*?)(\\?')|(["']?)([^"'\s,};&]+))/gim;
 
-/** Replace exact secrets (longest first) and known token patterns with [REDACTED]. */
+/** Replace exact secrets (longest first) and known token patterns with [REDACTED].
+ *
+ * Blind literal replacement applies only to secrets of at least
+ * MIN_LITERAL_SECRET_LENGTH chars: shorter values collide with ordinary prose
+ * (`OPENCODE_API_KEY=x` would otherwise rewrite every `x`). Context-aware
+ * paths (sensitive `KEY=value` assignments, `?key=value` query pairs,
+ * `sanitizePayload` whole-value drops, Bearer/Basic/JWT/token patterns)
+ * classify by key or shape and stay length-independent. */
+// Blind literal secrets need a length floor: below 8 chars collisions with
+// prose/tokens are near-certain, while real keys (Bearer, `sk-`, API values)
+// are far longer. Only this literal replacer is gated; key-driven paths below
+// and TOKEN_PATTERNS above keep full recall on short values.
+const MIN_LITERAL_SECRET_LENGTH = 8;
+
 export function redact(text: string, extraSecrets: string[] = []): string {
   let out = text;
-  const secrets = [...new Set(extraSecrets.filter((s) => s.length > 0))].sort(
+  const secrets = [...new Set(extraSecrets.filter((s) => s.length >= MIN_LITERAL_SECRET_LENGTH))].sort(
     (a, b) => b.length - a.length,
   );
   for (const secret of secrets) {
