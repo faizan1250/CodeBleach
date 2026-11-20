@@ -118,7 +118,7 @@ describe("opencode provider identity", () => {
     expect(body["max_output_tokens"]).toBe(512);
     expect(body["instructions"]).toBe("review");
     expect(body["input"]).toBe("find bugs");
-    for (const key of ["tools", "tool_choice", "response_format", "text", "json_schema"]) {
+    for (const key of ["tools", "tool_choice", "response_format", "text", "json_schema", "temperature", "stream"]) {
       expect(body[key]).toBeUndefined();
     }
   });
@@ -242,6 +242,18 @@ describe("opencode provider responses", () => {
     expect(err.message).toContain("max_output_tokens");
     expect(calls).toHaveLength(1);
   });
+
+  test("failed envelopes fail without retry with the detail preserved", async () => {
+    const { calls, fetchFn } = captureFetch([
+      jsonResponse({ status: "failed", error: { message: "policy violation" } }),
+    ]);
+    const provider = new OpenCodeProvider({ env: GATE, version: "0.1.0", fetchFn });
+    const err = await codeOf(provider.complete(REQUEST));
+    expect(err.code).toBe("PROVIDER_FAILED");
+    expect(err.retryable).toBe(false);
+    expect(err.message).toContain("policy violation");
+    expect(calls).toHaveLength(1);
+  });
 });
 
 describe("opencode provider retries", () => {
@@ -298,6 +310,165 @@ describe("opencode provider retries", () => {
     expect((await provider.complete(REQUEST)).text).toBe("hello");
     expect(calls).toHaveLength(2);
     expect(seen).toEqual([2000]);
+  });
+
+  test("retries 408 then succeeds within the bound", async () => {
+    const { calls, fetchFn } = captureFetch([
+      jsonResponse({ error: "timeout" }, 408),
+      jsonResponse(okBody()),
+    ]);
+    const provider = new OpenCodeProvider({
+      env: GATE,
+      version: "0.1.0",
+      fetchFn,
+      sleep: () => Promise.resolve(),
+    });
+    expect((await provider.complete(REQUEST)).text).toBe("hello");
+    expect(calls).toHaveLength(2);
+  });
+
+  test("persistent 408 stays retryable", async () => {
+    const { fetchFn } = captureFetch([jsonResponse({ error: "timeout" }, 408)]);
+    const provider = new OpenCodeProvider({
+      env: GATE,
+      version: "0.1.0",
+      fetchFn,
+      maxRetries: 0,
+    });
+    const err = await codeOf(provider.complete(REQUEST));
+    expect(err.code).toBe("PROVIDER_FAILED");
+    expect(err.retryable).toBe(true);
+    expect(err.message).toContain("408");
+  });
+
+  test("honors http-date retry-after on 429 and clamps far-future dates", async () => {
+    const seen: number[] = [];
+    const near = new Date(Date.now() + 5000).toUTCString();
+    const far = new Date(Date.now() + 3_600_000).toUTCString();
+    const first = captureFetch([
+      jsonResponse({ error: "slow" }, 429, { "Retry-After": near }),
+      jsonResponse(okBody()),
+    ]);
+    const provider = new OpenCodeProvider({
+      env: GATE,
+      version: "0.1.0",
+      fetchFn: first.fetchFn,
+      sleep: (ms: number) => {
+        seen.push(ms);
+        return Promise.resolve();
+      },
+    });
+    expect((await provider.complete(REQUEST)).text).toBe("hello");
+    expect(first.calls).toHaveLength(2);
+    expect(seen[0]).toBeGreaterThan(0);
+    expect(seen[0]).toBeLessThanOrEqual(5000);
+
+    const clamped: number[] = [];
+    const second = captureFetch([
+      jsonResponse({ error: "slow" }, 429, { "Retry-After": far }),
+      jsonResponse(okBody()),
+    ]);
+    const clamping = new OpenCodeProvider({
+      env: GATE,
+      version: "0.1.0",
+      fetchFn: second.fetchFn,
+      sleep: (ms: number) => {
+        clamped.push(ms);
+        return Promise.resolve();
+      },
+    });
+    expect((await clamping.complete(REQUEST)).text).toBe("hello");
+    expect(clamped).toEqual([30000]);
+  });
+
+  test("retries connection failures then succeeds", async () => {
+    let attempts = 0;
+    const fetchFn = (async (): Promise<Response> => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("connect ECONNREFUSED 127.0.0.1:443");
+      return jsonResponse(okBody());
+    }) as unknown as typeof fetch;
+    const provider = new OpenCodeProvider({
+      env: GATE,
+      version: "0.1.0",
+      fetchFn,
+      sleep: () => Promise.resolve(),
+    });
+    expect((await provider.complete(REQUEST)).text).toBe("hello");
+    expect(attempts).toBe(2);
+  });
+
+  test("persistent connection failures stay retryable", async () => {
+    const fetchFn = (async (): Promise<Response> => {
+      throw new Error("connect ECONNREFUSED 127.0.0.1:443");
+    }) as unknown as typeof fetch;
+    const provider = new OpenCodeProvider({
+      env: GATE,
+      version: "0.1.0",
+      fetchFn,
+      maxRetries: 0,
+      sleep: () => Promise.resolve(),
+    });
+    const err = await codeOf(provider.complete(REQUEST));
+    expect(err.code).toBe("PROVIDER_FAILED");
+    expect(err.retryable).toBe(true);
+  });
+
+  test("abort during backoff fires no further fetch", async () => {
+    const controller = new AbortController();
+    const { calls, fetchFn } = captureFetch([
+      jsonResponse({ error: "busy" }, 500),
+      jsonResponse(okBody()),
+    ]);
+    const provider = new OpenCodeProvider({
+      env: GATE,
+      version: "0.1.0",
+      fetchFn,
+      sleep: () => {
+        controller.abort(new Error("deadline"));
+        return Promise.resolve();
+      },
+    });
+    const err = await codeOf(provider.complete(REQUEST, controller.signal));
+    expect(err.code).toBe("PROVIDER_FAILED");
+    expect(err.retryable).toBe(false);
+    expect(err.message).toContain("aborted");
+    expect(calls).toHaveLength(1);
+  });
+
+  test("nan max retries fall back to the default bound", async () => {
+    const { calls, fetchFn } = captureFetch([
+      jsonResponse({ error: "x" }, 500),
+      jsonResponse({ error: "x" }, 500),
+      jsonResponse({ error: "x" }, 500),
+      jsonResponse(okBody()),
+    ]);
+    const provider = new OpenCodeProvider({
+      env: GATE,
+      version: "0.1.0",
+      fetchFn,
+      maxRetries: NaN,
+      sleep: () => Promise.resolve(),
+    });
+    const err = await codeOf(provider.complete(REQUEST));
+    expect(err.code).toBe("PROVIDER_FAILED");
+    expect(err.retryable).toBe(true);
+    expect(calls).toHaveLength(3);
+  });
+
+  test("nan timeout falls back to default instead of instant abort", async () => {
+    const fetchFn = (async (): Promise<Response> => {
+      await new Promise<void>((r) => setTimeout(r, 50));
+      return jsonResponse(okBody());
+    }) as unknown as typeof fetch;
+    const provider = new OpenCodeProvider({
+      env: GATE,
+      version: "0.1.0",
+      fetchFn,
+      timeoutMs: NaN,
+      maxRetries: 0,
+    });
+    expect((await provider.complete(REQUEST)).text).toBe("hello");
   });
 
   test("maps 400/401/403/404 without retry", async () => {

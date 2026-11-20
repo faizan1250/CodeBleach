@@ -91,11 +91,13 @@ export class OpenCodeProvider implements LlmProvider {
     this.sessionId = sessionId.length > 0 ? sessionId : mintSessionId();
     this.version = options.version ?? "0.0.0";
     this.maxRetries =
-      options.maxRetries === undefined
+      options.maxRetries === undefined || !Number.isFinite(options.maxRetries)
         ? DEFAULT_LLM_MAX_RETRIES
         : Math.min(MAX_LLM_MAX_RETRIES, Math.max(0, Math.floor(options.maxRetries)));
     this.defaultTimeoutMs =
-      options.timeoutMs === undefined ? DEFAULT_LLM_REQUEST_TIMEOUT_MS : options.timeoutMs;
+      options.timeoutMs === undefined || !Number.isFinite(options.timeoutMs)
+        ? DEFAULT_LLM_REQUEST_TIMEOUT_MS
+        : options.timeoutMs;
     this.fetchFn = options.fetchFn ?? fetch;
     this.sleepFn = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   }
@@ -116,7 +118,10 @@ export class OpenCodeProvider implements LlmProvider {
         message: `request aborted before send: ${redact(String(signal.reason ?? "aborted"), [key])}`,
       });
     }
-    const timeoutMs = Math.max(1, request.timeoutMs ?? this.defaultTimeoutMs);
+    const requestedTimeout = request.timeoutMs ?? this.defaultTimeoutMs;
+    const timeoutMs = Number.isFinite(requestedTimeout)
+      ? Math.max(1, requestedTimeout)
+      : DEFAULT_LLM_REQUEST_TIMEOUT_MS;
     const maxTokens = Math.min(
       MAX_LLM_MAX_OUTPUT_TOKENS,
       Math.max(1, Math.floor(request.maxTokens ?? DEFAULT_LLM_MAX_OUTPUT_TOKENS)),
@@ -136,9 +141,20 @@ export class OpenCodeProvider implements LlmProvider {
       "x-opencode-session": this.sessionId,
     };
 
+    const abortError = (): ReviewerError =>
+      new ReviewerError({
+        code: "PROVIDER_FAILED",
+        message: `request aborted: ${redact(String(signal?.reason ?? "aborted"), [key])}`,
+      });
+
     let waitMs = 0;
     for (let attempt = 0; ; attempt += 1) {
-      if (attempt > 0) await this.sleepFn(waitMs);
+      if (signal?.aborted) throw abortError();
+      if (attempt > 0) {
+        await this.sleepFn(waitMs);
+        // Cancel landing in the backoff window must not fire another POST.
+        if (signal?.aborted) throw abortError();
+      }
       const outcome = await this.attempt(body, headers, signal, timeoutMs, attempt, modelId, key);
       if (outcome.kind === "ok") return outcome.response;
       if (!outcome.error.retryable || attempt >= this.maxRetries) throw outcome.error;
@@ -214,7 +230,7 @@ export class OpenCodeProvider implements LlmProvider {
       // Best-effort detail: an unreadable body still yields a classified HTTP error.
       const snippet = await res
         .text()
-        .then((bodyText) => redact(bodyText.slice(0, ERROR_SNIPPET_CHARS), [key]), () => "");
+        .then((bodyText) => redact(bodyText, [key]).slice(0, ERROR_SNIPPET_CHARS), () => "");
       const suffix = snippet.length > 0 ? `: ${snippet}` : "";
       switch (res.status) {
         case 408:
