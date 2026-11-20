@@ -123,7 +123,7 @@ Partial behavior: `ContextBuildResult.status` is `complete` (no issues) | `parti
 ### 4.3 Review Engine (`src/review`)
 - **MVP: one agent, one pass per ReviewUnit** with a single focused prompt (bugs, null handling, security, regressions). One unit maps to one provider request (plus bounded transport retries, one JSON repair, one `max_output_tokens` cap escalation); never batch units or split a semantic unit. Add specialized passes (security, concurrency, perf) as separate prompt files only if evals show recall gaps. Separate agents are justified only when a pass needs different tools/context or different models for cost; not before.
 - Input: `ReviewUnit` (diff hunks with line numbers, symbol, context items, rules).
-- Output: `ReviewBuildResult` (ADR 0017) — `status` (`complete | partial | failed | skipped`), code-owned `Finding[]` (ids, `sha1(file + symbol + category + normalized title)` fingerprints, head SHA, symbol, origin), bounded redacted per-unit diagnostics, and usage (`requests/retries/repairRequests/incompleteRetries`, tokens/cost only when the provider reports them). Model output passes strict `RawReviewOutput` (Zod) validation first; the LLM never produces ids, SHAs or fingerprints. A failed unit never erases findings from successful ones. Bounded concurrency (default 3), stable result order.
+- Output: `ReviewBuildResult` (ADR 0017) — `status` (`complete | partial | failed | skipped`), code-owned `Finding[]` (ids, `sha1(file + symbol + category + normalized title)` fingerprints, head SHA, symbol, origin), bounded redacted per-unit diagnostics, and usage (`requests/retries/repairRequests/incompleteRetries`, tokens/cost only when the provider reports them). Model output passes strict `RawReviewOutput` (Zod) validation first; the LLM never produces ids, SHAs or fingerprints. A failed unit never erases findings from successful ones. Bounded concurrency (default 3), stable result order. One stage deadline (`review_timeout_ms`, default 600000) plus caller `AbortSignal` bound the whole run (ADR 0018): stops skip queued units with `REVIEW_DEADLINE_EXCEEDED` / `REVIEW_CANCELLED` and abort in-flight requests, preserving completed findings.
 - Prompt rules: report only issues introduced by the PR; cite exact code in `evidence`; use only provided context; say nothing if no confirmed bug (`findings: []` is a valid answer); untrusted code goes inside delimited blocks and is declared as data.
 
 ### 4.4 Validation Engine (`src/validate`)
@@ -332,13 +332,14 @@ llm:
   max_retries: 2
   max_concurrent_requests: 3
   max_review_unit_input_tokens: 64000
+  review_timeout_ms: 600000
 ```
 
 Behavior: missing file → defaults. Invalid file → `ConfigError` (CLI exit 2); in Action, publish a single comment describing the config error rather than silently reviewing with defaults. User `ignore.paths` extend (never replace) the built-in defaults. A `.reviewer.yml` symlink is followed only when its resolved target stays inside the resolved repository root and is a regular file; outside targets, dangling links, loops, and directories are config errors, never silent defaults. Unknown keys → error (catches typos). Evolution: `version` field + `migrate(raw)` registry chain; new fields are always optional with defaults.
 
 Optional `review.max_file_size_kb` (default 500 KB, absolute ceiling 26623 KB, ADRs 0007, 0009) is measured from the head-commit blob; over-limit files skip with `"too-large"`. An accepted blob plus its 1-byte growth sentinel must fit the 26 MiB per-stream blob-read cap, so values above the ceiling are rejected at config load. Configured glob fields are validated against the documented `*`/`**`/`**/`/`?` subset at load time.
 
-Optional `context` time limits bound the Context Engine (Phase 3): `max_run_time_ms` (default 120000, 5000–600000) is the overall wall-clock deadline, `max_parse_time_ms` (default 2000, 100–30000) caps one file parse, `max_total_parse_time_ms` (default 30000, 1000–180000) caps cumulative parsing. Config load rejects `max_parse_time_ms > max_total_parse_time_ms > max_run_time_ms` violations as `CONFIG_INVALID`. Optional `llm` controls tune the fixed-model integration (Phase 4, ADR 0016): `request_timeout_ms` (default 90000, 1000–600000), `max_output_tokens` (default 32768), `max_retries` (default 2, 0–5), `max_concurrent_requests` (default 3, 1–10), `max_review_unit_input_tokens` (default 64000, per-unit ceiling). There are no `provider`/`model`/`api_family` selectors: the target is pinned in code (`src/llm/constants.ts`), unknown `llm.*` keys are rejected, and token ceilings are clamped to the authenticated model limits at runtime. Phase 1–3 configuration files load unchanged with `llm` defaults applied.
+Optional `context` time limits bound the Context Engine (Phase 3): `max_run_time_ms` (default 120000, 5000–600000) is the overall wall-clock deadline, `max_parse_time_ms` (default 2000, 100–30000) caps one file parse, `max_total_parse_time_ms` (default 30000, 1000–180000) caps cumulative parsing. Config load rejects `max_parse_time_ms > max_total_parse_time_ms > max_run_time_ms` violations as `CONFIG_INVALID`. Optional `llm` controls tune the fixed-model integration (Phase 4, ADR 0016): `request_timeout_ms` (default 90000, 1000–600000), `max_output_tokens` (default 32768), `max_retries` (default 2, 0–5), `max_concurrent_requests` (default 3, 1–10), `max_review_unit_input_tokens` (default 64000, per-unit ceiling), `review_timeout_ms` (default 600000, 1000–3600000, overall review wall-clock deadline, ADR 0018). There are no `provider`/`model`/`api_family` selectors: the target is pinned in code (`src/llm/constants.ts`), unknown `llm.*` keys are rejected, and token ceilings are clamped to the authenticated model limits at runtime. Phase 1–3 configuration files load unchanged with `llm` defaults applied.
 
 ---
 
@@ -354,6 +355,7 @@ export interface LlmResponse {
   text: string; parsed?: unknown;
   usage?: { inputTokens: number; outputTokens: number; reasoningTokens?: number };
   costUsd?: number;            // provider-reported charge only, never estimated
+  retries?: number;           // transport retries behind this response (ADR 0018)
   model: string; raw?: unknown;
 }
 export interface LlmProvider {
@@ -383,8 +385,11 @@ host, no repository execution. Every model request requires exact
 by P4-07 (ADR 0017): completed-response usage/cost/reasoning capture
 (`usage.{input,output,reasoning}Tokens`, provider-reported `costUsd`), the
 `ReviewBuildResult` status/usage/diagnostics contract, and redacted `run.json`
-persistence. Still open for P4-08+: provider-reported transport-retry counts,
-Go allowance/billing-source surfacing beyond `raw`, and retry/timeout mapping.
+persistence. Resolved by P4-08 (ADR 0018): provider-reported transport-retry counts
+(`LlmResponse.retries`, exhausted-error `retries`, `usage.retries` distinct
+from repairs), the overall `review_timeout_ms` stage deadline, and
+deadline/caller abort propagation with partial-result preservation. Still
+open: Go allowance/billing-source surfacing beyond `raw`.
 
 **Prompt-injection & secrets (applies to all LLM calls):** wrap code in delimited blocks and state it is untrusted data; reviewer prompt contains no secrets; no tool access for the model beyond what's strictly needed; redact secrets (regex + entropy) and skip `.env*`, `*.pem`, key files before sending; discard any finding whose output tries to change instructions/format; never execute anything suggested by the model.
 
@@ -406,7 +411,7 @@ Go allowance/billing-source surfacing beyond `raw`, and retry/timeout mapping.
 
 - **Errors:** `ReviewerError{ code, retryable, cause }`. `Result<T,E>` for expected failures at module boundaries (config load, parse); throw for bugs. Exit codes: `0` ok, `1` runtime failure, `2` config/usage error.
 - **Logging:** JSON lines to stderr, levels `debug|info|warn|error`, one CLI-minted `runId` shared by every line and the run artifact, redaction built in. Human-readable results go to stdout.
-- **Reliability:** per-call timeout + abort, bounded retries (exp backoff + jitter) only on retryable errors, partial-failure tolerant (a failed unit ≠ failed run), head-SHA recheck before publish.
+- **Reliability:** per-call timeout + abort, bounded retries (exp backoff + jitter) only on retryable errors, overall review-stage deadline (`review_timeout_ms`) with caller-cancel propagation, partial-failure tolerant (a failed unit ≠ failed run), head-SHA recheck before publish.
 - **Cost:** skip irrelevant files, token budgets, batch small units, cache LLM responses by `hash(prompt+model)` in `.reviewer-cache/` (dev/eval only at first), incremental re-review on `synchronize` = only changed files since last reviewed SHA (Phase 8).
 
 ---

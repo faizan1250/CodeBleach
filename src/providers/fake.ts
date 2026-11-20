@@ -6,6 +6,8 @@ export interface ScriptedStep {
   /** Reported usage for P4-07 aggregation tests; absent means unknown. */
   usage?: LlmUsage | undefined;
   costUsd?: number | undefined;
+  /** Transport retries behind this scripted response; absent means unreported. */
+  retries?: number | undefined;
 }
 
 /** Scripted provider for tests: first matching step wins, unmatched requests fail loudly. */
@@ -37,6 +39,7 @@ export class FakeProvider implements LlmProvider {
       model: "fake-model",
       ...(step.usage === undefined ? {} : { usage: { ...step.usage } }),
       ...(step.costUsd === undefined ? {} : { costUsd: step.costUsd }),
+      ...(step.retries === undefined ? {} : { retries: step.retries }),
     };
   }
 }

@@ -26,6 +26,41 @@ export interface ReviewEngineOptions {
   headSha?: string | undefined;
 }
 
+export interface ReviewCallOptions {
+  /** Caller cancellation; aborts in-flight requests and skips queued units. */
+  signal?: AbortSignal | undefined;
+}
+
+// P4-08 stop reasons: caller cancellation wins over the stage deadline.
+type StopReason = "cancelled" | "deadline" | null;
+
+function stopCode(reason: StopReason): "REVIEW_CANCELLED" | "REVIEW_DEADLINE_EXCEEDED" | undefined {
+  if (reason === "cancelled") return "REVIEW_CANCELLED";
+  if (reason === "deadline") return "REVIEW_DEADLINE_EXCEEDED";
+  return undefined;
+}
+
+// Units never started after a stop keep stable order with a content-free skip.
+function skipOutcome(unit: ReviewUnit, reason: "cancelled" | "deadline"): UnitOutcome {
+  const code = reason === "cancelled" ? "REVIEW_CANCELLED" : "REVIEW_DEADLINE_EXCEEDED";
+  return {
+    ok: false,
+    findings: [],
+    diagnostics: [
+      {
+        stage: "unit",
+        code,
+        message:
+          reason === "cancelled"
+            ? "review unit skipped: run was cancelled before review started"
+            : "review unit skipped: stage deadline expired before review started",
+        unitId: unit.id,
+        retryable: false,
+      },
+    ],
+    usage: emptyReviewUsage(),
+  };
+}
 // P4-05: Responses `incomplete` is not a parse failure and is never
 // JSON-repaired. Only `max_output_tokens` gets one bounded cap escalation per
 // unit; the provider preserves the reason in the message, which is the
@@ -72,7 +107,11 @@ export class ReviewEngineImpl implements ReviewEngine {
     this.headSha = opts.headSha ?? "";
   }
 
-  async review(units: ReviewUnit[], config: ResolvedConfig): Promise<ReviewBuildResult> {
+  async review(
+    units: ReviewUnit[],
+    config: ResolvedConfig,
+    options?: ReviewCallOptions | undefined,
+  ): Promise<ReviewBuildResult> {
     const identity = { version: CODE_REVIEW_PROMPT_VERSION, hash: codeReviewTemplateHash() };
     if (units.length === 0) {
       return assembleReviewResult({
@@ -84,39 +123,87 @@ export class ReviewEngineImpl implements ReviewEngine {
       });
     }
     requireTrainingOptIn(this.env);
-    const limit = Math.max(1, config.llm.max_concurrent_requests);
-    const out: UnitOutcome[] = new Array(units.length);
-    let next = 0;
-    const workers = Array.from({ length: Math.min(limit, units.length) }, async () => {
-      for (;;) {
-        const index = next;
-        next += 1;
-        if (index >= units.length) return;
-        const unit = units[index];
-        if (unit === undefined) {
-          out[index] = { ok: true, findings: [], diagnostics: [], usage: emptyReviewUsage() };
-          continue;
+    const callerSignal = options?.signal;
+    // Stage deadline (P4-08): one wall-clock ceiling over every per-unit
+    // request, transport retry, repair, and cap escalation. Zero means the
+    // deadline is already expired: no unit starts. Expired callers abort via
+    // the stage controller below; clearTimeout in the finally always wins.
+    const stageBudgetMs = config.llm.review_timeout_ms;
+    const stage = new AbortController();
+    let deadlineFired = false;
+    const onCallerAbort = (): void => {
+      if (!stage.signal.aborted) stage.abort(callerSignal?.reason);
+    };
+    if (callerSignal?.aborted === true) {
+      stage.abort(callerSignal.reason);
+    } else {
+      callerSignal?.addEventListener("abort", onCallerAbort, { once: true });
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (stageBudgetMs <= 0 || stage.signal.aborted) {
+      deadlineFired = stageBudgetMs <= 0;
+    } else {
+      timer = setTimeout(() => {
+        deadlineFired = true;
+        stage.abort(new Error("review stage deadline exceeded"));
+      }, stageBudgetMs);
+    }
+    try {
+      const limit = Math.max(1, config.llm.max_concurrent_requests);
+      const out: UnitOutcome[] = new Array(units.length);
+      let next = 0;
+      const stopped = (): "cancelled" | "deadline" | null => {
+        if (callerSignal?.aborted === true) return "cancelled";
+        if (deadlineFired || stage.signal.aborted) return "deadline";
+        return null;
+      };
+      const workers = Array.from({ length: Math.min(limit, units.length) }, async () => {
+        for (;;) {
+          if (stopped() !== null) return;
+          const index = next;
+          next += 1;
+          if (index >= units.length) return;
+          const unit = units[index];
+          if (unit === undefined) {
+            out[index] = { ok: true, findings: [], diagnostics: [], usage: emptyReviewUsage() };
+            continue;
+          }
+          try {
+            out[index] = await this.reviewUnit(unit, config, stage.signal, stopped);
+          } catch (error) {
+            // Policy errors abort the whole run; per-unit failures stay partial.
+            if (error instanceof ReviewerError && error.code === "CONFIG_INVALID") throw error;
+            out[index] = this.unitFailure(unit, error, emptyReviewUsage(), stopCode(stopped()));
+          }
         }
-        try {
-          out[index] = await this.reviewUnit(unit, config);
-        } catch (error) {
-          // Policy errors abort the whole run; per-unit failures stay partial.
-          if (error instanceof ReviewerError && error.code === "CONFIG_INVALID") throw error;
-          out[index] = this.unitFailure(unit, error, emptyReviewUsage());
+      });
+      await Promise.all(workers);
+      // Units never claimed after a stop keep stable order with a skip diagnostic.
+      for (let index = 0; index < units.length; index += 1) {
+        if (out[index] === undefined) {
+          const unit = units[index];
+          if (unit !== undefined) out[index] = skipOutcome(unit, stopped() ?? "deadline");
         }
       }
-    });
-    await Promise.all(workers);
-    return assembleReviewResult({
-      unitsSubmitted: units.length,
-      outcomes: out,
-      promptVersion: identity.version,
-      promptHash: identity.hash,
-      model: FIXED_MODEL_ID,
-    });
+      return assembleReviewResult({
+        unitsSubmitted: units.length,
+        outcomes: out,
+        promptVersion: identity.version,
+        promptHash: identity.hash,
+        model: FIXED_MODEL_ID,
+      });
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      callerSignal?.removeEventListener("abort", onCallerAbort);
+    }
   }
 
-  private async reviewUnit(unit: ReviewUnit, config: ResolvedConfig): Promise<UnitOutcome> {
+  private async reviewUnit(
+    unit: ReviewUnit,
+    config: ResolvedConfig,
+    signal: AbortSignal,
+    stopped: () => StopReason,
+  ): Promise<UnitOutcome> {
     const built = buildReviewPrompt(unit, config);
     if (!isPromptWithinBudget(built, config.llm.max_review_unit_input_tokens)) {
       this.logger.warn("review unit skipped", { unitId: unit.id, reason: "input-budget-exceeded" });
@@ -138,10 +225,14 @@ export class ReviewEngineImpl implements ReviewEngine {
     const usage = emptyReviewUsage();
     const firstMax = config.llm.max_output_tokens;
     try {
-      const first = await this.completeUnit(unit, built, config, firstMax, usage);
+      const first = await this.completeUnit(unit, built, config, firstMax, usage, signal);
       return { ok: true, findings: first.findings, diagnostics: first.diagnostics, usage };
     } catch (error) {
       if (error instanceof ReviewerError && error.code === "CONFIG_INVALID") throw error;
+      // A stop during the attempt replaces the error code; escalation never
+      // outlives the stage deadline or caller cancellation.
+      const stop = stopCode(stopped());
+      if (stop !== undefined) return this.unitFailure(unit, error, usage, stop);
       // One bounded cap escalation for max_output_tokens only; every other
       // failure (refusal, other incomplete reasons, malformed output after
       // its single repair) stays partial with no further attempt.
@@ -150,11 +241,15 @@ export class ReviewEngineImpl implements ReviewEngine {
       if (escalated <= firstMax) return this.unitFailure(unit, error, usage, "REVIEW_OUTPUT_INCOMPLETE");
       usage.incompleteRetries += 1;
       try {
-        const second = await this.completeUnit(unit, built, config, escalated, usage);
+        const second = await this.completeUnit(unit, built, config, escalated, usage, signal);
         return { ok: true, findings: second.findings, diagnostics: second.diagnostics, usage };
       } catch (escalatedError) {
         if (escalatedError instanceof ReviewerError && escalatedError.code === "CONFIG_INVALID") {
           throw escalatedError;
+        }
+        const escalatedStop = stopCode(stopped());
+        if (escalatedStop !== undefined) {
+          return this.unitFailure(unit, escalatedError, usage, escalatedStop);
         }
         return this.unitFailure(unit, escalatedError, usage, "REVIEW_OUTPUT_INCOMPLETE");
       }
@@ -176,7 +271,7 @@ export class ReviewEngineImpl implements ReviewEngine {
     this.logger.warn("review unit failed", {
       unitId: unit.id,
       code: failureCode,
-      ...(code === undefined ? {} : { reason: "output-incomplete" }),
+      ...(failureCode === "REVIEW_OUTPUT_INCOMPLETE" ? { reason: "output-incomplete" } : {}),
     });
     const diagnostic: ReviewDiagnostic = {
       stage,
@@ -200,6 +295,7 @@ export class ReviewEngineImpl implements ReviewEngine {
     config: ResolvedConfig,
     maxTokens: number,
     usage: ReviewUsage,
+    signal: AbortSignal,
   ): Promise<{ findings: Finding[]; diagnostics: ReviewDiagnostic[] }> {
     const stats = newJsonCallStats();
     try {
@@ -213,6 +309,7 @@ export class ReviewEngineImpl implements ReviewEngine {
         },
         RawReviewOutputSchema,
         stats,
+        signal,
       );
       const findings: Finding[] = [];
       const diagnostics: ReviewDiagnostic[] = [];
@@ -243,6 +340,7 @@ export class ReviewEngineImpl implements ReviewEngine {
       // Failed attempts still spent requests/tokens; account them always.
       mergeReviewUsage(usage, {
         requests: stats.requests,
+        retries: stats.retries,
         repairRequests: stats.repairs,
         inputTokens: stats.inputTokens,
         outputTokens: stats.outputTokens,
