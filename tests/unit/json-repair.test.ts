@@ -63,4 +63,29 @@ describe("completeJson", () => {
     await expect(completeJson(provider, request, Schema)).rejects.toBe(failure);
     expect(provider.calls).toHaveLength(1);
   });
+
+  test("truncates an oversized invalid response in the repair request", async () => {
+    const tail = "TAIL-MARKER-9f3c";
+    const provider = new FakeProvider([
+      { respond: `${"x".repeat(20000)}${tail}` },
+      { respond: '{"findings":[]}' },
+    ]);
+    await expect(completeJson(provider, request, Schema)).resolves.toEqual({ findings: [] });
+    expect(provider.calls).toHaveLength(2);
+    const repairUser = provider.calls[1]?.user ?? "";
+    expect(repairUser).toContain("x".repeat(100));
+    expect(repairUser).not.toContain(tail);
+    expect(repairUser.length).toBeLessThan(10000);
+  });
+
+  test("truncates oversized validation errors in the repair request", async () => {
+    const invalid = Array.from({ length: 300 }, () => ({ findings: "oops" }));
+    const provider = new FakeProvider([
+      { respond: JSON.stringify({ findings: invalid }) },
+      { respond: '{"findings":[]}' },
+    ]);
+    await expect(completeJson(provider, request, Schema)).resolves.toEqual({ findings: [] });
+    expect(provider.calls).toHaveLength(2);
+    expect((provider.calls[1]?.user ?? "").length).toBeLessThan(10000);
+  });
 });
