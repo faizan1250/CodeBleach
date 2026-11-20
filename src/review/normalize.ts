@@ -12,7 +12,7 @@ export function normalizeRepoPath(path: string): string | null {
   let posix = trimmed.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
   while (posix.startsWith("./")) posix = posix.slice(2);
   if (posix.startsWith("/")) return null;
-  if (/^[A-Za-z]:(\/|$)/.test(posix)) return null;
+  if (/^[A-Za-z]:/.test(posix)) return null;
   const out: string[] = [];
   for (const segment of posix.split("/")) {
     if (segment === ".") continue;
@@ -35,7 +35,8 @@ export function fingerprintForFinding(input: {
   category: string;
   title: string;
 }): string {
-  const normalizedFile = normalizeRepoPath(input.file) ?? input.file.trim().replace(/\\/g, "/");
+  const fallback = input.file.trim().replace(/\\/g, "/").replace(/\/{2,}/g, "/").replace(/^(?:\.\/)+/, "");
+  const normalizedFile = normalizeRepoPath(input.file) ?? fallback;
   const normalizedTitle = normalizeTitleStorage(input.title).toLowerCase();
   return createHash("sha1")
     .update(`${normalizedFile}\u0000${input.symbol}\u0000${input.category}\u0000${normalizedTitle}`)

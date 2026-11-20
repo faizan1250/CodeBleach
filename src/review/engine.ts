@@ -157,7 +157,7 @@ export class ReviewEngineImpl implements ReviewEngine {
         pass: CODE_REVIEW_PROMPT_VERSION,
       });
       // Rejected findings carry no diagnostics yet (P4-07); log only the
-      // unit id and count so no model output leaks into logs.
+      // unit id so no model output leaks into logs.
       if (finding === null) {
         this.logger.warn("review finding rejected", { unitId: unit.id });
         continue;

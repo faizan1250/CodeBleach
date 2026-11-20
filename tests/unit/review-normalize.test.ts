@@ -107,6 +107,7 @@ describe("normalizeRepoPath", () => {
     expect(normalizeRepoPath("/etc/passwd")).toBeNull();
     expect(normalizeRepoPath("C:/Windows/x.ts")).toBeNull();
     expect(normalizeRepoPath("C:\\Windows\\x.ts")).toBeNull();
+    expect(normalizeRepoPath("C:foo/bar.ts")).toBeNull();
   });
 
   test("rejects traversal segments", () => {
@@ -185,6 +186,17 @@ describe("finding fingerprint", () => {
     });
     expect(b).not.toBe(a);
   });
+
+  test("fallback collapses separators like the stored path", () => {
+    const base = {
+      symbol: "check",
+      category: "null-handling",
+      title: "Null dereference on name",
+    };
+    const collapsed = fingerprintForFinding({ ...base, file: "../src/auth.ts" });
+    expect(fingerprintForFinding({ ...base, file: "..//src/auth.ts" })).toBe(collapsed);
+    expect(fingerprintForFinding({ ...base, file: "./../src/auth.ts" })).toBe(collapsed);
+  });
 });
 
 describe("normalizeFinding", () => {
@@ -233,6 +245,10 @@ describe("normalizeFinding", () => {
         { unit: unit(), headSha: "h" },
       ),
     ).toBeNull();
+  });
+
+  test("rejects blank titles", () => {
+    expect(normalizeFinding(raw({ title: "   " }), { unit: unit(), headSha: "h" })).toBeNull();
   });
 
   test("preserves introducedByPr as unverified model assertion", () => {
