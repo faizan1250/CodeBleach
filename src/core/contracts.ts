@@ -9,6 +9,7 @@ import type {
   ValidatedFinding,
 } from "../types/index.ts";
 import type { ContextBuildResult } from "../types/context.ts";
+import type { ReviewBuildResult } from "../types/review.ts";
 import type { ResolvedConfig } from "../config/schema.ts";
 import type { Result } from "./result.ts";
 import type { ConfigLoadResult } from "../config/load.ts";
@@ -28,7 +29,7 @@ export interface ContextEngine {
 }
 
 export interface ReviewEngine {
-  review(units: ReviewUnit[], config: ResolvedConfig): Promise<Finding[]>;
+  review(units: ReviewUnit[], config: ResolvedConfig): Promise<ReviewBuildResult>;
 }
 
 export interface ValidationEngine {

@@ -29,12 +29,25 @@ export function emptyReviewUsage(): ReviewUsage {
   };
 }
 
+/** Sparse per-call slice; unknown stays undefined, never zero. */
+export interface UsageDelta {
+  requests?: number | undefined;
+  retries?: number | undefined;
+  repairRequests?: number | undefined;
+  incompleteRetries?: number | undefined;
+  inputTokens?: number | undefined;
+  outputTokens?: number | undefined;
+  reasoningTokens?: number | undefined;
+  costUsd?: number | undefined;
+  costKnown?: boolean | undefined;
+}
+
 /** Sum a per-unit slice into the run total; unknown stays undefined, never zero. */
-export function mergeReviewUsage(total: ReviewUsage, part: ReviewUsage): void {
-  total.requests += part.requests;
-  total.retries += part.retries;
-  total.repairRequests += part.repairRequests;
-  total.incompleteRetries += part.incompleteRetries;
+export function mergeReviewUsage(total: ReviewUsage, part: UsageDelta): void {
+  total.requests += part.requests ?? 0;
+  total.retries += part.retries ?? 0;
+  total.repairRequests += part.repairRequests ?? 0;
+  total.incompleteRetries += part.incompleteRetries ?? 0;
   if (part.inputTokens !== undefined) total.inputTokens = (total.inputTokens ?? 0) + part.inputTokens;
   if (part.outputTokens !== undefined) {
     total.outputTokens = (total.outputTokens ?? 0) + part.outputTokens;
@@ -42,7 +55,7 @@ export function mergeReviewUsage(total: ReviewUsage, part: ReviewUsage): void {
   if (part.reasoningTokens !== undefined) {
     total.reasoningTokens = (total.reasoningTokens ?? 0) + part.reasoningTokens;
   }
-  if (part.costKnown) {
+  if (part.costKnown === true) {
     total.costKnown = true;
     total.costUsd = (total.costUsd ?? 0) + (part.costUsd ?? 0);
   }
