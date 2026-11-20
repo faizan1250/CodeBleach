@@ -156,7 +156,7 @@ export class OpenCodeProvider implements LlmProvider {
         if (signal?.aborted) throw abortError();
       }
       const outcome = await this.attempt(body, headers, signal, timeoutMs, attempt, modelId, key);
-      if (outcome.kind === "ok") return outcome.response;
+      if (outcome.kind === "ok") return { ...outcome.response, retries: attempt };
       if (!outcome.error.retryable || attempt >= this.maxRetries) throw outcome.error;
       waitMs = outcome.waitMs;
     }
@@ -206,6 +206,7 @@ export class OpenCodeProvider implements LlmProvider {
             ? `request timed out after ${timeoutMs}ms`
             : `request failed: ${redact(error instanceof Error ? error.message : String(error), [key]).slice(0, ERROR_SNIPPET_CHARS)}`,
           retryable: true,
+          retries: attempt,
         }),
         waitMs: backoffMs(attempt),
       };
@@ -223,7 +224,12 @@ export class OpenCodeProvider implements LlmProvider {
   ): Promise<AttemptOutcome> {
     const fail = (message: string, retryable: boolean, waitMs: number): AttemptOutcome => ({
       kind: "error",
-      error: new ReviewerError({ code: "PROVIDER_FAILED", message, retryable }),
+      error: new ReviewerError({
+        code: "PROVIDER_FAILED",
+        message,
+        retryable,
+        ...(retryable ? { retries: attempt } : {}),
+      }),
       waitMs,
     });
     if (!res.ok) {

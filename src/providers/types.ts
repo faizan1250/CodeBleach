@@ -20,6 +20,8 @@ export interface LlmResponse {
   usage?: LlmUsage | undefined;
   /** Provider-reported charge in USD; present only when the API reports it. */
   costUsd?: number | undefined;
+  /** Transport retries performed inside complete() before this response. */
+  retries?: number | undefined;
   model: string;
   raw?: unknown;
 }

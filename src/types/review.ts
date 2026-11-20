@@ -8,7 +8,7 @@ export type ReviewStatus = "complete" | "partial" | "failed" | "skipped";
 export interface ReviewUsage {
   /** Total LlmProvider.complete() calls: initial + repair + cap-escalation. */
   requests: number;
-  /** Provider-internal transport retries (0 until the provider reports them; P4-08). */
+  /** Transport retries performed inside provider complete() calls (P4-08). */
   retries: number;
   /** JSON-repair follow-up requests issued through completeJson. */
   repairRequests: number;

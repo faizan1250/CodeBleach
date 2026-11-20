@@ -29,7 +29,11 @@ export interface ContextEngine {
 }
 
 export interface ReviewEngine {
-  review(units: ReviewUnit[], config: ResolvedConfig): Promise<ReviewBuildResult>;
+  review(
+    units: ReviewUnit[],
+    config: ResolvedConfig,
+    options?: { signal?: AbortSignal | undefined } | undefined,
+  ): Promise<ReviewBuildResult>;
 }
 
 export interface ValidationEngine {

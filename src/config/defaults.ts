@@ -67,6 +67,16 @@ export const MIN_LLM_MAX_CONCURRENT_REQUESTS = 1;
 
 export const MAX_LLM_MAX_CONCURRENT_REQUESTS = 10;
 
+// Overall review-stage wall-clock ceiling (P4-08): bounds every per-unit
+// request, transport retry, repair, and cap escalation in one run. Generous
+// against the 90s per-request default so large reviews fit; aborts in-flight
+// work via AbortSignal instead of letting the CLI hang.
+export const DEFAULT_LLM_REVIEW_TIMEOUT_MS = 600000;
+
+export const MIN_LLM_REVIEW_TIMEOUT_MS = 1000;
+
+export const MAX_LLM_REVIEW_TIMEOUT_MS = 3600000;
+
 export const DEFAULT_LLM_MAX_REVIEW_UNIT_INPUT_TOKENS = 64000;
 
 export const MIN_LLM_MAX_REVIEW_UNIT_INPUT_TOKENS = 1000;

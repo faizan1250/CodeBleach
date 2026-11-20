@@ -51,6 +51,8 @@ export async function completeJson<T>(
 export interface JsonCallStats {
   requests: number;
   repairs: number;
+  /** Transport retries reported by the provider behind each response or error. */
+  retries: number;
   inputTokens?: number | undefined;
   outputTokens?: number | undefined;
   reasoningTokens?: number | undefined;
@@ -59,7 +61,7 @@ export interface JsonCallStats {
 }
 
 export function newJsonCallStats(): JsonCallStats {
-  return { requests: 0, repairs: 0, costKnown: false };
+  return { requests: 0, repairs: 0, retries: 0, costKnown: false };
 }
 
 function accumulateResponseStats(stats: JsonCallStats, response: LlmResponse): void {
@@ -75,6 +77,13 @@ function accumulateResponseStats(stats: JsonCallStats, response: LlmResponse): v
     stats.costKnown = true;
     stats.costUsd = (stats.costUsd ?? 0) + response.costUsd;
   }
+  stats.retries += response.retries ?? 0;
+}
+
+function accumulateErrorRetries(stats: JsonCallStats, error: unknown): void {
+  if (error instanceof ReviewerError && error.retries !== undefined) {
+    stats.retries += error.retries;
+  }
 }
 
 /** Same single-repair policy as completeJson, plus provider-call accounting. */
@@ -83,17 +92,24 @@ export async function completeJsonWithStats<T>(
   request: LlmRequest,
   schema: z.ZodType<T>,
   stats: JsonCallStats,
+  signal?: AbortSignal | undefined,
 ): Promise<T> {
   stats.requests += 1;
-  const first = await provider.complete(request);
+  let first: LlmResponse;
+  try {
+    first = await provider.complete(request, signal);
+  } catch (error) {
+    accumulateErrorRetries(stats, error);
+    throw error;
+  }
   accumulateResponseStats(stats, first);
   const attempt = tryParseJson(unfence(first.text));
   if (attempt.parsed) {
     const validated = schema.safeParse(attempt.value);
     if (validated.success) return validated.data;
-    return repair(provider, request, schema, stats, first.text, describeIssues(validated.error));
+    return repair(provider, request, schema, stats, first.text, describeIssues(validated.error), signal);
   }
-  return repair(provider, request, schema, stats, first.text, "response was not valid JSON");
+  return repair(provider, request, schema, stats, first.text, "response was not valid JSON", signal);
 }
 
 async function repair<T>(
@@ -103,16 +119,26 @@ async function repair<T>(
   stats: JsonCallStats,
   originalText: string,
   errorText: string,
+  signal?: AbortSignal | undefined,
 ): Promise<T> {
   stats.requests += 1;
   stats.repairs += 1;
-  const retry = await provider.complete({
-    ...request,
-    user:
-      `${request.user}\n\nThe previous response was invalid. ` +
-      `Fix it and reply with valid JSON only.\n\n` +
-      `Errors:\n${truncateSnippet(errorText, REPAIR_ERROR_CHARS)}\n\nInvalid response:\n${truncateSnippet(originalText, REPAIR_RESPONSE_CHARS)}`,
-  });
+  let retry: LlmResponse;
+  try {
+    retry = await provider.complete(
+      {
+        ...request,
+        user:
+          `${request.user}\n\nThe previous response was invalid. ` +
+          `Fix it and reply with valid JSON only.\n\n` +
+          `Errors:\n${truncateSnippet(errorText, REPAIR_ERROR_CHARS)}\n\nInvalid response:\n${truncateSnippet(originalText, REPAIR_RESPONSE_CHARS)}`,
+      },
+      signal,
+    );
+  } catch (error) {
+    accumulateErrorRetries(stats, error);
+    throw error;
+  }
   accumulateResponseStats(stats, retry);
   const attempt = tryParseJson(unfence(retry.text));
   if (!attempt.parsed) {
