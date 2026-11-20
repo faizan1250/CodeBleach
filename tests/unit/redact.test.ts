@@ -395,6 +395,66 @@ describe("redact percent-encoded query names", () => {
   });
 });
 
+describe("redact multi-url and fragment assignments", () => {
+  test("redacts later urls after comma/semicolon fragments", () => {
+    expect(redact("https://a.test/cb?x=1#frag,https://b.test/cb?api_key=SECRET")).toBe(
+      "https://a.test/cb?x=1#frag,https://b.test/cb?api_key=[REDACTED]",
+    );
+    expect(redact("https://a.test/cb?x=1#frag;https://b.test/cb?api_key=SECRET")).toBe(
+      "https://a.test/cb?x=1#frag;https://b.test/cb?api_key=[REDACTED]",
+    );
+    expect(redact("https://a.test/cb?api_key=ONE#f1,https://b.test/cb?api_key=TWO#f2")).toBe(
+      "https://a.test/cb?api_key=[REDACTED]#f1,https://b.test/cb?api_key=[REDACTED]#f2",
+    );
+    expect(redact("prose a,b here https://a.test/cb?x=1#f,https://b.test/cb?token=TT end")).toBe(
+      "prose a,b here https://a.test/cb?x=1#f,https://b.test/cb?token=[REDACTED] end",
+    );
+    // Comma without a new URL start stays fragment-opaque.
+    expect(redact("https://x.test/cb?x=1#frag,still-fragment&api_key=v")).toBe(
+      "https://x.test/cb?x=1#frag,still-fragment&api_key=v",
+    );
+  });
+
+  test("leaves fragment assignments opaque, keeps outside redaction", () => {
+    expect(redact("https://x.test/cb?x=1#frag;api_key=fragment-value")).toBe(
+      "https://x.test/cb?x=1#frag;api_key=fragment-value",
+    );
+    expect(redact("https://x.test/cb?x=1#frag/api_key=fragment-value")).toBe(
+      "https://x.test/cb?x=1#frag/api_key=fragment-value",
+    );
+    expect(redact("https://x.test/cb?api_key=SECRET#frag;api_key=fragment-value")).toBe(
+      "https://x.test/cb?api_key=[REDACTED]#frag;api_key=fragment-value",
+    );
+    expect(redact("https://x.test/cb?x=1#frag;api_key=v MY_SECRET=hunter2")).toBe(
+      "https://x.test/cb?x=1#frag;api_key=v MY_SECRET=[REDACTED]",
+    );
+    expect(redact("https://a.test/cb?x=1#fa;api_key=v1,https://b.test/cb?api_key=SECRET")).toBe(
+      "https://a.test/cb?x=1#fa;api_key=v1,https://b.test/cb?api_key=[REDACTED]",
+    );
+    expect(redact("a=1;MY_SECRET=hunter2")).toBe("a=1;MY_SECRET=[REDACTED]");
+  });
+
+  test("multi-url and fragment assignments are idempotent and leak-free", () => {
+    const samples = [
+      "https://a.test/cb?x=1#frag,https://b.test/cb?api_key=SECRET",
+      "https://a.test/cb?x=1#frag;https://b.test/cb?api_key=SECRET",
+      "https://a.test/cb?api_key=ONE#f1,https://b.test/cb?api_key=TWO#f2",
+      "https://x.test/cb?api_key=SECRET#frag;api_key=fragment-value",
+      "https://a.test/cb?x=1#fa;api_key=v1,https://b.test/cb?api_key=SECRET",
+    ];
+    for (const sample of samples) {
+      const once = redact(sample);
+      expect(redact(once)).toBe(once);
+    }
+    expect(redact("https://a.test/cb?x=1#frag,https://b.test/cb?api_key=SECRET")).not.toContain(
+      "SECRET",
+    );
+    expect(redact("https://x.test/cb?x=1#frag;api_key=fragment-value")).toBe(
+      "https://x.test/cb?x=1#frag;api_key=fragment-value",
+    );
+  });
+});
+
 describe("redact spaced and escaped quoted values", () => {
   test("redacts spaced double-quoted values with balanced quotes", () => {
     expect(redact('PASSWORD="correct horse battery staple"')).toBe('PASSWORD="[REDACTED]"');

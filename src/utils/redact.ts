@@ -151,6 +151,23 @@ function decodeQueryKeyOnce(key: string): string {
   }
 }
 
+// Per-URL fragment scope shared by query + assignment paths. Within one
+// whitespace/quote-delimited token, a new explicit URL start after `,` or `;`
+// begins a fresh URL with independent fragment state. Only `http(s)://`
+// after `,`/`;` resets; bare commas never split prose.
+function urlScopeToken(token: string): string {
+  const next = /[,;]https?:\/\/[^,;\s"'<>]*$/i.exec(token);
+  return next ? next[0].slice(1) : token;
+}
+
+// True when keyOffset sits after a literal `#` in the current URL scope.
+// Whitespace/quotes already delimit tokens, so prose `#` never protects a
+// later assignment separated by a space.
+function isInUrlFragment(input: string, keyOffset: number): boolean {
+  const token = /[^\s"'<>]*$/.exec(input.slice(0, keyOffset))?.[0] ?? "";
+  return urlScopeToken(token).includes("#");
+}
+
 // `.env` / YAML / JSON / log `KEY=value` / `KEY: value` (optionally quoted).
 // Runs after TOKEN_PATTERNS so structured tokens are already gone. The opening
 // value quote is consumed and the original closing quote stays, so quoted JSON
@@ -197,9 +214,9 @@ export function redact(text: string, extraSecrets: string[] = []): string {
     URL_QUERY_SECRET_RE,
     (match: string, mark: string, key: string, value: string, offset: number, input: string) => {
       if (value === REDACTED) return match;
-      // Fragment-opaque: skip pairs after the first literal `#` in this token.
-      const token = /[^\s"'<>]*$/.exec(input.slice(0, offset))?.[0] ?? "";
-      if (token.includes("#")) return match;
+      // Fragment-opaque per URL scope: a `,`/`;`-introduced https?:// URL
+      // starts fresh fragment state, so later URLs still redact.
+      if (isInUrlFragment(input, offset)) return match;
       const decodedKey = decodeQueryKeyOnce(key);
       if (!isSensitiveAssignmentKey(decodedKey)) return match;
       if (!isSensitiveKey(decodedKey) && isTelemetryKey(decodedKey)) return match;
@@ -224,6 +241,8 @@ export function redact(text: string, extraSecrets: string[] = []): string {
       sqClose: string | undefined,
       uqOpen: string,
       uqValue: string,
+      offset: number,
+      input: string,
     ) => {
       const openValue = dqValue !== undefined ? (dqOpen as string) : sqValue !== undefined ? (sqOpen as string) : uqOpen;
       const value =
@@ -235,6 +254,10 @@ export function redact(text: string, extraSecrets: string[] = []): string {
             ? (sqClose as string)
             : "";
       if (value === REDACTED || !isSensitiveAssignmentKey(key)) return match;
+      // Fragments are opaque to generic assignments too: skip pairs inside
+      // the current URL's `#` scope. Outside any fragment this is a no-op,
+      // so env/JSON/`;`-separated forms keep redacting.
+      if (isInUrlFragment(input, offset + pre.length + openKey.length)) return match;
       // Sensitive classification first: numerics and boolean-like values
       // never bypass password/secret/token/api-key/credential keys. The only
       // pass-through is exact-key telemetry on segment-only hits
