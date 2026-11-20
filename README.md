@@ -81,3 +81,7 @@ manual-only, Not-ZDR) runs the same shape against the live model; see
 - Phase 1 plan: `implementation.md`
 - Phase 4 plan: `implementation-phase4.md`
 - Decisions: `docs/adr/` (Phase 4 freeze: `0020-phase4-freeze.md`)
+
+## License
+
+MIT — see [LICENSE](LICENSE).

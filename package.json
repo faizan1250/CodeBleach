@@ -10,6 +10,7 @@
   },
   "name": "codebleach",
   "private": true,
+  "license": "MIT",
   "scripts": {
     "check": "bun run typecheck && bun test",
     "review": "bun run src/cli/index.ts review",
