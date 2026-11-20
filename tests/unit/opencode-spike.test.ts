@@ -7,6 +7,8 @@ import {
   buildSpikeHeaders,
   deriveResponsesEndpoint,
   isTrainingOptIn,
+  readBaseUrl,
+  readSpikeVersion,
 } from "../../scripts/opencode-spike.ts";
 
 describe("spike training gate", () => {
@@ -32,10 +34,64 @@ describe("spike endpoint derivation", () => {
     );
   });
 
+  test("appends only the missing tail when base already carries the protocol stem", () => {
+    expect(deriveResponsesEndpoint("https://opencode.ai/inference/go/openai/v1")).toBe(
+      "https://opencode.ai/inference/go/openai/v1/responses",
+    );
+    expect(deriveResponsesEndpoint("https://opencode.ai/inference/go/openai/v1/")).toBe(
+      "https://opencode.ai/inference/go/openai/v1/responses",
+    );
+  });
+
   test("rejects empty and non-https base urls", () => {
     expect(() => deriveResponsesEndpoint("")).toThrow();
     expect(() => deriveResponsesEndpoint("http://opencode.ai/inference/go")).toThrow();
     expect(() => deriveResponsesEndpoint("notaurl")).toThrow();
+  });
+});
+
+describe("spike catalog base url", () => {
+  const docsShapeCatalog = {
+    [FIXED_PROVIDER]: {
+      id: FIXED_PROVIDER,
+      name: "OpenCode Go",
+      models: {
+        [FIXED_MODEL_ID]: {
+          api: { responses: { base_url: "https://opencode.ai/inference/go" } },
+        },
+      },
+    },
+  };
+
+  test("reads base_url through the provider models nesting", () => {
+    expect(readBaseUrl(docsShapeCatalog)).toBe("https://opencode.ai/inference/go");
+  });
+
+  test("rejects flat model id on the provider and other malformed catalogs", () => {
+    expect(() => readBaseUrl(null)).toThrow("catalog is not an object");
+    expect(() => readBaseUrl({})).toThrow(`catalog lacks ${FIXED_PROVIDER} provider`);
+    expect(() => readBaseUrl({ [FIXED_PROVIDER]: null })).toThrow(
+      `catalog lacks ${FIXED_PROVIDER} provider`,
+    );
+    expect(() =>
+      readBaseUrl({
+        [FIXED_PROVIDER]: { [FIXED_MODEL_ID]: { api: { responses: { base_url: "https://x" } } } },
+      }),
+    ).toThrow(`catalog provider ${FIXED_PROVIDER} lacks models`);
+    expect(() => readBaseUrl({ [FIXED_PROVIDER]: { models: {} } })).toThrow(
+      "catalog model record lacks api.responses.base_url",
+    );
+    expect(() =>
+      readBaseUrl({ [FIXED_PROVIDER]: { models: { [FIXED_MODEL_ID]: {} } } }),
+    ).toThrow("catalog model record lacks api.responses.base_url");
+  });
+});
+
+describe("spike version", () => {
+  test("tracks package.json instead of a hardcoded copy", async () => {
+    const pkg = (await Bun.file("package.json").json()) as { version: unknown };
+    if (typeof pkg.version !== "string") throw new Error("package.json has no version");
+    expect(await readSpikeVersion()).toBe(pkg.version);
   });
 });
 

@@ -36,7 +36,11 @@ The general-docs candidate `https://opencode.ai/inference/go/openai/v1/responses
 and any third-party `/zen/go/v1` base are **unverified candidates, not approved**.
 The production constant stays unset until `scripts/opencode-spike.ts` derives the URL
 from the authenticated `base_url` and a harmless live request succeeds.
-`deriveResponsesEndpoint()` (tested) only normalizes that catalog value.
+`deriveResponsesEndpoint()` (tested) only normalizes that catalog value: a full
+`/openai/v1/responses` suffix is kept as-is, a bare `/openai/v1` stem gains only
+`/responses`, anything else gains the full suffix — the stem never doubles. The
+harness logs the raw catalog `base_url` (not secret) before derivation so the
+real value is on record at live-smoke time.
 
 ## Region / entitlement / privacy (UNVERIFIED)
 

@@ -18,6 +18,8 @@ export function isTrainingOptIn(env: Record<string, string | undefined> = {}): b
 
 // Appends the Responses path exactly once. Rejects empty/non-https input;
 // the caller must supply base_url from the authenticated model record.
+// Catalog base_url values may already carry the OpenAI protocol stem
+// (…/openai/v1); only the missing tail is appended so the stem never doubles.
 export function deriveResponsesEndpoint(baseUrl: string): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, "");
   if (trimmed.length === 0) throw new Error("empty base_url");
@@ -29,7 +31,9 @@ export function deriveResponsesEndpoint(baseUrl: string): string {
   }
   if (parsed.protocol !== "https:") throw new Error("base_url must be https");
   const suffix = "/openai/v1/responses";
-  return trimmed.endsWith(suffix) ? trimmed : `${trimmed}${suffix}`;
+  if (trimmed.endsWith(suffix)) return trimmed;
+  if (trimmed.endsWith("/openai/v1")) return `${trimmed}/responses`;
+  return `${trimmed}${suffix}`;
 }
 
 export function mintSessionId(): string {
@@ -46,14 +50,33 @@ export function buildSpikeHeaders(input: { sessionId: string; version: string })
   };
 }
 
+// Reads package.json so User-Agent tracks releases instead of a hardcoded copy.
+export async function readSpikeVersion(): Promise<string> {
+  const pkg = (await Bun.file(new URL("../package.json", import.meta.url)).json()) as {
+    version?: unknown;
+  };
+  if (typeof pkg.version !== "string" || pkg.version.length === 0) {
+    throw new Error("package.json has no usable version");
+  }
+  return pkg.version;
+}
+
 interface CatalogModel {
   api?: { responses?: { base_url?: unknown } };
 }
 
-function readBaseUrl(catalog: unknown): string {
+// Walks the documented catalog shape: provider object keyed by provider ID,
+// then `.models` keyed by model ID (never the model ID directly on the provider).
+export function readBaseUrl(catalog: unknown): string {
   if (typeof catalog !== "object" || catalog === null) throw new Error("catalog is not an object");
-  const models = (catalog as Record<string, unknown>)["opencode-go"];
-  if (typeof models !== "object" || models === null) throw new Error("catalog lacks opencode-go provider");
+  const provider = (catalog as Record<string, unknown>)[FIXED_PROVIDER];
+  if (typeof provider !== "object" || provider === null) {
+    throw new Error(`catalog lacks ${FIXED_PROVIDER} provider`);
+  }
+  const models = (provider as Record<string, unknown>)["models"];
+  if (typeof models !== "object" || models === null) {
+    throw new Error(`catalog provider ${FIXED_PROVIDER} lacks models`);
+  }
   const entry = (models as Record<string, unknown>)[FIXED_MODEL_ID] as CatalogModel | undefined;
   const baseUrl = entry?.api?.responses?.base_url;
   if (typeof baseUrl !== "string" || baseUrl.length === 0) {
@@ -83,7 +106,7 @@ if (import.meta.main) {
   }
   const sessionId = mintSessionId();
   const headers: Record<string, string> = {
-    ...buildSpikeHeaders({ sessionId, version: "0.1.0" }),
+    ...buildSpikeHeaders({ sessionId, version: await readSpikeVersion() }),
     Authorization: "Bearer [REDACTED]",
   };
   console.error(`[spike] catalog: GET ${AUTH_CATALOG_URL}`);
@@ -93,7 +116,9 @@ if (import.meta.main) {
     { headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": headers["User-Agent"] ?? "" } },
     30_000,
   );
-  const endpoint = deriveResponsesEndpoint(readBaseUrl(catalog));
+  const rawBaseUrl = readBaseUrl(catalog);
+  console.error(`[spike] catalog base_url: ${rawBaseUrl}`);
+  const endpoint = deriveResponsesEndpoint(rawBaseUrl);
   console.error(`[spike] derived endpoint: ${endpoint} (unpinned until generic smoke succeeds)`);
   const body = JSON.stringify({
     model: FIXED_MODEL_ID,
@@ -101,7 +126,7 @@ if (import.meta.main) {
     max_output_tokens: 64,
   });
   const out = await fetchJson(endpoint, { method: "POST", headers: { ...headers, Authorization: `Bearer ${apiKey}` }, body }, 90_000);
-  const redacted = JSON.stringify(out).slice(0, 500);
-  console.error(`[spike] response (truncated, redacted): ${redacted}`);
+  const truncated = JSON.stringify(out).slice(0, 500);
+  console.error(`[spike] response (truncated): ${truncated}`);
   console.log(JSON.stringify({ ok: true, endpoint, sessionHeaderSent: true }));
 }
