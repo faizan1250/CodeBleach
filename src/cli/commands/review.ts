@@ -10,14 +10,20 @@ import {
 import { ReviewerError } from "../../core/errors.ts";
 import { GitDiffEngine } from "../../diff/git.ts";
 import { ContextEngineImpl } from "../../context/engine.ts";
-import { exitCodeForError } from "../exit-codes.ts";
+import { loadConfig } from "../../config/load.ts";
+import type { LoadConfigFn } from "../../core/contracts.ts";
+import { FIXED_MODEL_ID, FIXED_PROVIDER, TRAINING_OPT_IN_ENV } from "../../llm/constants.ts";
 import type { Logger } from "../../core/logger.ts";
 import { runPipeline } from "../../core/pipeline.ts";
+import { OpenCodeProvider } from "../../providers/opencode.ts";
+import { ReviewEngineImpl } from "../../review/engine.ts";
+import { skippedReviewResult } from "../../review/result.ts";
 import {
   stubPublisher,
-  stubReviewEngine,
   stubValidationEngine,
 } from "../../core/stubs.ts";
+import { readVersion } from "./version.ts";
+import { exitCodeForError } from "../exit-codes.ts";
 
 export interface ReviewOptions {
   base?: string | undefined;
@@ -26,10 +32,44 @@ export interface ReviewOptions {
   out: string;
   dryRun: boolean;
   demo: boolean;
+  /** Explicit offline preview: diff + context only, review/validation skipped. */
+  noLlm: boolean;
   logLevel: string;
   runId: string;
   /** Exact key bytes for logger/artifact redaction; never logged itself. */
   secrets?: string[] | undefined;
+  /** Test seam for gates and provider construction; defaults to process.env. */
+  env?: Record<string, string | undefined> | undefined;
+}
+
+export interface RealReviewEngineInput {
+  runId: string;
+  version: string;
+  env: Record<string, string | undefined>;
+  secrets: string[];
+  logger: Logger;
+  maxRetries?: number | undefined;
+  timeoutMs?: number | undefined;
+  fetchFn?: typeof fetch | undefined;
+}
+
+/** Composition root for live review: fixed provider + engine, one opaque session per run. */
+export function createRealReviewEngine(input: RealReviewEngineInput): ReviewEngineImpl {
+  const sessionId = `ses_${input.runId.replace(/-/g, "")}`;
+  const provider = new OpenCodeProvider({
+    env: input.env,
+    sessionId,
+    version: input.version,
+    maxRetries: input.maxRetries,
+    timeoutMs: input.timeoutMs,
+    fetchFn: input.fetchFn,
+  });
+  return new ReviewEngineImpl({
+    provider,
+    logger: input.logger,
+    env: input.env,
+    secrets: input.secrets,
+  });
 }
 
 const LOG_LEVELS: readonly string[] = ["debug", "info", "warn", "error"];
@@ -48,29 +88,100 @@ export async function runReview(options: ReviewOptions, logger: Logger): Promise
     throw usageError("review requires --base and --head (or REVIEWER_BASE_SHA / REVIEWER_HEAD_SHA)");
   }
 
-  const engines = options.demo
-    ? {
+  const env = options.env ?? process.env;
+  const secrets = options.secrets ?? [];
+
+  // Demo is fully canned and never touches the network, with or without --no-llm.
+  if (options.demo) {
+    return runEngines(
+      {
         diff: demoDiffEngine,
         context: demoContextEngine,
         review: demoReviewEngine,
         validation: demoValidationEngine,
         publisher: demoPublisher,
-      }
-    : {
+      },
+      undefined,
+      { ...options, base, head },
+      logger,
+    );
+  }
+
+  // --no-llm precedes provider initialization: no OpenCodeProvider is built or
+  // health-checked, so no key or training opt-in is required and zero provider
+  // calls are possible. The pipeline records the explicit skips.
+  if (options.noLlm) {
+    return runEngines(
+      {
         diff: new GitDiffEngine({ logger }),
         context: new ContextEngineImpl({ logger }),
-        review: stubReviewEngine,
+        review: { review: () => Promise.resolve(skippedReviewResult()) },
         validation: stubValidationEngine,
         publisher: stubPublisher,
-      };
+      },
+      undefined,
+      { ...options, base, head },
+      logger,
+    );
+  }
 
+  // Live review: load config once for provider bounds, then reuse the same
+  // loaded value inside the pipeline so CLI and stages cannot disagree.
+  const loaded = await loadConfig(options.repo);
+  if (!loaded.ok) throw loaded.error;
+  logger.warn(
+    `live review sends repository code to ${FIXED_MODEL_ID} (${FIXED_PROVIDER}), ` +
+      `which is not zero-data-retention: prompts/completions may train future models; ` +
+      `continuing requires ${TRAINING_OPT_IN_ENV}=true and the workspace training-data toggle`,
+  );
+  const review = createRealReviewEngine({
+    runId: options.runId,
+    version: await readVersion(),
+    env,
+    secrets,
+    logger,
+    maxRetries: loaded.value.config.llm.max_retries,
+    timeoutMs: loaded.value.config.llm.request_timeout_ms,
+  });
+  const loadAgain: LoadConfigFn = async () => loaded;
+  return runEngines(
+    {
+      diff: new GitDiffEngine({ logger }),
+      context: new ContextEngineImpl({ logger }),
+      review,
+      validation: stubValidationEngine,
+      publisher: stubPublisher,
+    },
+    loadAgain,
+    { ...options, base, head },
+    logger,
+  );
+}
+
+interface ResolvedReviewOptions extends ReviewOptions {
+  base: string;
+  head: string;
+}
+
+async function runEngines(
+  engines: {
+    diff: GitDiffEngine | typeof demoDiffEngine;
+    context: ContextEngineImpl | typeof demoContextEngine;
+    review: ReviewEngineImpl | typeof demoReviewEngine | { review: () => Promise<ReturnType<typeof skippedReviewResult>> };
+    validation: typeof demoValidationEngine | typeof stubValidationEngine;
+    publisher: typeof demoPublisher | typeof stubPublisher;
+  },
+  loadConfig: LoadConfigFn | undefined,
+  options: ResolvedReviewOptions,
+  logger: Logger,
+): Promise<number> {
   try {
     const summary = await runPipeline(
-      { ...engines, logger },
+      { ...engines, logger, ...(loadConfig === undefined ? {} : { loadConfig }) },
       {
         repoDir: options.repo,
-        baseSha: base,
-        headSha: head,
+        baseSha: options.base,
+        headSha: options.head,
         dryRun: options.dryRun,
         outDir: options.out,
         runId: options.runId,
@@ -80,6 +191,9 @@ export async function runReview(options: ReviewOptions, logger: Logger): Promise
     console.log(
       `review ${summary.status}: ${summary.stages.length} stages, ${summary.configSource} config`,
     );
+    if (options.noLlm && !options.demo) {
+      console.log("offline preview: no model review or validation occurred (--no-llm)");
+    }
     return 0;
   } catch (error) {
     if (error instanceof ReviewerError) {
