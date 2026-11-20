@@ -1,4 +1,3 @@
-import { createHash, randomUUID } from "node:crypto";
 import { MAX_LLM_MAX_OUTPUT_TOKENS } from "../config/defaults.ts";
 import type { ResolvedConfig } from "../config/schema.ts";
 import type { ReviewEngine } from "../core/contracts.ts";
@@ -7,16 +6,17 @@ import type { Logger } from "../core/logger.ts";
 import { requireTrainingOptIn } from "../llm/training-gate.ts";
 import { completeJson } from "../providers/json.ts";
 import type { LlmProvider } from "../providers/types.ts";
-import { RawReviewOutputSchema, type Finding, type RawFinding } from "../types/finding.ts";
+import { RawReviewOutputSchema, type Finding } from "../types/finding.ts";
 import type { ReviewUnit } from "../types/context.ts";
 import { buildReviewPrompt, CODE_REVIEW_PROMPT_VERSION, isPromptWithinBudget } from "./prompt.ts";
 import type { BuiltReviewPrompt } from "./prompt.ts";
+import { normalizeFinding } from "./normalize.ts";
 
 export interface ReviewEngineOptions {
   provider: LlmProvider;
   logger: Logger;
   env?: Record<string, string | undefined> | undefined;
-  /** DiffResult.headSha wiring lands in P4-06/P4-09; empty until then. */
+  /** DiffResult.headSha wiring lands in P4-09; empty until then. */
   headSha?: string | undefined;
 }
 
@@ -28,25 +28,6 @@ function isIncompleteCapError(error: unknown): boolean {
   if (!(error instanceof ReviewerError) || error.code !== "PROVIDER_FAILED") return false;
   return /provider response incomplete/i.test(error.message) && error.message.includes("max_output_tokens");
 }
-// Provisional P4-04 fingerprint: sha1(file + symbol + category + title).
-// P4-06 hardens path/ruleId handling; any algorithm change needs an ADR.
-function fingerprintFor(raw: RawFinding, symbol: string): string {
-  const file = raw.file.trim().replace(/\\/g, "/");
-  const title = raw.title.trim().replace(/\s+/g, " ").toLowerCase();
-  return createHash("sha1").update(`${file}\u0000${symbol}\u0000${raw.category}\u0000${title}`).digest("hex");
-}
-
-function toFinding(raw: RawFinding, unit: ReviewUnit, headSha: string): Finding {
-  return {
-    ...raw,
-    id: randomUUID(),
-    fingerprint: fingerprintFor(raw, unit.symbol.name),
-    headSha,
-    symbol: unit.symbol.name,
-    origin: { pass: CODE_REVIEW_PROMPT_VERSION, unitId: unit.id },
-  };
-}
-
 /** One focused pass, one provider request per ReviewUnit. No batching. */
 export class ReviewEngineImpl implements ReviewEngine {
   private readonly provider: LlmProvider;
@@ -168,6 +149,21 @@ export class ReviewEngineImpl implements ReviewEngine {
       },
       RawReviewOutputSchema,
     );
-    return output.findings.map((raw) => toFinding(raw, unit, this.headSha));
+    const findings: Finding[] = [];
+    for (const raw of output.findings) {
+      const finding = normalizeFinding(raw, {
+        unit,
+        headSha: this.headSha,
+        pass: CODE_REVIEW_PROMPT_VERSION,
+      });
+      // Rejected findings carry no diagnostics yet (P4-07); log only the
+      // unit id and count so no model output leaks into logs.
+      if (finding === null) {
+        this.logger.warn("review finding rejected", { unitId: unit.id });
+        continue;
+      }
+      findings.push(finding);
+    }
+    return findings;
   }
 }
