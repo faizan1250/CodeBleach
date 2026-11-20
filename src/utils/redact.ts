@@ -109,10 +109,13 @@ function isSensitiveAssignmentKey(key: string): boolean {
   return isSensitiveKey(key) || hasSensitiveSegment(key);
 }
 
-// Exact telemetry counters that share a segment with secrets ("token" in
+// Exact telemetry counters that may share a segment with secrets ("token" in
 // tokenCount) but carry counts, not secrets. Key-based, never value-based:
 // only these normalized keys pass, and only on segment-only hits —
-// whole-key classification always wins.
+// whole-key classification always wins. Only "tokencount" actively reaches
+// the exemption today (other *-tokens keys match no sensitive rule, so they
+// pass through as non-sensitive); the rest are defense-in-depth against
+// future segment-rule widening.
 const TELEMETRY_KEYS: ReadonlySet<string> = new Set([
   "tokencount",
   "inputtokens",

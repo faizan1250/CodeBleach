@@ -41,3 +41,10 @@ docs sync, cross-platform green. No new features.
 - Phase 4 contracts are frozen. Any change now needs a new ADR.
 - Phase 5 starts from: real `ReviewBuildResult` in `run.json`, validation
   stub `NOT_IMPLEMENTED`, demo untouched, `--no-llm` preview intact.
+
+## Addendum (P4 hardening — history above unchanged)
+
+The Decision section's "No live seeded-bug smoke was run in Phase 4" deferral
+is lifted for the smoke harness only by ADR 0023 (opt-in live harness
+`tests/live/review-live-smoke.test.ts`, `CODEBLEACH_LIVE_SMOKE=1`,
+manual-only under Not-ZDR terms). Freeze otherwise stands.
