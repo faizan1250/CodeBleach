@@ -12,8 +12,13 @@ interface RunResult {
   stderr: string;
 }
 
-async function runCli(args: string[], cwd: string): Promise<RunResult> {
-  const proc = Bun.spawn(["bun", CLI, ...args], { cwd, stdout: "pipe", stderr: "pipe" });
+async function runCli(args: string[], cwd: string, env?: Record<string, string | undefined>): Promise<RunResult> {
+  const proc = Bun.spawn(["bun", CLI, ...args], {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+    ...(env === undefined ? {} : { env: { ...process.env, ...env } }),
+  });
   const [stdout, stderr, code] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -115,18 +120,20 @@ describe("cli diff", () => {
     }
   });
 
-  test("normal review completes context then fails at stubbed review with diff in artifact", async () => {
+  test("normal review without credentials stops at the training gate with diff in artifact", async () => {
     const { dir, cleanup } = await makeRepo();
     try {
       const base = await writeAndCommit(dir, { "src/a.ts": "const a = 1;\n" }, "base");
       const head = await writeAndCommit(dir, { "src/a.ts": "const a = 2;\n" }, "head");
       const out = join(dir, "out");
+      // Scrub ambient live credentials: normal tests never touch the network.
       const result = await runCli(
         ["review", "--base", base, "--head", head, "--repo", dir, "--out", out],
         dir,
+        { OPENCODE_API_KEY: "", CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING: "" },
       );
-      expect(result.code).toBe(1);
-      expect(result.stderr).toContain("NOT_IMPLEMENTED");
+      expect(result.code).toBe(2);
+      expect(result.stderr).toContain("CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING");
       const artifact = JSON.parse(await readFile(join(out, "run.json"), "utf8")) as {
         status: string;
         error: { code: string };
@@ -137,7 +144,7 @@ describe("cli diff", () => {
         contextDiagnostics: { unitsCreated: number } | null;
       };
       expect(artifact.status).toBe("failed");
-      expect(artifact.error.code).toBe("NOT_IMPLEMENTED");
+      expect(artifact.error.code).toBe("CONFIG_INVALID");
       expect(artifact.stages).toMatchObject([
         { name: "config", status: "completed" },
         { name: "diff", status: "completed" },
@@ -150,6 +157,42 @@ describe("cli diff", () => {
       expect(artifact.units).toHaveLength(1);
       expect(artifact.contextStatus).toBe("complete");
       expect(artifact.contextDiagnostics?.unitsCreated).toBe(1);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("review --no-llm exits 0 with skipped review and validation", async () => {
+    const { dir, cleanup } = await makeRepo();
+    try {
+      const base = await writeAndCommit(dir, { "src/a.ts": "const a = 1;\n" }, "base");
+      const head = await writeAndCommit(dir, { "src/a.ts": "const a = 2;\n" }, "head");
+      const out = join(dir, "out");
+      const result = await runCli(
+        ["review", "--base", base, "--head", head, "--repo", dir, "--out", out, "--dry-run", "--no-llm"],
+        dir,
+        { OPENCODE_API_KEY: "", CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING: "" },
+      );
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain("no model review");
+      const artifact = JSON.parse(await readFile(join(out, "run.json"), "utf8")) as {
+        status: string;
+        runId: string;
+        reviewStatus: string;
+        findings: unknown[];
+        stages: Array<{ name: string; status: string; reason?: string }>;
+      };
+      expect(artifact.status).toBe("completed");
+      expect(artifact.reviewStatus).toBe("skipped");
+      expect(artifact.findings).toEqual([]);
+      expect(artifact.stages).toMatchObject([
+        { name: "config", status: "completed" },
+        { name: "diff", status: "completed" },
+        { name: "context", status: "completed" },
+        { name: "review", status: "skipped", reason: "no_llm_flag" },
+        { name: "validation", status: "skipped", reason: "review_skipped_no_llm" },
+        { name: "publish", status: "skipped" },
+      ]);
     } finally {
       await cleanup();
     }
