@@ -137,7 +137,7 @@ describe("p4-09 review wiring", () => {
     }
   });
 
-  test("real engine with FakeProvider reaches validation NOT_IMPLEMENTED with findings retained", async () => {
+  test("real engine with FakeProvider still fails at validation NOT_IMPLEMENTED without --dry-run", async () => {
     const base = await mkdtemp(join(tmpdir(), "codebleach-wiring-"));
     try {
       const fixture = createFixtureEngines();
@@ -147,9 +147,21 @@ describe("p4-09 review wiring", () => {
         logger: nullLogger(),
         env: { CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING: "true" },
       });
+      let publishCalls = 0;
       const promise = runPipeline(
-        { ...fixture, review, validation: stubValidationEngine, logger: nullLogger() },
-        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: base, runId: "wiring-real" },
+        {
+          ...fixture,
+          review,
+          validation: stubValidationEngine,
+          publisher: {
+            publish: () => {
+              publishCalls += 1;
+              return Promise.resolve({ published: 0, skipped: 0, failures: [] });
+            },
+          },
+          logger: nullLogger(),
+        },
+        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: false, outDir: base, runId: "wiring-real" },
       );
       const error = await promise.then(
         () => null,
@@ -157,6 +169,7 @@ describe("p4-09 review wiring", () => {
       );
       expect(error).toBeInstanceOf(ReviewerError);
       expect((error as ReviewerError).code).toBe("NOT_IMPLEMENTED");
+      expect(publishCalls).toBe(0);
       expect(provider.calls).toHaveLength(1);
       expect(provider.calls[0]?.user).toContain("src/a.ts");
       const artifact = JSON.parse(await readFile(join(base, "run.json"), "utf8"));
@@ -164,6 +177,144 @@ describe("p4-09 review wiring", () => {
       expect(artifact.findings).toHaveLength(1);
       expect(artifact.findings[0]).toMatchObject({ file: "src/a.ts", headSha: "head" });
       expect(artifact.error.code).toBe("NOT_IMPLEMENTED");
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  test("live dry-run with validation stub completes with findings unvalidated and no publish", async () => {
+    const base = await mkdtemp(join(tmpdir(), "codebleach-wiring-"));
+    try {
+      const fixture = createFixtureEngines();
+      const provider = new FakeProvider([{ respond: { findings: [rawFinding()] } }]);
+      const review = new ReviewEngineImpl({
+        provider,
+        logger: nullLogger(),
+        env: { CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING: "true" },
+      });
+      let publishCalls = 0;
+      const summary = await runPipeline(
+        {
+          ...fixture,
+          review,
+          validation: stubValidationEngine,
+          publisher: {
+            publish: () => {
+              publishCalls += 1;
+              return Promise.resolve({ published: 0, skipped: 0, failures: [] });
+            },
+          },
+          logger: nullLogger(),
+        },
+        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: base, runId: "wiring-dryrun" },
+      );
+      expect(summary.status).toBe("completed");
+      expect(summary.stages.map((stage) => [stage.name, stage.status, stage.reason])).toEqual([
+        ["config", "completed", undefined],
+        ["diff", "completed", undefined],
+        ["context", "completed", undefined],
+        ["review", "completed", undefined],
+        ["validation", "skipped", "validation_unimplemented"],
+        ["publish", "skipped", "dry-run"],
+      ]);
+      expect(publishCalls).toBe(0);
+      expect(provider.calls).toHaveLength(1);
+      const artifact = JSON.parse(await readFile(join(base, "run.json"), "utf8"));
+      expect(artifact.status).toBe("completed");
+      expect(artifact.reviewStatus).toBe("complete");
+      expect(artifact.findings).toHaveLength(1);
+      expect(artifact.findings[0]).toMatchObject({ file: "src/a.ts", headSha: "head" });
+      expect(artifact.validated).toEqual([]);
+      expect(artifact.publishResult).toBeNull();
+      expect(artifact.error).toBeUndefined();
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  test("dry-run never suppresses real validation errors", async () => {
+    const base = await mkdtemp(join(tmpdir(), "codebleach-wiring-"));
+    try {
+      const fixture = createFixtureEngines();
+      let publishCalls = 0;
+      const promise = runPipeline(
+        {
+          ...fixture,
+          validation: {
+            validate: () => Promise.reject(new ReviewerError({ code: "INTERNAL", message: "boom" })),
+          },
+          publisher: {
+            publish: () => {
+              publishCalls += 1;
+              return Promise.resolve({ published: 0, skipped: 0, failures: [] });
+            },
+          },
+          logger: nullLogger(),
+        },
+        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: base, runId: "wiring-dryrun-err" },
+      );
+      const error = await promise.then(
+        () => null,
+        (failure: unknown) => failure as ReviewerError,
+      );
+      expect(error).toBeInstanceOf(ReviewerError);
+      expect((error as ReviewerError).code).toBe("INTERNAL");
+      expect(publishCalls).toBe(0);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  test("dry-run still blocks at the training gate with zero provider calls", async () => {
+    const provider = new FakeProvider([{ respond: { findings: [rawFinding()] } }]);
+    const review = new ReviewEngineImpl({
+      provider,
+      logger: nullLogger(),
+      env: { OPENCODE_API_KEY: "dummy-key" },
+    });
+    const config = ConfigFileSchema.parse({});
+    const error = await review.review([wiringUnit()], config).then(
+      () => null,
+      (failure: unknown) => failure as ReviewerError,
+    );
+    expect(error).toBeInstanceOf(ReviewerError);
+    expect((error as ReviewerError).code).toBe("CONFIG_INVALID");
+    expect(provider.calls).toHaveLength(0);
+  });
+
+  test("no-llm dry-run never invokes the publisher and records zero requests", async () => {
+    const base = await mkdtemp(join(tmpdir(), "codebleach-wiring-"));
+    try {
+      const fixture = createFixtureEngines();
+      let publishCalls = 0;
+      const summary = await runPipeline(
+        {
+          ...fixture,
+          review: { review: () => Promise.resolve(skippedReviewResult()) },
+          validation: stubValidationEngine,
+          publisher: {
+            publish: () => {
+              publishCalls += 1;
+              return Promise.resolve({ published: 0, skipped: 0, failures: [] });
+            },
+          },
+          logger: nullLogger(),
+        },
+        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: true, outDir: base, runId: "wiring-nollm" },
+      );
+      expect(summary.status).toBe("completed");
+      expect(publishCalls).toBe(0);
+      const artifact = JSON.parse(await readFile(join(base, "run.json"), "utf8"));
+      expect(artifact.reviewStatus).toBe("skipped");
+      expect(artifact.reviewUsage.requests).toBe(0);
+      expect(artifact.stages.map((stage: { name: string; status: string; reason?: string }) => [stage.name, stage.status, stage.reason])).toEqual([
+        ["config", "completed", undefined],
+        ["diff", "completed", undefined],
+        ["context", "completed", undefined],
+        ["review", "skipped", "no_llm_flag"],
+        ["validation", "skipped", "review_skipped_no_llm"],
+        ["publish", "skipped", "dry-run"],
+      ]);
     } finally {
       await rm(base, { recursive: true, force: true });
     }

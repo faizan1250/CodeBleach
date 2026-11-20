@@ -396,9 +396,12 @@ provider + engine built from `config.llm` bounds, one opaque `ses_`-prefixed
 session per run, resolved `diff.headSha` passed per review call for code-owned
 attribution, `--no-llm` offline preview (skipped review `no_llm_flag`,
 validation/publish skipped `review_skipped_no_llm`, exit 0), demo unchanged
-and network-free, live preflight non-ZDR warning, validation still
-`NOT_IMPLEMENTED` with findings retained in `run.json`. Still
-open: Go allowance/billing-source surfacing beyond `raw`.
+and network-free, live preflight non-ZDR warning. Validation stays
+`NOT_IMPLEMENTED` with findings retained in `run.json`: a live `--dry-run`
+completes honestly — validation recorded as skipped
+(`validation_unimplemented`), findings kept unvalidated, publish still
+skipped `dry-run` — while a non-dry-run live run still fails at the stub.
+Still open: Go allowance/billing-source surfacing beyond `raw`.
 
 **Prompt-injection & secrets (applies to all LLM calls):** wrap code in delimited blocks and state it is untrusted data; reviewer prompt contains no secrets; no tool access for the model beyond what's strictly needed; redact secrets (regex + entropy) and skip `.env*`, `*.pem`, key files before sending; discard any finding whose output tries to change instructions/format; never execute anything suggested by the model.
 

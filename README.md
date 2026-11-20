@@ -35,8 +35,10 @@ explicit `CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING=true` opt-in (and the
 workspace training-data toggle). `--dry-run` alone still calls the model;
 add `--no-llm` for a network-free preview that records review/validation as
 skipped and exits 0. Findings are validated in Phase 5; until then a live
-run ends at the validation stub with review results retained in
-`.reviewer-out/run.json`.
+`--dry-run` completes with validation recorded as skipped
+(`validation_unimplemented`), findings retained unvalidated in
+`.reviewer-out/run.json`, and nothing published. Without `--dry-run` a live
+run still ends at the validation stub with `NOT_IMPLEMENTED`.
 
 ## Demo (offline, no network or secrets)
 

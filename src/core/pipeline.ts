@@ -179,11 +179,34 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
     }
     await persist("running");
 
-    const validatedList = await runStage(
-      "validation",
-      () => deps.validation.validate(findings, diffResult, contextResult.units, resolved),
-      (result) => result.filter((item) => item.status === "accepted").length,
-    );
+    let validatedList: ValidatedFinding[] = [];
+    try {
+      validatedList = await runStage(
+        "validation",
+        () => deps.validation.validate(findings, diffResult, contextResult.units, resolved),
+        (result) => result.filter((item) => item.status === "accepted").length,
+      );
+    } catch (error) {
+      // Dry-run honesty without Phase 5: the validation stub is the only
+      // tolerated failure here. A live --dry-run keeps review findings,
+      // records validation as skipped (never completed), and still skips
+      // publish. Real validation errors and non-dry-run runs still throw.
+      if (input.dryRun && error instanceof ReviewerError && error.code === "NOT_IMPLEMENTED") {
+        const failed = stages.pop();
+        stages.push({
+          name: "validation",
+          status: "skipped",
+          ms: failed?.ms ?? 0,
+          reason: "validation_unimplemented",
+        });
+        deps.logger.warn("validation skipped: engine not implemented (dry-run only)", {
+          runId,
+          stage: "validation",
+        });
+      } else {
+        throw error;
+      }
+    }
     validated = validatedList;
     await persist("running");
 
