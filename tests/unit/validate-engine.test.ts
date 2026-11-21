@@ -129,17 +129,23 @@ describe("validation engine provenance (P5-02)", () => {
     const readers: FakeValidationSnapshotReader[] = [];
     const engine = engineWithHeadText(headText(10), readers);
     const config = ConfigFileSchema.parse({});
-    const result = await engine.validate([testFinding("a"), testFinding("b")], testAddedDiff(), [testUnit()], config);
+    const first = testFinding("a");
+    const second = testFinding("b");
+    second.title = "Resource leak on close";
+    const result = await engine.validate([first, second], testAddedDiff(), [testUnit()], config);
     expect(result).toHaveLength(2);
     for (const item of result) {
       expect(item.status).toBe("accepted");
-      expect(item.checks).toHaveLength(16);
+      expect(item.checks).toHaveLength(19);
       expect(item.checks.every((check) => check.passed)).toBe(true);
       expect(item.checks.some((check) => check.name === "location_line")).toBe(true);
       expect(item.checks.some((check) => check.name === "head_comment_target")).toBe(true);
       expect(item.checks.some((check) => check.name === "evidence_bounds" && check.passed)).toBe(true);
       expect(item.checks.some((check) => check.name === "evidence_quote" && check.passed)).toBe(true);
       expect(item.checks.some((check) => check.name === "introduced_by_pr" && check.passed)).toBe(true);
+      expect(item.checks.some((check) => check.name === "dedupe_fingerprint" && check.passed)).toBe(true);
+      expect(item.checks.some((check) => check.name === "dedupe_secondary" && check.passed)).toBe(true);
+      expect(item.checks.some((check) => check.name === "max_findings" && check.passed)).toBe(true);
       expect(item.derivedAttribution).toEqual({
         introducedByPr: true,
         basis: { kind: "added-lines", evidenceIndex: 0, file: "src/a.ts", lines: [1] },
@@ -152,6 +158,87 @@ describe("validation engine provenance (P5-02)", () => {
       { side: "head", path: "src/a.ts" },
       { side: "head", path: "src/a.ts" },
     ]);
+  });
+
+  test("shared fingerprint keeps the deterministic winner and links the loser", async () => {
+    const engine = engineWithHeadText(headText(10));
+    const config = ConfigFileSchema.parse({});
+    const loser = testFinding("lo");
+    loser.severity = "medium";
+    loser.confidence = 0.86;
+    const winner = testFinding("hi");
+    winner.severity = "critical";
+    winner.confidence = 0.99;
+    winner.fingerprint = loser.fingerprint;
+    winner.title = "Distinct title keeps the primary key decisive";
+    const orders: Finding[][] = [
+      [loser, winner],
+      [winner, loser],
+    ];
+    for (const order of orders) {
+      const result = await engine.validate(order, testAddedDiff(), [testUnit()], config);
+      const accepted = result.filter((item) => item.status === "accepted");
+      const rejected = result.filter((item) => item.status === "rejected");
+      expect(accepted).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect(accepted[0]?.finding.id).toBe("hi");
+      expect(accepted[0]?.checks).toHaveLength(19);
+      expect(accepted[0]?.checks.every((check) => check.passed)).toBe(true);
+      expect(rejected[0]?.finding.id).toBe("lo");
+      expect(rejected[0]?.checks).toHaveLength(17);
+      expect(rejected[0]?.checks).toContainEqual(
+        expect.objectContaining({ name: "dedupe_fingerprint", passed: false }),
+      );
+      expect(rejected[0]?.checks.some((check) => check.name === "max_findings")).toBe(false);
+    }
+  });
+
+  test("secondary duplicates merge on normalized title with overlapping ranges", async () => {
+    const engine = engineWithHeadText(headText(10));
+    const config = ConfigFileSchema.parse({});
+    const first = testFinding("a");
+    const second = testFinding("b");
+    second.title = "NULL  dereference ON name";
+    const result = await engine.validate([first, second], testAddedDiff(), [testUnit()], config);
+    expect(result.filter((item) => item.status === "accepted")).toHaveLength(1);
+    const loser = result.find((item) => item.status === "rejected");
+    expect(loser?.checks).toContainEqual(expect.objectContaining({ name: "dedupe_secondary", passed: false }));
+    expect(loser?.checks.some((check) => check.name === "dedupe_fingerprint" && check.passed)).toBe(true);
+  });
+
+  test("max findings keeps severity order and leaves the surplus visible", async () => {
+    const engine = engineWithHeadText(headText(10));
+    const config = ConfigFileSchema.parse({ review: { max_findings: 1 } });
+    const low = testFinding("low");
+    low.severity = "medium";
+    low.title = "Minor null check";
+    const high = testFinding("high");
+    high.severity = "critical";
+    high.title = "Critical null dereference";
+    const result = await engine.validate([low, high], testAddedDiff(), [testUnit()], config);
+    const accepted = result.filter((item) => item.status === "accepted");
+    const rejected = result.filter((item) => item.status === "rejected");
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0]?.finding.id).toBe("high");
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.finding.id).toBe("low");
+    expect(rejected[0]?.checks).toContainEqual(expect.objectContaining({ name: "max_findings", passed: false }));
+  });
+
+  test("rejected and inconclusive findings never consume the accepted cap", async () => {
+    const engine = engineWithHeadText(headText(10));
+    const config = ConfigFileSchema.parse({ review: { max_findings: 1 } });
+    const proven = testFinding("proven");
+    proven.title = "Proven null dereference";
+    const unproven = testFinding("unproven");
+    unproven.origin = { pass: "test", unitId: "ghost-unit" };
+    const stray = testFinding("stray");
+    stray.line = 2;
+    stray.evidence = [{ file: "src/a.ts", startLine: 2, endLine: 2, quote: "line-2" }];
+    const result = await engine.validate([proven, unproven, stray], testAddedDiff(), [testUnit()], config);
+    expect(result.find((item) => item.finding.id === "proven")?.status).toBe("accepted");
+    expect(result.find((item) => item.finding.id === "unproven")?.status).toBe("rejected");
+    expect(result.find((item) => item.finding.id === "stray")?.status).toBe("inconclusive");
   });
 
   test("model false with added evidence is accepted on code proof", async () => {
