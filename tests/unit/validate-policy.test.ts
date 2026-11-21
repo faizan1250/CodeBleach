@@ -149,9 +149,9 @@ describe("confidence thresholds", () => {
 
   test("NaN confidence fails closed", () => {
     const config = configWith({ review: { confidence_threshold: 0.7 } });
-    expect(
-      validatePolicy({ finding: policyFinding({ confidence: NaN }), canonicalPath: "src/a.ts", config }).ok,
-    ).toBe(false);
+    expect(validatePolicy({ finding: policyFinding({ confidence: NaN }), canonicalPath: "src/a.ts", config }).ok).toBe(
+      false,
+    );
   });
 });
 
