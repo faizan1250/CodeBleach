@@ -191,7 +191,7 @@ describe("p4-09 review wiring", () => {
     }
   });
 
-  test("live dry-run with validation stub completes with findings unvalidated and no publish", async () => {
+  test("live dry-run with a failing validator fails instead of skipping validation", async () => {
     const base = await mkdtemp(join(tmpdir(), "codebleach-wiring-"));
     try {
       const fixture = createFixtureEngines();
@@ -202,7 +202,7 @@ describe("p4-09 review wiring", () => {
         env: { CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING: "true" },
       });
       let publishCalls = 0;
-      const summary = await runPipeline(
+      const promise = runPipeline(
         {
           ...fixture,
           review,
@@ -225,25 +225,32 @@ describe("p4-09 review wiring", () => {
           env: { CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING: "true", OPENCODE_API_KEY: "dummy-key" },
         },
       );
-      expect(summary.status).toBe("completed");
-      expect(summary.stages.map((stage) => [stage.name, stage.status, stage.reason])).toEqual([
-        ["config", "completed", undefined],
-        ["diff", "completed", undefined],
-        ["context", "completed", undefined],
-        ["review", "completed", undefined],
-        ["validation", "skipped", "validation_unimplemented"],
-        ["publish", "skipped", "dry-run"],
-      ]);
+      const error = await promise.then(
+        () => null,
+        (failure: unknown) => failure as ReviewerError,
+      );
+      // P5-09: the transitional NOT_IMPLEMENTED tolerance is removed. A real
+      // validator exists, so any validation failure fails the stage, dry-run
+      // included. Findings stay in the artifact for audit; nothing publishes.
+      expect(error).toBeInstanceOf(ReviewerError);
+      expect((error as ReviewerError).code).toBe("NOT_IMPLEMENTED");
       expect(publishCalls).toBe(0);
       expect(provider.calls).toHaveLength(1);
       const artifact = JSON.parse(await readFile(join(base, "run.json"), "utf8"));
-      expect(artifact.status).toBe("completed");
+      expect(artifact.status).toBe("failed");
       expect(artifact.reviewStatus).toBe("complete");
       expect(artifact.findings).toHaveLength(1);
       expect(artifact.findings[0]).toMatchObject({ file: "src/a.ts", headSha: "head" });
       expect(artifact.validated).toEqual([]);
       expect(artifact.publishResult).toBeNull();
-      expect(artifact.error).toBeUndefined();
+      expect(artifact.error.code).toBe("NOT_IMPLEMENTED");
+      expect(artifact.stages.map((stage: { name: string; status: string }) => [stage.name, stage.status])).toEqual([
+        ["config", "completed"],
+        ["diff", "completed"],
+        ["context", "completed"],
+        ["review", "completed"],
+        ["validation", "failed"],
+      ]);
     } finally {
       await rm(base, { recursive: true, force: true });
     }
