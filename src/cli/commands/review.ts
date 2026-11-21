@@ -22,6 +22,9 @@ import { stubPublisher, stubValidationEngine } from "../../core/stubs.ts";
 import { createValidationEngine } from "../../validate/engine.ts";
 import { readVersion } from "./version.ts";
 import { exitCodeForError } from "../exit-codes.ts";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import type { ValidationSummary } from "../../types/index.ts";
 
 export interface ReviewOptions {
   base?: string | undefined;
@@ -71,6 +74,30 @@ export function createRealReviewEngine(input: RealReviewEngineInput): ReviewEngi
 }
 
 const LOG_LEVELS: readonly string[] = ["debug", "info", "warn", "error"];
+
+/**
+ * Scope disclaimer for Phase 5 deterministic validation (ADR 0028 D1): counts
+ * verify diff/path/location/evidence/provenance/policy only, never semantic
+ * correctness of the bug claim.
+ */
+export const VALIDATION_SCOPE_NOTE =
+  "validation verifies diff/path/location/evidence/provenance/policy only; it does not prove a finding is semantically correct.";
+
+/** One-line CLI validation counts; null when validation did not run (skipped review). */
+export function formatValidationLine(args: {
+  outDir: string;
+  findingsTotal: number;
+  summary: ValidationSummary | null;
+}): string | null {
+  if (args.summary === null) return null;
+  const summary = args.summary;
+  return (
+    `validation: ${args.findingsTotal} finding(s): ${summary.accepted} accepted, ` +
+    `${summary.rejected} rejected, ${summary.inconclusive} inconclusive, ` +
+    `${summary.duplicates} duplicate(s), ${summary.policyFiltered} policy-filtered; ` +
+    `details in ${join(args.outDir, "run.json")}`
+  );
+}
 
 function usageError(message: string): ReviewerError {
   return new ReviewerError({ code: "CONFIG_INVALID", message });
@@ -195,6 +222,27 @@ async function runEngines(
       },
     );
     console.log(`review ${summary.status}: ${summary.stages.length} stages, ${summary.configSource} config`);
+    // Bounded CLI visibility (P5-10): counts only, never evidence quotes or
+    // source text. The artifact holds per-finding reasons.
+    try {
+      const raw = await readFile(join(options.out, "run.json"), "utf8");
+      const artifact = JSON.parse(raw) as {
+        findings?: unknown[] | undefined;
+        validationSummary?: ValidationSummary | null | undefined;
+      };
+      const line = formatValidationLine({
+        outDir: options.out,
+        findingsTotal: Array.isArray(artifact.findings) ? artifact.findings.length : 0,
+        summary: artifact.validationSummary ?? null,
+      });
+      if (line !== null) {
+        console.log(line);
+        console.log(VALIDATION_SCOPE_NOTE);
+      }
+    } catch {
+      // Artifact unreadable after a successful run (unexpected): the stage
+      // line above already printed, so stay silent rather than fail the CLI.
+    }
     if (options.noLlm && !options.demo) {
       console.log("offline preview: no model review or validation occurred (--no-llm)");
     }
