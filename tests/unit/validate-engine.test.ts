@@ -125,21 +125,25 @@ describe("validation engine provenance (P5-02)", () => {
     expect(result).toEqual([]);
   });
 
-  test("findings with valid provenance are inconclusive and never accepted", async () => {
+  test("findings with proven attribution are accepted with a recorded basis", async () => {
     const readers: FakeValidationSnapshotReader[] = [];
     const engine = engineWithHeadText(headText(10), readers);
     const config = ConfigFileSchema.parse({});
     const result = await engine.validate([testFinding("a"), testFinding("b")], testAddedDiff(), [testUnit()], config);
     expect(result).toHaveLength(2);
     for (const item of result) {
-      expect(item.status).toBe("inconclusive");
-      expect(item.status).not.toBe("accepted");
-      expect(item.checks).toHaveLength(11);
+      expect(item.status).toBe("accepted");
+      expect(item.checks).toHaveLength(12);
       expect(item.checks.every((check) => check.passed)).toBe(true);
       expect(item.checks.some((check) => check.name === "location_line")).toBe(true);
       expect(item.checks.some((check) => check.name === "head_comment_target")).toBe(true);
       expect(item.checks.some((check) => check.name === "evidence_bounds" && check.passed)).toBe(true);
       expect(item.checks.some((check) => check.name === "evidence_quote" && check.passed)).toBe(true);
+      expect(item.checks.some((check) => check.name === "introduced_by_pr" && check.passed)).toBe(true);
+      expect(item.derivedAttribution).toEqual({
+        introducedByPr: true,
+        basis: { kind: "added-lines", evidenceIndex: 0, file: "src/a.ts", lines: [1] },
+      });
       expect("llmVerdict" in item).toBe(false);
     }
     expect(readers[0]?.reads).toEqual([
@@ -148,6 +152,42 @@ describe("validation engine provenance (P5-02)", () => {
       { side: "head", path: "src/a.ts" },
       { side: "head", path: "src/a.ts" },
     ]);
+  });
+
+  test("model false with added evidence is accepted on code proof", async () => {
+    const engine = engineWithHeadText(headText(10));
+    const config = ConfigFileSchema.parse({});
+    const finding = testFinding();
+    finding.introducedByPr = false;
+    const result = await engine.validate([finding], testAddedDiff(), [testUnit()], config);
+    expect(result[0]?.status).toBe("accepted");
+    expect(result[0]?.derivedAttribution?.introducedByPr).toBe(true);
+    expect(result[0]?.derivedAttribution?.basis?.kind).toBe("added-lines");
+  });
+
+  test("model true with unchanged evidence is inconclusive, never accepted", async () => {
+    const engine = engineWithHeadText(headText(10));
+    const config = ConfigFileSchema.parse({});
+    const finding = testFinding();
+    finding.evidence = [{ file: "src/a.ts", startLine: 2, endLine: 2, quote: "line-2" }];
+    const result = await engine.validate([finding], testAddedDiff(), [testUnit()], config);
+    expect(result[0]?.status).toBe("inconclusive");
+    expect(result[0]?.status).not.toBe("accepted");
+    expect(result[0]?.checks.some((check) => check.name === "introduced_by_pr" && !check.passed)).toBe(true);
+    expect(result[0]?.derivedAttribution).toEqual({ introducedByPr: false });
+    expect("llmVerdict" in (result[0] ?? {})).toBe(false);
+  });
+
+  test("relocated target with context-only evidence is inconclusive", async () => {
+    const engine = engineWithHeadText(headText(10));
+    const config = ConfigFileSchema.parse({});
+    const finding = testFinding();
+    finding.line = 2;
+    finding.evidence = [{ file: "src/a.ts", startLine: 2, endLine: 2, quote: "line-2" }];
+    const result = await engine.validate([finding], testAddedDiff(), [testUnit()], config);
+    expect(result[0]?.status).toBe("inconclusive");
+    expect(result[0]?.checks.some((check) => check.name === "head_comment_target" && check.passed)).toBe(true);
+    expect(result[0]?.checks.some((check) => check.name === "introduced_by_pr" && !check.passed)).toBe(true);
   });
 
   test("findings with failed provenance are rejected", async () => {
@@ -263,6 +303,62 @@ describe("validation engine provenance (P5-02)", () => {
     const result = await engine.validate([finding], diff, [anchorUnit], ConfigFileSchema.parse({}));
     expect(result[0]?.status).toBe("inconclusive");
     expect(result[0]?.checks.some((check) => check.name === "evidence_quote" && !check.passed)).toBe(true);
+  });
+
+  test("deleted-line evidence with a valid anchor is accepted", async () => {
+    const deletedLineFile: ChangedFile = {
+      ...testAddedFile(),
+      hunks: [
+        ...testAddedFile().hunks,
+        {
+          oldStart: 5,
+          oldLines: 1,
+          newStart: 2,
+          newLines: 0,
+          lines: [{ kind: "del" as const, oldLine: 5, newLine: null, position: 5, text: "code" }],
+        },
+      ],
+    };
+    const anchorUnit: ReviewUnit = {
+      ...testUnit(),
+      symbol: {
+        name: "render",
+        kind: "function",
+        startLine: 1,
+        endLine: 10,
+        changedLines: [1],
+        deletedLines: [5],
+        anchorLine: 1,
+      },
+    };
+    const engine = createValidationEngine({
+      repoDir: "/repo",
+      createReader: (input) => {
+        const head = headText(10);
+        const baseLines = headText(10).split("\n");
+        baseLines[4] = "old-code";
+        const base = baseLines.join("\n");
+        return new FakeValidationSnapshotReader({
+          headSha: input.headSha,
+          mergeBase: input.mergeBase,
+          script: {
+            head: { "src/a.ts": { status: "ok" as const, text: head, bytes: head.length } },
+            base: { "src/a.ts": { status: "ok" as const, text: base, bytes: base.length } },
+          },
+        });
+      },
+    });
+    const diff: DiffResult = { baseSha: BASE, headSha: HEAD, mergeBase: BASE, files: [deletedLineFile] };
+    const finding = testFinding();
+    finding.line = 5;
+    finding.evidence = [{ file: "src/a.ts", startLine: 5, endLine: 5, quote: "old-code" }];
+    const result = await engine.validate([finding], diff, [anchorUnit], ConfigFileSchema.parse({}));
+    expect(result[0]?.status).toBe("accepted");
+    expect(result[0]?.checks.some((check) => check.name === "introduced_by_pr" && check.passed)).toBe(true);
+    expect(result[0]?.derivedAttribution).toEqual({
+      introducedByPr: true,
+      basis: { kind: "deleted-lines", evidenceIndex: 0, file: "src/a.ts", lines: [5] },
+    });
   });
 
   test("deleted file has no head-side target and performs no snapshot read", async () => {
