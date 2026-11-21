@@ -29,11 +29,28 @@ export function normalizeTitleStorage(title: string): string {
   return title.trim().replace(/\s+/g, " ");
 }
 
+// Whitespace-collapsed quote: the stable anchor. Model-written titles vary run to run;
+// the quoted code does not.
+export function normalizeQuoteForFingerprint(quote: string): string {
+  return quote.replace(/\r\n?/g, "\n").replace(/\s+/g, " ").trim();
+}
+
+// Deterministic anchor choice independent of model ordering: the evidence item covering the
+// finding's line (smallest start on ties), else the earliest item overall.
+export function anchorQuote(
+  line: number,
+  evidence: ReadonlyArray<{ startLine: number; endLine: number; quote: string }>,
+): string {
+  const ordered = [...evidence].sort((a, b) => a.startLine - b.startLine || a.endLine - b.endLine);
+  const covering = ordered.find((item) => item.startLine <= line && line <= item.endLine);
+  return normalizeQuoteForFingerprint((covering ?? ordered[0])?.quote ?? "");
+}
+
 export function fingerprintForFinding(input: {
   file: string;
   symbol: string;
   category: string;
-  title: string;
+  anchor: string;
 }): string {
   const fallback = input.file
     .trim()
@@ -41,9 +58,9 @@ export function fingerprintForFinding(input: {
     .replace(/\/{2,}/g, "/")
     .replace(/^(?:\.\/)+/, "");
   const normalizedFile = normalizeRepoPath(input.file) ?? fallback;
-  const normalizedTitle = normalizeTitleStorage(input.title).toLowerCase();
+  const anchor = normalizeQuoteForFingerprint(input.anchor);
   return createHash("sha1")
-    .update(`${normalizedFile}\u0000${input.symbol}\u0000${input.category}\u0000${normalizedTitle}`)
+    .update(`${normalizedFile}\u0000${input.symbol}\u0000${input.category}\u0000${anchor}`)
     .digest("hex");
 }
 
@@ -96,7 +113,7 @@ export function normalizeFinding(raw: RawFinding, ctx: NormalizeContext): Findin
       file,
       symbol: ctx.unit.symbol.name,
       category: raw.category,
-      title,
+      anchor: anchorQuote(raw.line, evidence),
     }),
     headSha: ctx.headSha,
     symbol: ctx.unit.symbol.name,

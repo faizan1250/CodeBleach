@@ -3,7 +3,7 @@ import { ConfigFileSchema, type ResolvedConfig } from "../../src/config/schema.t
 import type { Logger } from "../../src/core/logger.ts";
 import { FakeProvider } from "../../src/providers/fake.ts";
 import { ReviewEngineImpl } from "../../src/review/engine.ts";
-import { fingerprintForFinding, normalizeFinding, normalizeRepoPath } from "../../src/review/normalize.ts";
+import { anchorQuote, fingerprintForFinding, normalizeFinding, normalizeRepoPath } from "../../src/review/normalize.ts";
 import type { ReviewUnit } from "../../src/types/context.ts";
 import type { RawFinding } from "../../src/types/finding.ts";
 import type { Rule } from "../../src/types/rules.ts";
@@ -118,80 +118,60 @@ describe("normalizeRepoPath", () => {
 });
 
 describe("finding fingerprint", () => {
-  test("stable across title case and whitespace variants", () => {
-    const base = fingerprintForFinding({
-      file: "src/auth.ts",
-      symbol: "check",
-      category: "null-handling",
-      title: "Null dereference on name",
-    });
-    const variant = fingerprintForFinding({
-      file: "src/auth.ts",
-      symbol: "check",
-      category: "null-handling",
-      title: "  null   DEREFERENCE\non  name ",
-    });
-    expect(variant).toBe(base);
-    expect(base).toMatch(/^[0-9a-f]{40}$/);
+  const base = {
+    file: "src/auth.ts",
+    symbol: "check",
+    category: "null-handling",
+    anchor: "return user.name.trim();",
+  };
+
+  test("stable across quote whitespace variants", () => {
+    const variant = fingerprintForFinding({ ...base, anchor: "  return   user.name.trim();\r\n" });
+    expect(variant).toBe(fingerprintForFinding(base));
+    expect(fingerprintForFinding(base)).toMatch(/^[0-9a-f]{40}$/);
   });
 
   test("stable across path separator variants", () => {
-    const posix = fingerprintForFinding({
-      file: "src/auth.ts",
-      symbol: "check",
-      category: "null-handling",
-      title: "Null dereference on name",
-    });
-    const windows = fingerprintForFinding({
-      file: "src\\auth.ts",
-      symbol: "check",
-      category: "null-handling",
-      title: "Null dereference on name",
-    });
-    expect(windows).toBe(posix);
+    expect(fingerprintForFinding({ ...base, file: "src\\auth.ts" })).toBe(fingerprintForFinding(base));
   });
 
-  test("differs across categories", () => {
-    const a = fingerprintForFinding({
-      file: "src/auth.ts",
-      symbol: "check",
-      category: "null-handling",
-      title: "Null dereference on name",
-    });
-    const b = fingerprintForFinding({
-      file: "src/auth.ts",
-      symbol: "check",
-      category: "security",
-      title: "Null dereference on name",
-    });
-    expect(b).not.toBe(a);
+  test("differs across categories, symbols, files and anchored code", () => {
+    const original = fingerprintForFinding(base);
+    expect(fingerprintForFinding({ ...base, category: "security" })).not.toBe(original);
+    expect(fingerprintForFinding({ ...base, symbol: "verify" })).not.toBe(original);
+    expect(fingerprintForFinding({ ...base, file: "src/other.ts" })).not.toBe(original);
+    expect(fingerprintForFinding({ ...base, anchor: "return user.id;" })).not.toBe(original);
   });
 
-  test("differs across symbols", () => {
-    const a = fingerprintForFinding({
-      file: "src/auth.ts",
-      symbol: "check",
-      category: "null-handling",
-      title: "Null dereference on name",
-    });
-    const b = fingerprintForFinding({
-      file: "src/auth.ts",
-      symbol: "verify",
-      category: "null-handling",
-      title: "Null dereference on name",
-    });
-    expect(b).not.toBe(a);
+  test("quote comparison stays case-sensitive (code is)", () => {
+    expect(fingerprintForFinding({ ...base, anchor: "RETURN user.name.trim();" })).not.toBe(
+      fingerprintForFinding(base),
+    );
   });
 
   test("fallback collapses separators like the stored path", () => {
-    const base = {
-      symbol: "check",
-      category: "null-handling",
-      title: "Null dereference on name",
-    };
     const collapsed = fingerprintForFinding({ ...base, file: "../src/auth.ts" });
     expect(fingerprintForFinding({ ...base, file: "..//src/auth.ts" })).toBe(collapsed);
     expect(fingerprintForFinding({ ...base, file: "./../src/auth.ts" })).toBe(collapsed);
+  });
+
+  test("model-written title does not affect the fingerprint of the same finding", () => {
+    const ctx = { unit: unit({ id: "u-1" }), headSha: "head-abc" };
+    const a = normalizeFinding(raw({ title: "Null dereference on name" }), ctx);
+    const b = normalizeFinding(raw({ title: "name.trim() can throw when name is null" }), ctx);
+    expect(a?.fingerprint).toBeDefined();
+    expect(b?.fingerprint).toBe(a?.fingerprint);
+  });
+
+  test("anchor choice ignores evidence ordering and prefers the item covering the finding line", () => {
+    const covering = { startLine: 9, endLine: 9, quote: "name.trim()" };
+    const other = { startLine: 3, endLine: 4, quote: "const name = lookup(id);" };
+    expect(anchorQuote(9, [other, covering])).toBe("name.trim()");
+    expect(anchorQuote(9, [covering, other])).toBe("name.trim()");
+    // No item covers the line: earliest item wins, deterministically.
+    expect(anchorQuote(50, [covering, other])).toBe("const name = lookup(id);");
+    expect(anchorQuote(50, [other, covering])).toBe("const name = lookup(id);");
+    expect(anchorQuote(1, [])).toBe("");
   });
 });
 
