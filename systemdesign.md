@@ -228,7 +228,9 @@ export interface ReviewUnitDiff {
 // the real ReviewEngine with the resolved diff headSha (or records an explicit
 // skipped review for --no-llm) and persists units + status + diagnostics in
 // run.json. The complete DiffResult stays in the artifact as the authoritative
-// diff. Validation still throws NOT_IMPLEMENTED until Phase 5.
+// diff. P5-09 wiring: live runs validate findings with the deterministic
+// ValidationEngine (repo-bound snapshot reader over exact headSha/mergeBase);
+// --no-llm still skips validation, the publisher stays a Phase 7 stub.
 // The complete DiffResult stays in the artifact as the authoritative diff.
 // Status gains "failed" (zero units + retrieval failure); diagnostics gains
 // ContextDiagnostic[] plus parseCacheHits/Misses/Entries (filesParsed counts
@@ -406,11 +408,11 @@ and network-free, live preflight non-ZDR warning. Resolved by the
 reliability pass (ADR 0025): pipeline LLM preflight right after config —
 consent, key, fixed-model wiring, and usable budgets fail `CONFIG_INVALID`
 before diff and context (offline/canned engines declare
-`requiresLlm: false` and skip it); `--dry-run` preflights identically. Validation stays
-`NOT_IMPLEMENTED` with findings retained in `run.json`: a live `--dry-run`
-completes honestly — validation recorded as skipped
-(`validation_unimplemented`), findings kept unvalidated, publish still
-skipped `dry-run` — while a non-dry-run live run still fails at the stub.
+`requiresLlm: false` and skip it); `--dry-run` preflights identically. Validation runs
+deterministically with results in `run.json`: a live `--dry-run` completes with
+validated, rejected, and inconclusive findings and still skips publish
+(`dry-run`) — while a non-dry-run live run validates then still fails at the
+Phase 7 publisher stub (`NOT_IMPLEMENTED`, no GitHub calls).
 Still open: Go allowance/billing-source surfacing beyond `raw`.
 
 **Prompt-injection & secrets (applies to all LLM calls):** wrap code in delimited blocks and state it is untrusted data; reviewer prompt contains no secrets; no tool access for the model beyond what's strictly needed; redact secrets (regex + entropy) and skip `.env*`, `*.pem`, key files before sending; discard any finding whose output tries to change instructions/format; never execute anything suggested by the model.

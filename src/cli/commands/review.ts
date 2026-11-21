@@ -11,7 +11,7 @@ import { ReviewerError } from "../../core/errors.ts";
 import { GitDiffEngine } from "../../diff/git.ts";
 import { ContextEngineImpl } from "../../context/engine.ts";
 import { loadConfig } from "../../config/load.ts";
-import type { LoadConfigFn } from "../../core/contracts.ts";
+import type { LoadConfigFn, ValidationEngine } from "../../core/contracts.ts";
 import { FIXED_MODEL_ID, FIXED_PROVIDER, TRAINING_OPT_IN_ENV } from "../../llm/constants.ts";
 import type { Logger } from "../../core/logger.ts";
 import { runPipeline } from "../../core/pipeline.ts";
@@ -19,6 +19,7 @@ import { OpenCodeProvider } from "../../providers/opencode.ts";
 import { ReviewEngineImpl } from "../../review/engine.ts";
 import { skippedReviewResult } from "../../review/result.ts";
 import { stubPublisher, stubValidationEngine } from "../../core/stubs.ts";
+import { createValidationEngine } from "../../validate/engine.ts";
 import { readVersion } from "./version.ts";
 import { exitCodeForError } from "../exit-codes.ts";
 
@@ -146,7 +147,11 @@ export async function runReview(options: ReviewOptions, logger: Logger): Promise
       diff: new GitDiffEngine({ logger }),
       context: new ContextEngineImpl({ logger }),
       review,
-      validation: stubValidationEngine,
+      // P5-09: live runs use the deterministic validator bound to this run's
+      // repo; the reader is created per validation from the diff SHAs and
+      // released after. --no-llm keeps the stub (review skipped, so the
+      // validator never runs); demo keeps its canned engine.
+      validation: createValidationEngine({ repoDir: options.repo }),
       publisher: stubPublisher,
     },
     loadAgain,
@@ -168,7 +173,7 @@ async function runEngines(
       | ReviewEngineImpl
       | typeof demoReviewEngine
       | { review: () => Promise<ReturnType<typeof skippedReviewResult>>; requiresLlm?: boolean | undefined };
-    validation: typeof demoValidationEngine | typeof stubValidationEngine;
+    validation: ValidationEngine;
     publisher: typeof demoPublisher | typeof stubPublisher;
   },
   loadConfig: LoadConfigFn | undefined,
@@ -192,14 +197,6 @@ async function runEngines(
     console.log(`review ${summary.status}: ${summary.stages.length} stages, ${summary.configSource} config`);
     if (options.noLlm && !options.demo) {
       console.log("offline preview: no model review or validation occurred (--no-llm)");
-    } else if (options.dryRun && !options.demo) {
-      // --dry-run alone still calls the model; only --no-llm is offline.
-      const validation = summary.stages.find((stage) => stage.name === "validation");
-      if (validation?.status === "skipped") {
-        console.log(
-          `dry-run: live model review ran; validation skipped (${validation.reason ?? "skipped"}); findings unvalidated, nothing published`,
-        );
-      }
     }
     return 0;
   } catch (error) {
