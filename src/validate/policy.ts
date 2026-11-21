@@ -37,7 +37,8 @@ export const POLICY_GROUP_MEMBERS: Record<PolicyConfigGroup, readonly Category[]
   concurrency: memberCategories("concurrency"),
 };
 
-const SEVERITY_RANK: Record<Severity, number> = {
+// Shared with P5-07 dedupe: winner order compares effective severity first.
+export const SEVERITY_RANK: Record<Severity, number> = {
   info: 0,
   low: 1,
   medium: 2,
