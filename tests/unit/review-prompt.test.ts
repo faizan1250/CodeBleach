@@ -221,7 +221,6 @@ describe("review prompt redaction", () => {
       "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----",
       "auth Bearer hunter2value and Basic dXNlcjpwYXNzd29yZA== end",
       "https://x.test/cb?api_key=SECRET123&b=1",
-      "MY_SECRET=hunter2 password: hunter2",
       '{"api_key": "abc123"}',
     ].join("\n");
     const hostile = unit({
@@ -252,12 +251,82 @@ describe("review prompt redaction", () => {
       "hunter2value",
       "dXNlcjpwYXNzd29yZA==",
       "api_key=SECRET123",
-      "hunter2",
       "abc123",
     ]) {
       expect(combined).not.toContain(secret);
     }
     expect(built.user).toContain("[REDACTED]");
+  });
+
+  function unitWithLine(path: string, text: string): ReturnType<typeof unit> {
+    return unit({
+      file: { path, oldPath: null, status: "modified", language: "typescript", commentableLines: [1] },
+      diff: {
+        hunks: [
+          {
+            oldStart: 1,
+            oldLines: 1,
+            newStart: 1,
+            newLines: 1,
+            lines: [{ kind: "add", oldLine: null, newLine: 1, position: 0, text }],
+          },
+        ],
+        originalHunkCount: 1,
+        includedHunkCount: 1,
+        omittedHunkCount: 0,
+        truncated: false,
+      },
+    });
+  }
+
+  function diffText(built: { user: string }): string {
+    const payload = JSON.parse(built.user.slice(built.user.indexOf("{"))) as {
+      reviewUnit: { diff: Array<{ lines: Array<{ text: string }> }> };
+    };
+    return payload.reviewUnit.diff[0]?.lines[0]?.text ?? "";
+  }
+
+  test("redacts unquoted key=value secrets in config-like files", () => {
+    for (const path of [".env", "config/app.yml", "deploy/Dockerfile"]) {
+      const built = buildReviewPrompt(unitWithLine(path, "MY_SECRET=hunter2 password: hunter2"), configWith({}));
+      expect(built.user).not.toContain("hunter2");
+      expect(built.user).toContain("[REDACTED]");
+    }
+  });
+
+  test("keeps ordinary source code intact when it merely mentions credential-like names", () => {
+    const lines = [
+      "const token = getToken();",
+      "if (token === expectedToken) return true;",
+      "if (user.password == input.password) {",
+      "password: string;",
+      "auth: AuthConfig;",
+      "const secret = process.env.JWT_SECRET;",
+      "const handler = token => verify(token);",
+      "const picked = ok ? token : fallback;",
+      "return { password: hashedPassword, token };",
+    ];
+    for (const line of lines) {
+      const built = buildReviewPrompt(unitWithLine("src/auth.ts", line), configWith({}));
+      expect(diffText(built)).toBe(line);
+    }
+  });
+
+  test("still redacts quoted credential literals inside source code", () => {
+    const built = buildReviewPrompt(
+      unitWithLine("src/auth.ts", 'const apiKey = "abcd1234efgh5678"; const token = "hunter2";'),
+      configWith({}),
+    );
+    expect(built.user).not.toContain("abcd1234efgh5678");
+    expect(built.user).not.toContain("hunter2");
+    expect(built.user).toContain("[REDACTED]");
+  });
+
+  test("redacts interpolation-free template-string credentials but not interpolated expressions", () => {
+    const literal = buildReviewPrompt(unitWithLine("src/auth.ts", "const token = `hunter2value`;"), configWith({}));
+    expect(literal.user).not.toContain("hunter2value");
+    const interpolated = `const token = \`\${prefix}-\${suffix}\`;`;
+    expect(diffText(buildReviewPrompt(unitWithLine("src/auth.ts", interpolated), configWith({})))).toBe(interpolated);
   });
 
   test("preserves unrelated numeric telemetry", () => {

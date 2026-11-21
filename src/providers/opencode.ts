@@ -202,8 +202,10 @@ export class OpenCodeProvider implements LlmProvider {
     // temperature/jsonSchema omitted: unverified against this endpoint, never guessed.
     const body = JSON.stringify({
       model: modelId,
-      instructions: redact(request.system, [key]),
-      input: redact(request.user, [key]),
+      // Transport layer cannot know content types: literal key + token shapes only.
+      // Content-aware (file-type) redaction happens in buildReviewPrompt.
+      instructions: redact(request.system, [key], { assignments: "none" }),
+      input: redact(request.user, [key], { assignments: "none" }),
       max_output_tokens: maxTokens,
     });
     const headers: Record<string, string> = {
