@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { ReviewerError } from "../../src/core/errors.ts";
 import type { TreeEntry } from "../../src/context/snapshot.ts";
+import { runProcess } from "../../src/utils/spawn.ts";
 import {
   DEFAULT_VALIDATION_SNAPSHOT_MAX_ENTRIES,
   FakeValidationSnapshotReader,
@@ -23,8 +24,52 @@ function timeoutError(): ReviewerError {
   return new ReviewerError({
     code: "GIT_FAILED",
     message: 'command "git" timed out after 30000ms',
-    cause: { reason: "timeout" },
+    cause: { reason: "timeout", timeoutMs: 30000 },
   });
+}
+
+function abortError(): ReviewerError {
+  return new ReviewerError({
+    code: "GIT_FAILED",
+    message: 'command "git" was aborted',
+    cause: { reason: "abort" },
+  });
+}
+
+function perFileLimitError(oid: string = OID_A): ReviewerError {
+  return new ReviewerError({
+    code: "GIT_FAILED",
+    message: `blob ${oid.toLowerCase()} is 999 bytes, above the 10-byte per-blob snapshot cap`,
+    cause: { kind: "per-file-limit", oid: oid.toLowerCase(), sizeBytes: 999, limitBytes: 10 },
+  });
+}
+
+function cumulativeLimitError(oid: string = OID_A): ReviewerError {
+  return new ReviewerError({
+    code: "GIT_FAILED",
+    message: "snapshot total 12 bytes would exceed the 10-byte run cap",
+    cause: { kind: "cumulative-limit", oid: oid.toLowerCase(), sizeBytes: 12, limitBytes: 10 },
+  });
+}
+
+function untypedCapError(): ReviewerError {
+  return new ReviewerError({ code: "GIT_FAILED", message: "snapshot blob hit the legacy per-file cap" });
+}
+
+function untypedMissingError(oid: string = OID_A): ReviewerError {
+  return new ReviewerError({ code: "GIT_FAILED", message: `blob ${oid.toLowerCase()} is missing` });
+}
+
+function untypedTimeoutError(): ReviewerError {
+  return new ReviewerError({ code: "GIT_FAILED", message: 'command "git" timed out after 30000ms' });
+}
+
+function malformedIndexError(): ReviewerError {
+  return new ReviewerError({ code: "PARSE_FAILED", message: "ls-tree record has no metadata/path tab separator" });
+}
+
+function protocolBlobError(oid: string = OID_A): ReviewerError {
+  return new ReviewerError({ code: "GIT_FAILED", message: `unexpected batch header for "${oid.toLowerCase()}"` });
 }
 
 function exitError(): ReviewerError {
@@ -66,7 +111,11 @@ class ScriptSource implements ValidationSnapshotSource {
     this.blobReads.push(oid.toLowerCase());
     const hit = this.blobs.get(oid.toLowerCase());
     if (hit === undefined) {
-      throw new ReviewerError({ code: "GIT_FAILED", message: `blob ${oid.toLowerCase()} is missing` });
+      throw new ReviewerError({
+        code: "GIT_FAILED",
+        message: `blob ${oid.toLowerCase()} is missing`,
+        cause: { kind: "missing", oid: oid.toLowerCase() },
+      });
     }
     if (hit instanceof ReviewerError) throw hit;
     return hit;
@@ -292,6 +341,94 @@ describe("failure mapping", () => {
     expect(result.status).toBe("timeout");
   });
 
+  test("real subprocess timeout is a timeout outcome", async () => {
+    const failure = await runProcess({
+      cmd: [process.execPath, "-e", "await new Promise((r) => setTimeout(r, 30000));"],
+      timeoutMs: 200,
+    }).then(
+      () => null,
+      (caught: unknown) => caught,
+    );
+    expect(failure).toBeInstanceOf(ReviewerError);
+    const source = new ScriptSource();
+    source.headFiles.set("src/a.ts", blobEntry(OID_A, "src/a.ts"));
+    source.blobs.set(OID_A, failure as ReviewerError);
+    const reader = readerFor(source);
+    expect((await reader.readHead("src/a.ts")).status).toBe("timeout");
+  });
+
+  test("timeout wording without a timeout cause propagates", async () => {
+    const source = new ScriptSource();
+    source.headFiles.set("src/a.ts", blobEntry(OID_A, "src/a.ts"));
+    source.blobs.set(OID_A, untypedTimeoutError());
+    const reader = readerFor(source);
+    await expect(reader.readHead("src/a.ts")).rejects.toThrow(ReviewerError);
+  });
+
+  test("blob abort is an aborted outcome, not a throw", async () => {
+    const source = new ScriptSource();
+    source.headFiles.set("src/a.ts", blobEntry(OID_A, "src/a.ts"));
+    source.blobs.set(OID_A, abortError());
+    const reader = readerFor(source);
+    expect((await reader.readHead("src/a.ts")).status).toBe("aborted");
+  });
+
+  test("index abort is an aborted outcome, not a throw", async () => {
+    const source = new ScriptSource();
+    source.indexError = abortError();
+    const reader = readerFor(source);
+    expect((await reader.readHead("src/a.ts")).status).toBe("aborted");
+  });
+
+  test("typed per-file limit is size_limit", async () => {
+    const source = new ScriptSource();
+    source.headFiles.set("src/a.ts", blobEntry(OID_A, "src/a.ts"));
+    source.blobs.set(OID_A, perFileLimitError());
+    const reader = readerFor(source);
+    expect((await reader.readHead("src/a.ts")).status).toBe("size_limit");
+  });
+
+  test("typed cumulative limit is size_limit", async () => {
+    const source = new ScriptSource();
+    source.headFiles.set("src/a.ts", blobEntry(OID_A, "src/a.ts"));
+    source.blobs.set(OID_A, cumulativeLimitError());
+    const reader = readerFor(source);
+    expect((await reader.readHead("src/a.ts")).status).toBe("size_limit");
+  });
+
+  test("untyped cap wording propagates instead of becoming size_limit", async () => {
+    const source = new ScriptSource();
+    source.headFiles.set("src/a.ts", blobEntry(OID_A, "src/a.ts"));
+    source.blobs.set(OID_A, untypedCapError());
+    const reader = readerFor(source);
+    await expect(reader.readHead("src/a.ts")).rejects.toThrow(ReviewerError);
+  });
+
+  test("untyped is-missing wording propagates instead of becoming not_found", async () => {
+    const source = new ScriptSource();
+    source.headFiles.set("src/a.ts", blobEntry(OID_A, "src/a.ts"));
+    source.blobs.set(OID_A, untypedMissingError());
+    const reader = readerFor(source);
+    await expect(reader.readHead("src/a.ts")).rejects.toThrow(ReviewerError);
+  });
+
+  test("raw output-limit propagates instead of becoming size_limit", async () => {
+    const failure = await runProcess({
+      cmd: [process.execPath, "-e", "const c='x'.repeat(65536);for(let i=0;i<64;i++)process.stdout.write(c);"],
+      maxStdoutBytes: 1024,
+    }).then(
+      () => null,
+      (caught: unknown) => caught,
+    );
+    expect(failure).toBeInstanceOf(ReviewerError);
+    expect((failure as ReviewerError).cause).toEqual(expect.objectContaining({ reason: "output-limit" }));
+    const source = new ScriptSource();
+    source.headFiles.set("src/a.ts", blobEntry(OID_A, "src/a.ts"));
+    source.blobs.set(OID_A, failure as ReviewerError);
+    const reader = readerFor(source);
+    await expect(reader.readHead("src/a.ts")).rejects.toThrow(ReviewerError);
+  });
+
   test("index timeout is a timeout outcome, not a throw", async () => {
     const source = new ScriptSource();
     source.indexError = timeoutError();
@@ -300,7 +437,7 @@ describe("failure mapping", () => {
     expect(result.status).toBe("timeout");
   });
 
-  test("missing blob behind a present index entry is not_found", async () => {
+  test("typed missing blob behind a present index entry is not_found", async () => {
     const source = new ScriptSource();
     source.headFiles.set("src/a.ts", blobEntry(OID_A, "src/a.ts"));
     const reader = readerFor(source);
@@ -319,6 +456,21 @@ describe("failure mapping", () => {
   test("index corruption propagates instead of becoming a status", async () => {
     const source = new ScriptSource();
     source.indexError = exitError();
+    const reader = readerFor(source);
+    await expect(reader.readHead("src/a.ts")).rejects.toThrow(ReviewerError);
+  });
+
+  test("malformed index output propagates instead of becoming a status", async () => {
+    const source = new ScriptSource();
+    source.indexError = malformedIndexError();
+    const reader = readerFor(source);
+    await expect(reader.readHead("src/a.ts")).rejects.toThrow(ReviewerError);
+  });
+
+  test("malformed blob protocol output propagates instead of becoming a status", async () => {
+    const source = new ScriptSource();
+    source.headFiles.set("src/a.ts", blobEntry(OID_A, "src/a.ts"));
+    source.blobs.set(OID_A, protocolBlobError());
     const reader = readerFor(source);
     await expect(reader.readHead("src/a.ts")).rejects.toThrow(ReviewerError);
   });
