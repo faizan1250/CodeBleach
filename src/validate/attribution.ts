@@ -54,8 +54,10 @@ function intersectRange(startLine: number, endLine: number, lines: Set<number>):
  * verified snapshot locations count. Added basis needs a head-side verified
  * location in the primary file spanning an added line inside the originating
  * symbol's changedLines; deleted basis needs a verified old-side location
- * spanning a del/deletedLines line plus the location anchor. Anything else
- * (context-only, other files, out-of-scope hunks) is inconclusive.
+ * spanning a deleted line inside the originating symbol's deletedLines plus
+ * the location anchor. Anything else
+ * (context-only, other files, out-of-scope hunks, or deleted lines owned by
+ * another symbol) is inconclusive.
  */
 export function validateAttribution(input: AttributionInput): AttributionResult {
   const { finding, unit, changedFile, canonicalPath, target, locations } = input;
@@ -113,8 +115,13 @@ export function validateAttribution(input: AttributionInput): AttributionResult 
     const location = locations[index];
     if (location === undefined || location.side !== "base") continue;
     if (location.path !== canonicalPath && location.path !== oldPath) continue;
-    const removed = new Set([...deleted, ...symbolDeleted]);
-    const overlap = intersectRange(location.startLine, location.endLine, removed);
+    // Symbol scope is load-bearing: only the originating symbol's deletedLines
+    // confer a basis. The file-level deleted set is a cross-check, never a
+    // fallback — a verified range over another symbol's deletions stays
+    // inconclusive for this unit.
+    const overlap = intersectRange(location.startLine, location.endLine, symbolDeleted).filter((line) =>
+      deleted.has(line),
+    );
     if (overlap.length > 0) {
       const basis: AttributionBasis = {
         kind: "deleted-lines",

@@ -97,9 +97,9 @@ Accepted findings carry a code-owned head-side `derivedTarget`
 `introducedByPr` is code-derived; the model's boolean is ignored. Accepted
 introduction needs a verified evidence location intersecting real PR lines:
 head-side verified location in the primary file spanning an `add` line in
-the originating symbol (`added-lines` basis), or old-side verified location
-spanning a `del`/`deletedLines` line plus a valid head-side anchor
-(`deleted-lines` basis). Anything else is `introduction_inconclusive` —
+the originating symbol (`changedLines` basis), or old-side verified location
+spanning a `del` line owned by the originating symbol (`deletedLines` basis)
+plus a valid head-side anchor. Anything else is `introduction_inconclusive` —
 never accepted. Replacement hunks keep the head/base distinction; identical
 matches on both sides stay `evidence_side_ambiguous`.
 

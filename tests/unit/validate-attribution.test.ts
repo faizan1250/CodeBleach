@@ -224,6 +224,58 @@ describe("attribution deleted-line basis (P5-05)", () => {
     if (result.ok) expect(result.basis.kind).toBe("deleted-lines");
   });
 
+  test("deleted line outside the originating symbol scope does not pass", () => {
+    const file: ChangedFile = {
+      ...testFile(),
+      hunks: [
+        ...testFile().hunks,
+        {
+          oldStart: 20,
+          oldLines: 1,
+          newStart: 19,
+          newLines: 1,
+          lines: [diffLine("del", 20, null)],
+        },
+      ],
+    };
+    // Unit owns deletedLines [5, 6]; verified old-side evidence spans only
+    // line 20 (another symbol's deletion). File-level deletion is not enough.
+    const result = validateAttribution(
+      inputFor([{ file: "src/a.ts", startLine: 20, endLine: 20, quote: "other-symbol" }], ["base"], true, {
+        changedFile: file,
+        target: { file: "src/a.ts", line: 3, side: "RIGHT", kind: "deletion-anchor", sourceLine: 5 },
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.inconclusive).toBe(true);
+  });
+
+  test("multi-line deleted evidence attributes only the in-symbol lines", () => {
+    const file: ChangedFile = {
+      ...testFile(),
+      hunks: [
+        ...testFile().hunks,
+        {
+          oldStart: 20,
+          oldLines: 1,
+          newStart: 19,
+          newLines: 1,
+          lines: [diffLine("del", 20, null)],
+        },
+      ],
+    };
+    const result = validateAttribution(
+      inputFor([{ file: "src/a.ts", startLine: 5, endLine: 20, quote: "old-code" }], ["base"], true, {
+        changedFile: file,
+        target: { file: "src/a.ts", line: 3, side: "RIGHT", kind: "deletion-anchor", sourceLine: 5 },
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.basis).toEqual({ kind: "deleted-lines", evidenceIndex: 0, file: "src/a.ts", lines: [5, 6] });
+    }
+  });
+
   test("replacement hunk maps each verified side to its own basis", () => {
     const file: ChangedFile = {
       ...testFile(),
