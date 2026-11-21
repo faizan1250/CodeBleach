@@ -291,7 +291,8 @@ export interface FakeSnapshotScript {
 
 /**
  * Scripted reader for tests: records every read, never touches git or the
- * filesystem. Unscripted paths throw loudly so unexpected reads fail tests.
+ * filesystem. Script keys resolve through the same path canonicalization as
+ * the real reader. Unscripted paths throw loudly so unexpected reads fail tests.
  */
 export class FakeValidationSnapshotReader implements ValidationSnapshotReader {
   readonly headSha: string;
@@ -346,7 +347,8 @@ export class FakeValidationSnapshotReader implements ValidationSnapshotReader {
 
   private lookup(side: ValidationSnapshotSide, path: string): SnapshotReadResult {
     this.reads.push({ side, path });
-    const hit = this.script.get(`${side}\u0000${path}`);
+    const checked = validateSnapshotPath(path);
+    const hit = this.script.get(`${side}\u0000${checked.ok ? checked.path : path}`);
     if (hit === undefined) throw new Error(`FakeValidationSnapshotReader: no scripted result for ${side}:${path}`);
     return hit;
   }

@@ -3,6 +3,7 @@ import { ReviewerError } from "../../src/core/errors.ts";
 import type { TreeEntry } from "../../src/context/snapshot.ts";
 import {
   DEFAULT_VALIDATION_SNAPSHOT_MAX_ENTRIES,
+  FakeValidationSnapshotReader,
   GitValidationSnapshotReader,
   validateSnapshotPath,
 } from "../../src/validate/snapshot.ts";
@@ -320,5 +321,23 @@ describe("failure mapping", () => {
     source.indexError = exitError();
     const reader = readerFor(source);
     await expect(reader.readHead("src/a.ts")).rejects.toThrow(ReviewerError);
+  });
+});
+
+describe("fake validation snapshot reader", () => {
+  test("resolves non-canonical paths like the real reader", async () => {
+    const reader = new FakeValidationSnapshotReader({
+      headSha: HEAD,
+      mergeBase: BASE,
+      script: { head: { "src/a.ts": { status: "ok", text: "ok\n", bytes: 3 } } },
+    });
+    const result = await reader.readHead("./src/a.ts");
+    expect(result.status).toBe("ok");
+    expect(reader.reads).toEqual([{ side: "head", path: "./src/a.ts" }]);
+  });
+
+  test("unscripted paths still throw loudly", async () => {
+    const reader = new FakeValidationSnapshotReader({ headSha: HEAD, mergeBase: BASE });
+    expect(() => reader.readHead("src/missing.ts")).toThrow();
   });
 });
