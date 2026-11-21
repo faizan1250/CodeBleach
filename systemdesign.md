@@ -19,7 +19,7 @@ Fixed stack: Bun, TypeScript (strict), Octokit, GitHub Actions, web-tree-sitter,
 ## 2. Principles
 
 1. **CLI-first.** The GitHub Action is a thin wrapper that calls `bun run src/cli/index.ts review ...`. Everything runs locally with `--dry-run`.
-2. **Deterministic where possible.** Diff, positions, ids, dedupe, schema checks, evidence checks = code. Only bug-finding and semantic validation = LLM.
+2. **Deterministic where possible.** Diff, positions, ids, dedupe, schema checks, evidence checks, and finding validation = code. Only bug-finding = LLM (Phase 5 validation is deterministic-only, ADRs 0028/0030).
 3. **Never trust LLM output.** Zod-validate at the boundary, then re-verify against the repo.
 4. **Default is silence.** Weak, inconclusive or unverifiable findings are discarded (but logged to the run artifact).
 5. **Modules communicate only through typed data contracts** (`src/types`). No module imports another engine's internals.
@@ -54,7 +54,7 @@ Single process, single run per PR event. No server, no database, no queue.
 event → resolve SHAs → load config → git diff (local) → filter files
 → parse changed files (tree-sitter) → changed symbols → build ReviewUnits (context + rules)
 → review pass(es) → normalize + fingerprint → deterministic validation
-→ (optional) LLM validation → dedupe vs existing PR comments → rank & cap
+→ same-run dedupe & cap → rank
 → verify head SHA unchanged → publish review → write artifact
 ```
 
@@ -129,12 +129,12 @@ Partial behavior: `ContextBuildResult.status` is `complete` (no issues) | `parti
 - Prompt rules: report only issues introduced by the PR; cite exact code in `evidence`; use only provided context; say nothing if no confirmed bug (`findings: []` is a valid answer); untrusted code goes inside delimited blocks and is declared as data.
 
 ### 4.4 Validation Engine (`src/validate`)
-Ordered; cheap/deterministic first. Any hard failure → reject.
+Ordered; cheap/deterministic first. Any hard failure → reject. Deterministic-only in v1 (ADRs 0028, 0030): the engine makes no `LlmProvider` calls and `llmVerdict` stays absent.
 
 **Deterministic (code):**
-1. Schema valid. 2. `file` is in the PR diff. 3. `line` exists in head file. 4. `line` ∈ `commentableLines` (else try nearest changed line of same symbol within ±N, else reject). 5. `evidence.quote` appears verbatim (whitespace-normalized) in file at/near cited range or in provided context. 6. Line/symbol touched by PR (`introducedByPr`). 7. Severity ≥ threshold and confidence ≥ threshold (per category). 8. Not a duplicate (fingerprint, plus same file+symbol+category similarity). 9. Not already posted on this PR. 10. Not matched by ignore rules.
+1. Schema valid. 2. `file` is in the PR diff. 3. `line` exists in the exact head snapshot. 4. `line` ∈ `commentableLines` (else nearest changed line of the same symbol within ±5, else reject). 5. `evidence.quote` appears verbatim (whitespace-normalized, case-sensitive) in the exact snapshot — head side at `headSha`, deleted lines at `mergeBase` — at/near the cited range or in provided context. 6. Line/symbol touched by PR (code-derived `introducedByPr`, never the model boolean). 7. Severity ≥ threshold and confidence ≥ threshold (per category). 8. Not a same-run duplicate (Phase 4 fingerprint, plus same file+symbol+category similarity). 9. Not matched by ignore rules. (Cross-run / already-posted-on-PR dedupe is Phase 7, not validation.)
 
-**Semantic (LLM, optional, only for findings that pass deterministic checks and are severity ≥ medium):** independent prompt, fresh context, *different framing* ("try to refute this finding using the code; answer `confirmed | refuted | inconclusive` with evidence"). Prefer a different model than the reviewer if available. A same-model self-check is a weak signal — never the only gate for high severity.
+**No semantic LLM validation in v1:** the optional independent-LLM check described here in earlier revisions is superseded for Phase 5 v1 by ADR 0028 D1 — deferred until Phase 8 produces evaluation evidence and a separate architectural decision approves it. Deterministic provenance/evidence validation is not proof of semantic correctness.
 
 **Outcome:** `accepted | rejected | inconclusive`. `inconclusive` ⇒ discard (logged). Every check records `{name, outcome, code, detail}` (`outcome: passed | failed | inconclusive | skipped`, stable machine-readable `code` per `docs/adr/0029-phase5-result-contract.md`, bounded detail with no source text or secrets) for eval/debug. Accepted findings carry a code-owned head-side `derivedTarget`; rejected duplicates link the retained finding via `duplicateOfId`. `llmVerdict` stays absent in v1 (deterministic-only, ADR 0028 D1).
 
@@ -484,7 +484,7 @@ evals/                 cases/, run.ts   (Phase 8)
 | 3 | Parsing | web-tree-sitter (WASM) + per-language adapters | Native `tree-sitter` bindings; TS compiler API | WASM avoids native-build/binary issues under Bun; one API for many languages | Yes |
 | 4 | Context | On-demand per PR (git grep + AST) | Full repo index | No state to invalidate; repos are small | Yes |
 | 5 | Rules | Explicit authoritative; inferred advisory | Inferred-only | Inferred is noisy | Explicit yes, inferred later |
-| 6 | Validation | Deterministic gates + optional independent LLM check | LLM-only | Cheap, objective checks catch most hallucinations | Deterministic yes, LLM Phase 5 |
+| 6 | Validation | Deterministic gates only (no LLM check in v1) | LLM-only | Cheap, objective checks catch most hallucinations | Yes (deterministic-only v1; semantic LLM deferred, ADRs 0028/0030) |
 | 7 | Caching | GitHub Actions cache for inferred/index data; local dir for dev | None | Runner is ephemeral | Later |
 | 8 | OpenCode | `LlmProvider` interface; surface chosen by spike | Hardcode one SDK | API shape unverified; avoid lock-in | Interface yes, impl Phase 4 |
 | 9 | Multi-language | `LanguageAdapter` + wasm grammar per language | Regex fallback | Add TS first, then Python/Go | TS only |
@@ -500,7 +500,7 @@ evals/                 cases/, run.ts   (Phase 8)
 | 2 Diff Engine | deterministic git diff → `DiffResult` with positions, filters, skip reasons, one synthetic module symbol per eligible file | Fixture diffs map to correct lines/positions/symbols; identical output under hostile Git config |
 | 3 Context Engine | TS adapter, definitions, callers, callees, tests, ranking, budget | `ReviewUnit`s for a fixture repo contain expected items within budget |
 | 4 Review Engine | OpenCode spike → provider, prompts, Zod parse, repair retry, result/usage/artifact | Done (P4-10, ADR 0020): deterministic seeded-bug smoke green, garbage/incomplete handled, suite + types green, x-plat CI |
-| 5 Validation | Deterministic checks, dedupe, optional LLM check | Hallucinated file/line/evidence rejected in tests |
+| 5 Validation | Deterministic checks, same-run dedupe (no LLM check in v1) | Hallucinated file/line/evidence rejected in tests |
 | 6 Repo awareness | Rules → prompt, path overrides, inferred conventions + cache | Explicit rules affect prompts; inferred never overrides |
 | 7 GitHub | Octokit publisher, workflow, dedupe markers, SHA recheck | Real PR gets correct inline comments, no dupes on re-push |
 | 8 Eval/optimize | Eval harness, baselines, caching, incremental review | Precision/cost tracked per change |

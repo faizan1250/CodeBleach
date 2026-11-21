@@ -39,13 +39,15 @@ bun run src/cli/index.ts review --base <sha> --head <sha> --dry-run --no-llm
 Muse Spark 1.3 Contributor is not zero-data-retention: prompts/completions
 may train future models. Live review requires `OPENCODE_API_KEY` plus the
 explicit `CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING=true` opt-in (and the
-workspace training-data toggle). `--dry-run` alone still calls the model;
-add `--no-llm` for a network-free preview that records review/validation as
-skipped and exits 0. Findings are validated in Phase 5; until then a live
-`--dry-run` completes with validation recorded as skipped
-(`validation_unimplemented`), findings retained unvalidated in
-`.reviewer-out/run.json`, and nothing published. Without `--dry-run` a live
-run still ends at the validation stub with `NOT_IMPLEMENTED`.
+workspace training-data toggle). Findings are deterministically validated
+(diff/path/location/evidence/provenance/policy — no model calls, see
+`docs/validation.md`): a live `--dry-run` completes with
+accepted/rejected/inconclusive counts (details in `.reviewer-out/run.json`)
+and skips publishing. Without `--dry-run` a live run validates, then still
+ends at the Phase 7 publisher stub with `NOT_IMPLEMENTED` (no GitHub calls).
+`--no-llm` remains the network-free preview: `review --dry-run --no-llm`
+records review/validation as skipped and exits 0. Validation verifies
+provenance and support; it does not prove a finding is semantically correct.
 
 ## Demo (offline, no network or secrets)
 
@@ -87,7 +89,9 @@ manual-only, Not-ZDR) runs the same shape against the live model; see
 - Architecture: `systemdesign.md`
 - Phase 1 plan: `implementation.md`
 - Phase 4 plan: `implementation-phase4.md`
-- Decisions: `docs/adr/` (Phase 4 freeze: `0020-phase4-freeze.md`)
+- Phase 5 plan: `implementation-phase5.md`
+- Validation (deterministic checks, codes, `run.json` v2): `docs/validation.md`
+- Decisions: `docs/adr/` (Phase 4 freeze: `0020-phase4-freeze.md`; Phase 5 deterministic-only: `0028-phase5-deterministic-validation.md`, `0029-phase5-result-contract.md`, `0030-phase5-cli-docs-hardening.md`)
 
 ## License
 
