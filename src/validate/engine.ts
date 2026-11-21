@@ -8,6 +8,7 @@ import { validateFindingProvenance } from "./provenance.ts";
 import { validateEvidence } from "./evidence.ts";
 import { validateLocation } from "./location.ts";
 import { validateAttribution } from "./attribution.ts";
+import { validatePolicy } from "./policy.ts";
 
 function internal(message: string): ReviewerError {
   return new ReviewerError({ code: "INTERNAL", message });
@@ -36,8 +37,10 @@ export function createValidationEngine(options: ValidationEngineOptions): Valida
  * with failed provenance is rejected. P5-03 location resolves the head-side
  * target, P5-04 verifies every evidence quote against its exact snapshot
  * side via redactSource, and P5-05 derives code-owned introducedByPr from
- * verified evidence intersecting PR added/deleted lines — the first stage
- * that can mark findings accepted (policy and dedupe land in P5-06/P5-07).
+ * verified evidence intersecting PR added/deleted lines. P5-06 enforces
+ * config policy (category gate, rule reference, severity/confidence
+ * thresholds) — the first stage that can mark findings accepted (dedupe and
+ * the result cap land in P5-07).
  * Provenance performs no reads, so an unproven path can never become a Git
  * lookup; location reads only the P5-02 canonical path at head, evidence
  * reads only provenance-allowed paths at their diff side, and attribution is
@@ -62,7 +65,7 @@ export class ValidationEngineImpl implements ValidationEngine {
     findings: Finding[],
     diff: DiffResult,
     units: ReviewUnit[],
-    _config: ResolvedConfig,
+    config: ResolvedConfig,
   ): Promise<ValidatedFinding[]> {
     if (diff === null || diff === undefined || typeof diff !== "object") {
       throw internal("ValidationEngine requires a diff result");
@@ -112,13 +115,27 @@ export class ValidationEngineImpl implements ValidationEngine {
           target: location.target,
           sides: evidence.sides,
         });
+        const attributionChecks = [...evidenceChecks, ...attribution.checks];
+        if (!attribution.ok) {
+          results.push({
+            finding,
+            status: "inconclusive",
+            checks: attributionChecks,
+            derivedAttribution: { introducedByPr: false },
+          });
+          continue;
+        }
+        const policy = validatePolicy({ finding, canonicalPath: provenance.canonicalPath, config });
+        const policyChecks = [...attributionChecks, ...policy.checks];
+        if (!policy.ok) {
+          results.push({ finding, status: "rejected", checks: policyChecks });
+          continue;
+        }
         results.push({
           finding,
-          status: attribution.ok ? "accepted" : "inconclusive",
-          checks: [...evidenceChecks, ...attribution.checks],
-          derivedAttribution: attribution.ok
-            ? { introducedByPr: true, basis: attribution.basis }
-            : { introducedByPr: false },
+          status: "accepted",
+          checks: policyChecks,
+          derivedAttribution: { introducedByPr: true, basis: attribution.basis },
         });
       }
       return results;

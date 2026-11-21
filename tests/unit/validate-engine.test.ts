@@ -133,7 +133,7 @@ describe("validation engine provenance (P5-02)", () => {
     expect(result).toHaveLength(2);
     for (const item of result) {
       expect(item.status).toBe("accepted");
-      expect(item.checks).toHaveLength(12);
+      expect(item.checks).toHaveLength(16);
       expect(item.checks.every((check) => check.passed)).toBe(true);
       expect(item.checks.some((check) => check.name === "location_line")).toBe(true);
       expect(item.checks.some((check) => check.name === "head_comment_target")).toBe(true);
@@ -381,6 +381,44 @@ describe("validation engine provenance (P5-02)", () => {
     expect(result[0]?.status).toBe("rejected");
     expect(readers[0]?.reads).toEqual([]);
     expect(readers[0]?.cleared).toBe(1);
+  });
+
+  test("policy below threshold rejects a proven finding with a stable code", async () => {
+    const engine = engineWithHeadText(headText(10));
+    const config = ConfigFileSchema.parse({ review: { severity_threshold: "critical" } });
+    const result = await engine.validate([testFinding()], testAddedDiff(), [testUnit()], config);
+    expect(result[0]?.status).toBe("rejected");
+    expect(result[0]?.checks).toHaveLength(15);
+    expect(result[0]?.checks.some((check) => check.name === "severity_policy" && !check.passed)).toBe(true);
+    expect(result[0]?.checks.some((check) => check.name === "introduced_by_pr" && check.passed)).toBe(true);
+  });
+
+  test("policy rejects a proven finding in a disabled category", async () => {
+    const engine = engineWithHeadText(headText(10));
+    const config = ConfigFileSchema.parse({ review: { categories: { bugs: false } } });
+    const result = await engine.validate([testFinding()], testAddedDiff(), [testUnit()], config);
+    expect(result[0]?.status).toBe("rejected");
+    expect(result[0]?.checks.some((check) => check.name === "category_policy" && !check.passed)).toBe(true);
+  });
+
+  test("policy rejects a proven finding with an unknown rule id", async () => {
+    const engine = engineWithHeadText(headText(10));
+    const config = ConfigFileSchema.parse({});
+    const finding = testFinding();
+    finding.ruleId = "ghost-rule";
+    const result = await engine.validate([finding], testAddedDiff(), [testUnit()], config);
+    expect(result[0]?.status).toBe("rejected");
+    expect(result[0]?.checks.some((check) => check.name === "rule_policy" && !check.passed)).toBe(true);
+  });
+
+  test("path override at the canonical path rejects a proven finding", async () => {
+    const engine = engineWithHeadText(headText(10));
+    const config = ConfigFileSchema.parse({
+      path_overrides: [{ paths: ["src/**"], review: { severity_threshold: "critical" } }],
+    });
+    const result = await engine.validate([testFinding()], testAddedDiff(), [testUnit()], config);
+    expect(result[0]?.status).toBe("rejected");
+    expect(result[0]?.checks.some((check) => check.name === "severity_policy" && !check.passed)).toBe(true);
   });
 
   test("input findings are preserved, never mutated", async () => {
