@@ -136,7 +136,7 @@ Ordered; cheap/deterministic first. Any hard failure → reject.
 
 **Semantic (LLM, optional, only for findings that pass deterministic checks and are severity ≥ medium):** independent prompt, fresh context, *different framing* ("try to refute this finding using the code; answer `confirmed | refuted | inconclusive` with evidence"). Prefer a different model than the reviewer if available. A same-model self-check is a weak signal — never the only gate for high severity.
 
-**Outcome:** `accepted | rejected | inconclusive`. `inconclusive` ⇒ discard (logged). Every check records `{name, passed, detail}` for eval/debug.
+**Outcome:** `accepted | rejected | inconclusive`. `inconclusive` ⇒ discard (logged). Every check records `{name, outcome, code, detail}` (`outcome: passed | failed | inconclusive | skipped`, stable machine-readable `code` per `docs/adr/0029-phase5-result-contract.md`, bounded detail with no source text or secrets) for eval/debug. Accepted findings carry a code-owned head-side `derivedTarget`; rejected duplicates link the retained finding via `duplicateOfId`. `llmVerdict` stays absent in v1 (deterministic-only, ADR 0028 D1).
 
 ### 4.5 GitHub Publisher (`src/github`)
 - One `pulls.createReview` call (`event: "COMMENT"`) with `comments[]` + summary body; `commit_id` = head SHA.
@@ -275,14 +275,17 @@ export interface ReviewBuildResult {
   promptVersion: string; promptHash: string; model: string;
 }
 
-// ---- Validation ----
-export interface CheckResult { name: string; passed: boolean; detail?: string }
+// ---- Validation (P5-08 result contract, ADR 0029; run artifact schema v2) ----
+export type ValidationCheckOutcome = "passed" | "failed" | "inconclusive" | "skipped";
+export interface CheckResult { name: string; outcome: ValidationCheckOutcome; code: ValidationCheckCode; detail?: string }
 export interface ValidatedFinding {
   finding: Finding;
   status: "accepted" | "rejected" | "inconclusive";
   checks: CheckResult[];
   llmVerdict?: { verdict: "confirmed" | "refuted" | "inconclusive"; reasoning: string };
   derivedAttribution?: { introducedByPr: boolean; basis?: { kind: "added-lines" | "deleted-lines"; evidenceIndex: number; file: string; lines: number[] } }; // P5-05 code-owned, model boolean ignored (ADR 0028 D3)
+  derivedTarget?: ValidationTarget | undefined; // P5-03 head-side anchor (required when accepted, diagnostic otherwise)
+  duplicateOfId?: string | undefined; // retained finding id when rejected as a same-run duplicate
 }
 
 // ---- Stage interfaces (each independently testable) ----
