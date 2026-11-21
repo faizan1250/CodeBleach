@@ -113,6 +113,20 @@ describe("finding provenance (P5-02)", () => {
     const result = validateFindingProvenance(testFinding(), testDiff(), [testUnit("unit-9")]);
     expect(result.ok).toBe(false);
     expect(failedNames(result)).toContain("origin_unit");
+    expect(result.checks).toHaveLength(7);
+    for (const check of result.checks) {
+      if (check.name !== "finding_identity" && check.name !== "finding_head_sha" && check.name !== "origin_unit") {
+        expect(check.detail).toBe("skipped: prerequisite check failed");
+      }
+    }
+  });
+
+  test("non-canonical unit path still maps to the canonical diff file", () => {
+    const unit = testUnit();
+    unit.file.path = "./src/a.ts";
+    const result = validateFindingProvenance(testFinding(), testDiff(), [unit]);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.canonicalPath).toBe("src/a.ts");
   });
 
   test("unit with no changed file in the diff fails", () => {

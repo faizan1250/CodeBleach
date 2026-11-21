@@ -101,7 +101,23 @@ export function validateFindingProvenance(finding: Finding, diff: DiffResult, un
   next("origin_unit");
   pass(checks, "origin_unit");
 
-  const changedFile = diff.files.find((file) => file.path === unit.file.path);
+  const unitChecked = validateSnapshotPath(unit.file.path);
+  if (!unitChecked.ok) {
+    next("origin_file");
+    fail(checks, "origin_file", `originating unit file is not a readable repo path: ${unitChecked.reason}`);
+    return skipRest();
+  }
+  const unitPath = unitChecked.path;
+  let changedFile: ChangedFile | undefined;
+  let headPath = "";
+  for (const file of diff.files) {
+    const fileChecked = validateSnapshotPath(file.path);
+    if (fileChecked.ok && fileChecked.path === unitPath) {
+      changedFile = file;
+      headPath = fileChecked.path;
+      break;
+    }
+  }
   if (changedFile === undefined) {
     next("origin_file");
     fail(checks, "origin_file", "originating unit does not map to a changed file in this diff");
@@ -118,7 +134,7 @@ export function validateFindingProvenance(finding: Finding, diff: DiffResult, un
   }
   const canonical = checkedPath.path;
   let viaOldPath = false;
-  if (canonical !== changedFile.path) {
+  if (canonical !== headPath) {
     const oldChecked =
       changedFile.status === "renamed" && changedFile.oldPath !== null
         ? validateSnapshotPath(changedFile.oldPath)
@@ -128,8 +144,11 @@ export function validateFindingProvenance(finding: Finding, diff: DiffResult, un
     } else {
       next("finding_path");
       const elsewhere = diff.files.find((file) => {
-        if (file.path === canonical) return true;
-        return file.status === "renamed" && file.oldPath === canonical;
+        const fileChecked = validateSnapshotPath(file.path);
+        if (fileChecked.ok && fileChecked.path === canonical) return true;
+        if (file.status !== "renamed" || file.oldPath === null) return false;
+        const oldPathChecked = validateSnapshotPath(file.oldPath);
+        return oldPathChecked.ok && oldPathChecked.path === canonical;
       });
       fail(
         checks,
@@ -152,7 +171,7 @@ export function validateFindingProvenance(finding: Finding, diff: DiffResult, un
   next("finding_symbol");
   pass(checks, "finding_symbol", finding.symbol === undefined ? "no symbol claimed" : undefined);
 
-  const allowed = new Set<string>([changedFile.path]);
+  const allowed = new Set<string>([headPath]);
   if (changedFile.status === "renamed" && changedFile.oldPath !== null) {
     const oldChecked = validateSnapshotPath(changedFile.oldPath);
     if (oldChecked.ok) allowed.add(oldChecked.path);
@@ -182,5 +201,5 @@ export function validateFindingProvenance(finding: Finding, diff: DiffResult, un
   next("evidence_provenance");
   pass(checks, "evidence_provenance");
 
-  return { ok: true, checks, unit, changedFile, canonicalPath: changedFile.path, viaOldPath };
+  return { ok: true, checks, unit, changedFile, canonicalPath: headPath, viaOldPath };
 }
