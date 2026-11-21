@@ -146,6 +146,13 @@ describe("confidence thresholds", () => {
     expect(below.ok).toBe(false);
     expect(below.checks.some((check) => check.name === "confidence_policy" && !check.passed)).toBe(true);
   });
+
+  test("NaN confidence fails closed", () => {
+    const config = configWith({ review: { confidence_threshold: 0.7 } });
+    expect(
+      validatePolicy({ finding: policyFinding({ confidence: NaN }), canonicalPath: "src/a.ts", config }).ok,
+    ).toBe(false);
+  });
 });
 
 describe("threshold precedence", () => {

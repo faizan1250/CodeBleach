@@ -45,6 +45,7 @@ const SEVERITY_RANK: Record<Severity, number> = {
   critical: 4,
 };
 
+// interim: P5-08 owns stable codes
 export type PolicyCheckName = "category_policy" | "rule_policy" | "severity_policy" | "confidence_policy";
 
 export interface EffectivePolicy {
