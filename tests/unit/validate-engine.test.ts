@@ -43,6 +43,44 @@ function testDiff(): DiffResult {
   return { baseSha: BASE, headSha: HEAD, mergeBase: BASE, files: [testChangedFile()] };
 }
 
+function headText(count: number): string {
+  return Array.from({ length: count }, (_, index) => `line-${index + 1}`).join("\n");
+}
+
+function testAddedFile(): ChangedFile {
+  return {
+    ...testChangedFile(),
+    hunks: [
+      {
+        oldStart: 1,
+        oldLines: 1,
+        newStart: 1,
+        newLines: 1,
+        lines: [{ kind: "add" as const, oldLine: null, newLine: 1, position: 1, text: "code" }],
+      },
+    ],
+  };
+}
+
+function testAddedDiff(): DiffResult {
+  return { baseSha: BASE, headSha: HEAD, mergeBase: BASE, files: [testAddedFile()] };
+}
+
+function engineWithHeadText(text: string, readers: FakeValidationSnapshotReader[] = []) {
+  return createValidationEngine({
+    repoDir: "/repo",
+    createReader: (input) => {
+      const reader = new FakeValidationSnapshotReader({
+        headSha: input.headSha,
+        mergeBase: input.mergeBase,
+        script: { head: { "src/a.ts": { status: "ok" as const, text, bytes: text.length } } },
+      });
+      readers.push(reader);
+      return reader;
+    },
+  });
+}
+
 function testFinding(id: string = "finding-1"): Finding {
   return {
     id,
@@ -88,17 +126,24 @@ describe("validation engine provenance (P5-02)", () => {
   });
 
   test("findings with valid provenance are inconclusive and never accepted", async () => {
-    const engine = createValidationEngine({ repoDir: "/repo" });
+    const readers: FakeValidationSnapshotReader[] = [];
+    const engine = engineWithHeadText(headText(10), readers);
     const config = ConfigFileSchema.parse({});
-    const result = await engine.validate([testFinding("a"), testFinding("b")], testDiff(), [testUnit()], config);
+    const result = await engine.validate([testFinding("a"), testFinding("b")], testAddedDiff(), [testUnit()], config);
     expect(result).toHaveLength(2);
     for (const item of result) {
       expect(item.status).toBe("inconclusive");
       expect(item.status).not.toBe("accepted");
-      expect(item.checks.length).toBeGreaterThan(0);
+      expect(item.checks).toHaveLength(9);
       expect(item.checks.every((check) => check.passed)).toBe(true);
+      expect(item.checks.some((check) => check.name === "location_line")).toBe(true);
+      expect(item.checks.some((check) => check.name === "head_comment_target")).toBe(true);
       expect("llmVerdict" in item).toBe(false);
     }
+    expect(readers[0]?.reads).toEqual([
+      { side: "head", path: "src/a.ts" },
+      { side: "head", path: "src/a.ts" },
+    ]);
   });
 
   test("findings with failed provenance are rejected", async () => {
@@ -127,6 +172,54 @@ describe("validation engine provenance (P5-02)", () => {
     const result = await engine.validate([finding], testDiff(), [testUnit()], config);
     expect(result[0]?.status).toBe("rejected");
     expect(readers).toHaveLength(1);
+    expect(readers[0]?.reads).toEqual([]);
+    expect(readers[0]?.cleared).toBe(1);
+  });
+
+  test("location failure rejects the finding", async () => {
+    const engine = engineWithHeadText(headText(10));
+    const config = ConfigFileSchema.parse({});
+    const finding = testFinding();
+    finding.line = 99;
+    const result = await engine.validate([finding], testAddedDiff(), [testUnit()], config);
+    expect(result[0]?.status).toBe("rejected");
+    expect(result[0]?.checks.some((check) => check.name === "head_comment_target" && !check.passed)).toBe(true);
+  });
+
+  test("missing head snapshot is inconclusive, never accepted", async () => {
+    const engine = createValidationEngine({
+      repoDir: "/repo",
+      createReader: (input) => {
+        const reader = new FakeValidationSnapshotReader({
+          headSha: input.headSha,
+          mergeBase: input.mergeBase,
+          script: { head: { "src/a.ts": { status: "not_found", reason: "path is not in the head snapshot" } } },
+        });
+        return reader;
+      },
+    });
+    const result = await engine.validate([testFinding()], testAddedDiff(), [testUnit()], ConfigFileSchema.parse({}));
+    expect(result[0]?.status).toBe("inconclusive");
+  });
+
+  test("deleted file has no head-side target and performs no snapshot read", async () => {
+    const readers: FakeValidationSnapshotReader[] = [];
+    const engine = createValidationEngine({
+      repoDir: "/repo",
+      createReader: (input) => {
+        const reader = new FakeValidationSnapshotReader({
+          headSha: input.headSha,
+          mergeBase: input.mergeBase,
+          script: { head: { "src/a.ts": { status: "ok", text: headText(10), bytes: headText(10).length } } },
+        });
+        readers.push(reader);
+        return reader;
+      },
+    });
+    const deleted: ChangedFile = { ...testChangedFile(), status: "deleted", hunks: [], commentableLines: [] };
+    const diff: DiffResult = { baseSha: BASE, headSha: HEAD, mergeBase: BASE, files: [deleted] };
+    const result = await engine.validate([testFinding()], diff, [testUnit()], ConfigFileSchema.parse({}));
+    expect(result[0]?.status).toBe("rejected");
     expect(readers[0]?.reads).toEqual([]);
     expect(readers[0]?.cleared).toBe(1);
   });
