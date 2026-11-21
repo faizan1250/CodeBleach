@@ -14,13 +14,23 @@ export const EVIDENCE_SEARCH_RADIUS = 3;
 
 export type EvidenceSide = "head" | "base";
 
+export interface VerifiedEvidenceLocation {
+  /** Snapshot side whose text actually contains the quote. */
+  side: EvidenceSide;
+  /** Canonical snapshot path that was read. */
+  path: string;
+  /** Actual 1-based matched line range in that snapshot, never the cited range. */
+  startLine: number;
+  endLine: number;
+}
+
 export type EvidenceCheckName = "evidence_bounds" | "evidence_quote";
 
 export interface EvidenceSuccess {
   ok: true;
   checks: CheckResult[];
-  /** Verified snapshot side per finding.evidence item, in order (P5-05 attribution input). */
-  sides: EvidenceSide[];
+  /** Verified snapshot location per finding.evidence item, in order (P5-05 attribution input). */
+  locations: VerifiedEvidenceLocation[];
 }
 
 export interface EvidenceFailure {
@@ -77,8 +87,11 @@ function unavailableCode(result: SnapshotReadResult): ValidationCheckCode {
 /**
  * P5-04 evidence verification. Bounds first (no reads), then per-item side
  * resolution from diff metadata, then exact-snapshot quote comparison via
- * redactSource. Never re-mints fingerprints (P5-07 owns identity); never
- * trusts the model boolean (P5-05 owns introduction).
+ * redactSource. Each item resolves to a verified snapshot location (side,
+ * canonical path, actual matched lines): exact cited-range first, then a
+ * bounded ±radius fallback that locates the single actual range and rejects
+ * multiples as ambiguous. Never re-mints fingerprints (P5-07 owns identity);
+ * never trusts the model boolean (P5-05 owns introduction).
  */
 export async function validateEvidence(input: EvidenceInput): Promise<EvidenceResult> {
   const { finding, unit, changedFile, canonicalPath, reader } = input;
@@ -173,7 +186,7 @@ export async function validateEvidence(input: EvidenceInput): Promise<EvidenceRe
 
   const { head, deleted } = lineSets(changedFile);
   let sawInconclusive: ValidationCheckCode | undefined;
-  const resolvedSides: EvidenceSide[] = [];
+  const resolved: VerifiedEvidenceLocation[] = [];
 
   const noteUnavailable = (result: SnapshotReadResult): void => {
     if (sawInconclusive === undefined) sawInconclusive = unavailableCode(result);
@@ -196,15 +209,27 @@ export async function validateEvidence(input: EvidenceInput): Promise<EvidenceRe
     const inHead = evidencePath === oldPath ? false : intersects(item.startLine, item.endLine, head);
     const inDeleted = intersects(item.startLine, item.endLine, deleted);
 
-    const verify = async (side: EvidenceSide, readPath: string, label: string): Promise<boolean> => {
+    // Terminal evidence result for one item, or null to keep scanning.
+    const verify = async (side: EvidenceSide, readPath: string, label: string): Promise<EvidenceResult | null> => {
       const outcome = await matchSide(reader, side, readPath, item.startLine, item.endLine, item.quote);
       if (outcome.kind === "match") {
-        resolvedSides.push(side);
-        return true;
+        resolved.push({ side, path: readPath, startLine: outcome.startLine, endLine: outcome.endLine });
+        return null;
       }
       if (outcome.kind === "unavailable") {
         noteUnavailable(outcome.result);
-        return true;
+        return null;
+      }
+      if (outcome.kind === "ambiguous") {
+        checks.push(
+          makeCheck(
+            "evidence_quote",
+            "inconclusive",
+            "evidence_side_ambiguous",
+            `evidence[${index}] quote matches multiple locations near lines ${item.startLine}-${item.endLine}; location is ambiguous`,
+          ),
+        );
+        return { ok: false, checks, inconclusive: true };
       }
       checks.push(
         makeCheck(
@@ -214,29 +239,51 @@ export async function validateEvidence(input: EvidenceInput): Promise<EvidenceRe
           `evidence[${index}] quote not found in the ${label} snapshot`,
         ),
       );
-      return false;
+      return { ok: false, checks, inconclusive: false };
     };
 
     if (evidencePath === oldPath) {
-      if (!(await verify("base", evidencePath, "merge-base"))) return { ok: false, checks, inconclusive: false };
+      const terminal = await verify("base", evidencePath, "merge-base");
+      if (terminal !== null) return terminal;
     } else if (evidencePath !== canonicalPath) {
       // Context-only file: head-side text revalidated against the snapshot.
-      if (!(await verify("head", evidencePath, "head"))) return { ok: false, checks, inconclusive: false };
+      const terminal = await verify("head", evidencePath, "head");
+      if (terminal !== null) return terminal;
     } else if (inDeleted && !inHead) {
-      if (!(await verify("base", oldPath ?? canonicalPath, "merge-base")))
-        return { ok: false, checks, inconclusive: false };
+      const terminal = await verify("base", oldPath ?? canonicalPath, "merge-base");
+      if (terminal !== null) return terminal;
     } else if (!inDeleted) {
       // Head-side change evidence, or unchanged lines verified at head;
       // change linkage itself is P5-05's job.
-      if (!(await verify("head", canonicalPath, "head"))) return { ok: false, checks, inconclusive: false };
+      const terminal = await verify("head", canonicalPath, "head");
+      if (terminal !== null) return terminal;
     } else {
-      // Replacement overlap: content disambiguates, guessing does not.
-      const headOutcome = await matchExact(reader, "head", canonicalPath, item);
-      const baseOutcome = await matchExact(reader, "base", oldPath ?? canonicalPath, item);
+      // Replacement overlap: content disambiguates, guessing does not. Each
+      // side resolves to its own verified location; identical text on both
+      // sides, or multiple locations on one side, stays inconclusive.
+      const headOutcome = await matchSide(reader, "head", canonicalPath, item.startLine, item.endLine, item.quote);
+      const baseOutcome = await matchSide(
+        reader,
+        "base",
+        oldPath ?? canonicalPath,
+        item.startLine,
+        item.endLine,
+        item.quote,
+      );
       if (headOutcome.kind === "unavailable") noteUnavailable(headOutcome.result);
       if (baseOutcome.kind === "unavailable") noteUnavailable(baseOutcome.result);
       if (headOutcome.kind === "unavailable" || baseOutcome.kind === "unavailable") {
         // Keep scanning: the run-level unavailable verdict is recorded below.
+      } else if (headOutcome.kind === "ambiguous" || baseOutcome.kind === "ambiguous") {
+        checks.push(
+          makeCheck(
+            "evidence_quote",
+            "inconclusive",
+            "evidence_side_ambiguous",
+            `evidence[${index}] quote matches multiple locations; side is ambiguous`,
+          ),
+        );
+        return { ok: false, checks, inconclusive: true };
       } else if (headOutcome.kind !== "match" && baseOutcome.kind !== "match") {
         checks.push(
           makeCheck(
@@ -247,7 +294,7 @@ export async function validateEvidence(input: EvidenceInput): Promise<EvidenceRe
           ),
         );
         return { ok: false, checks, inconclusive: false };
-      } else if (headOutcome.kind === baseOutcome.kind) {
+      } else if (headOutcome.kind === "match" && baseOutcome.kind === "match") {
         checks.push(
           makeCheck(
             "evidence_quote",
@@ -257,8 +304,30 @@ export async function validateEvidence(input: EvidenceInput): Promise<EvidenceRe
           ),
         );
         return { ok: false, checks, inconclusive: true };
+      } else if (headOutcome.kind === "match") {
+        resolved.push({
+          side: "head",
+          path: canonicalPath,
+          startLine: headOutcome.startLine,
+          endLine: headOutcome.endLine,
+        });
+      } else if (baseOutcome.kind === "match") {
+        resolved.push({
+          side: "base",
+          path: oldPath ?? canonicalPath,
+          startLine: baseOutcome.startLine,
+          endLine: baseOutcome.endLine,
+        });
       } else {
-        resolvedSides.push(headOutcome.kind === "match" ? "head" : "base");
+        checks.push(
+          makeCheck(
+            "evidence_quote",
+            "failed",
+            "evidence_quote_not_found",
+            `evidence[${index}] quote not found on either snapshot side`,
+          ),
+        );
+        return { ok: false, checks, inconclusive: false };
       }
     }
   }
@@ -275,7 +344,7 @@ export async function validateEvidence(input: EvidenceInput): Promise<EvidenceRe
     return { ok: false, checks, inconclusive: true };
   }
   checks.push(makeCheck("evidence_quote", "passed", "evidence_quote_verified"));
-  return { ok: true, checks, sides: resolvedSides };
+  return { ok: true, checks, locations: resolved };
 }
 
 function intersects(startLine: number, endLine: number, lines: Set<number>): boolean {
@@ -285,7 +354,11 @@ function intersects(startLine: number, endLine: number, lines: Set<number>): boo
   return false;
 }
 
-type MatchOutcome = { kind: "match" } | { kind: "mismatch" } | { kind: "unavailable"; result: SnapshotReadResult };
+type MatchOutcome =
+  | { kind: "match"; startLine: number; endLine: number }
+  | { kind: "mismatch" }
+  | { kind: "ambiguous" }
+  | { kind: "unavailable"; result: SnapshotReadResult };
 
 async function readSide(
   reader: ValidationSnapshotReader,
@@ -297,22 +370,32 @@ async function readSide(
   return { text: result.text };
 }
 
-async function matchExact(
-  reader: ValidationSnapshotReader,
-  side: EvidenceSide,
+/** Every contiguous span in [windowStart, windowEnd] whose canonical form equals the quote. */
+function locateInWindow(
+  text: string,
   path: string,
-  item: { startLine: number; endLine: number; quote: string },
-): Promise<MatchOutcome> {
-  const snapshot = await readSide(reader, side, path);
-  if ("result" in snapshot) return { kind: "unavailable", result: snapshot.result };
-  const lineCount = snapshot.text.length === 0 ? 0 : snapshot.text.split("\n").length;
-  if (item.startLine > lineCount) return { kind: "mismatch" };
-  const want = canonicalForm(item.quote, path);
-  const exact = canonicalForm(sliceLines(snapshot.text, item.startLine, Math.min(item.endLine, lineCount)), path);
-  return want === exact ? { kind: "match" } : { kind: "mismatch" };
+  want: string,
+  windowStart: number,
+  windowEnd: number,
+): { startLine: number; endLine: number }[] {
+  const matches: { startLine: number; endLine: number }[] = [];
+  for (let start = windowStart; start <= windowEnd; start += 1) {
+    for (let end = start; end <= windowEnd; end += 1) {
+      if (canonicalForm(sliceLines(text, start, end), path) === want) {
+        matches.push({ startLine: start, endLine: end });
+      }
+    }
+  }
+  return matches;
 }
 
-/** Exact-range match first, then a bounded neighborhood fallback. */
+/**
+ * Exact cited-range match first, then a bounded neighborhood fallback. The
+ * fallback verifies occurrence AND location: it searches only the documented
+ * ±radius window, identifies the actual range, and rejects multiples as
+ * ambiguous. No fuzzy/Levenshtein/semantic matching: comparison is the same
+ * redactSource + quote-normalized, case-sensitive equality as the exact path.
+ */
 async function matchSide(
   reader: ValidationSnapshotReader,
   side: EvidenceSide,
@@ -327,9 +410,20 @@ async function matchSide(
   if (startLine > lineCount) return { kind: "mismatch" };
   const want = canonicalForm(quote, path);
   const clampedEnd = Math.min(endLine, lineCount);
-  if (want === canonicalForm(sliceLines(snapshot.text, startLine, clampedEnd), path)) return { kind: "match" };
+  if (want === canonicalForm(sliceLines(snapshot.text, startLine, clampedEnd), path)) {
+    return { kind: "match", startLine, endLine: clampedEnd };
+  }
   const windowStart = Math.max(1, startLine - EVIDENCE_SEARCH_RADIUS);
   const windowEnd = Math.min(lineCount, endLine + EVIDENCE_SEARCH_RADIUS);
-  const window = canonicalForm(sliceLines(snapshot.text, windowStart, windowEnd), path);
-  return window.includes(want) ? { kind: "match" } : { kind: "mismatch" };
+  const candidates = locateInWindow(snapshot.text, path, want, windowStart, windowEnd);
+  if (candidates.length === 0) return { kind: "mismatch" };
+  // Minimum-discrimination for neighborhood-only matches: the quote most
+  // plausibly denotes its shortest matching span (blank padding never counts
+  // as content). An exact cited-range hit above bypasses this rule entirely.
+  const shortest = Math.min(...candidates.map((candidate) => candidate.endLine - candidate.startLine));
+  const minimal = candidates.filter((candidate) => candidate.endLine - candidate.startLine === shortest);
+  if (minimal.length !== 1) return { kind: "ambiguous" };
+  const only = minimal[0];
+  if (only === undefined) return { kind: "ambiguous" };
+  return { kind: "match", startLine: only.startLine, endLine: only.endLine };
 }

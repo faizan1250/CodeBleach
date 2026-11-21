@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ChangedFile, ChangedSymbol, DiffLine, Finding, ReviewUnit } from "../../src/types/index.ts";
-import type { EvidenceSide } from "../../src/validate/evidence.ts";
+import type { EvidenceSide, VerifiedEvidenceLocation } from "../../src/validate/evidence.ts";
 import { validateAttribution } from "../../src/validate/attribution.ts";
 import type { ResolvedTarget } from "../../src/validate/location.ts";
 
@@ -82,13 +82,22 @@ function inputFor(
   introducedByPr: boolean,
   overrides?: { unit?: ReviewUnit; changedFile?: ChangedFile; target?: ResolvedTarget; canonicalPath?: string },
 ) {
+  // Exact-match equivalence: the verified location equals the cited range.
+  // Tests for off-range verification build locations explicitly instead.
+  const locations: VerifiedEvidenceLocation[] = evidence
+    .map((item, index) => {
+      const side = sides[index];
+      if (side === undefined) return undefined;
+      return { side, path: item.file, startLine: item.startLine, endLine: item.endLine };
+    })
+    .filter((location): location is VerifiedEvidenceLocation => location !== undefined);
   return {
     finding: testFinding(evidence, introducedByPr),
     unit: overrides?.unit ?? testUnit(),
     changedFile: overrides?.changedFile ?? testFile(),
     canonicalPath: overrides?.canonicalPath ?? "src/a.ts",
     target: overrides?.target ?? addedTarget(),
-    sides,
+    locations,
   };
 }
 
@@ -273,6 +282,109 @@ describe("attribution ambiguity policy (P5-05)", () => {
   test("side-count mismatch with evidence fails closed", () => {
     const result = validateAttribution(
       inputFor([{ file: "src/a.ts", startLine: 1, endLine: 1, quote: "line-1" }], [], true),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.inconclusive).toBe(true);
+  });
+});
+
+describe("attribution consumes verified locations, not cited ranges (post-5 hardening)", () => {
+  function locatedInput(
+    evidence: Finding["evidence"],
+    locations: VerifiedEvidenceLocation[],
+    overrides?: { unit?: ReviewUnit; changedFile?: ChangedFile; target?: ResolvedTarget; canonicalPath?: string },
+  ) {
+    return {
+      finding: testFinding(evidence, true),
+      unit: overrides?.unit ?? testUnit(),
+      changedFile: overrides?.changedFile ?? testFile(),
+      canonicalPath: overrides?.canonicalPath ?? "src/a.ts",
+      target: overrides?.target ?? addedTarget(),
+      locations,
+    };
+  }
+
+  test("verified off-range location does not attribute through an overlapping cite", () => {
+    // Model cites added lines 1-2, but evidence verified the quote at unchanged line 10.
+    const result = validateAttribution(
+      locatedInput(
+        [{ file: "src/a.ts", startLine: 1, endLine: 2, quote: "line-10" }],
+        [{ side: "head", path: "src/a.ts", startLine: 10, endLine: 10 }],
+      ),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.inconclusive).toBe(true);
+  });
+
+  test("verified on-added location attributes when the cite points elsewhere", () => {
+    // Model cites unchanged line 10, but evidence verified the quote at added line 2.
+    const result = validateAttribution(
+      locatedInput(
+        [{ file: "src/a.ts", startLine: 10, endLine: 10, quote: "line-2" }],
+        [{ side: "head", path: "src/a.ts", startLine: 2, endLine: 2 }],
+      ),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.basis).toEqual({ kind: "added-lines", evidenceIndex: 0, file: "src/a.ts", lines: [2] });
+    }
+  });
+
+  test("deleted basis intersects the verified base range, not the cited range", () => {
+    const result = validateAttribution(
+      locatedInput(
+        [{ file: "src/a.ts", startLine: 5, endLine: 5, quote: "old-code" }],
+        [{ side: "base", path: "src/a.ts", startLine: 6, endLine: 6 }],
+      ),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.basis).toEqual({ kind: "deleted-lines", evidenceIndex: 0, file: "src/a.ts", lines: [6] });
+    }
+  });
+
+  test("first non-attributing item falls through to a later verified location", () => {
+    const result = validateAttribution(
+      locatedInput(
+        [
+          { file: "src/a.ts", startLine: 10, endLine: 10, quote: "line-10" },
+          { file: "src/a.ts", startLine: 2, endLine: 2, quote: "line-2" },
+        ],
+        [
+          { side: "head", path: "src/a.ts", startLine: 10, endLine: 10 },
+          { side: "head", path: "src/a.ts", startLine: 2, endLine: 2 },
+        ],
+      ),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.basis).toEqual({ kind: "added-lines", evidenceIndex: 1, file: "src/a.ts", lines: [2] });
+    }
+  });
+
+  test("verified off-file location never confers an added basis", () => {
+    const unit: ReviewUnit = {
+      ...testUnit(),
+      context: [
+        {
+          id: "ctx-1",
+          kind: "callee",
+          file: "src/helper.ts",
+          startLine: 1,
+          endLine: 1,
+          text: "helper",
+          score: 1,
+          tokens: 10,
+          reason: "callee",
+        },
+      ],
+    };
+    const result = validateAttribution(
+      locatedInput(
+        [{ file: "src/helper.ts", startLine: 1, endLine: 1, quote: "helper" }],
+        [{ side: "head", path: "src/helper.ts", startLine: 1, endLine: 1 }],
+        { unit },
+      ),
     );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.inconclusive).toBe(true);

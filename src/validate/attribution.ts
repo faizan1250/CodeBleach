@@ -1,7 +1,7 @@
 import type { ChangedFile, Finding, ReviewUnit } from "../types/index.ts";
 import type { AttributionBasis, CheckResult } from "../types/validation.ts";
 import { makeCheck } from "./checks.ts";
-import type { EvidenceSide } from "./evidence.ts";
+import type { VerifiedEvidenceLocation } from "./evidence.ts";
 import type { ResolvedTarget } from "./location.ts";
 import { validateSnapshotPath } from "./snapshot.ts";
 
@@ -35,8 +35,8 @@ export interface AttributionInput {
   canonicalPath: string;
   /** P5-03 head-side anchor; required for an accepted deleted-line finding. */
   target: ResolvedTarget;
-  /** P5-04 verified snapshot side per finding.evidence item, in order. */
-  sides: EvidenceSide[];
+  /** P5-04 verified snapshot location per finding.evidence item, in order. */
+  locations: VerifiedEvidenceLocation[];
 }
 
 function intersectRange(startLine: number, endLine: number, lines: Set<number>): number[] {
@@ -49,22 +49,24 @@ function intersectRange(startLine: number, endLine: number, lines: Set<number>):
 
 /**
  * P5-05 attribution: code-owned `introducedByPr` from verified evidence
- * intersecting PR-changed lines. The model boolean is never read. Added basis
- * needs a head-side item in the primary file spanning an added line inside
- * the originating symbol's changedLines; deleted basis needs an old-side
- * item spanning a del/deletedLines line plus the location anchor. Anything
- * else (context-only, other files, out-of-scope hunks) is inconclusive.
+ * intersecting PR-changed lines. The model boolean is never read, and the
+ * model's cited ranges are never intersected: only the evidence stage's
+ * verified snapshot locations count. Added basis needs a head-side verified
+ * location in the primary file spanning an added line inside the originating
+ * symbol's changedLines; deleted basis needs a verified old-side location
+ * spanning a del/deletedLines line plus the location anchor. Anything else
+ * (context-only, other files, out-of-scope hunks) is inconclusive.
  */
 export function validateAttribution(input: AttributionInput): AttributionResult {
-  const { finding, unit, changedFile, canonicalPath, target, sides } = input;
+  const { finding, unit, changedFile, canonicalPath, target, locations } = input;
   const checks: CheckResult[] = [];
   const inconclusive = (detail: string): AttributionFailure => {
     checks.push(makeCheck("introduced_by_pr", "inconclusive", "introduction_inconclusive", detail));
     return { ok: false, checks, introducedByPr: false, inconclusive: true };
   };
 
-  if (sides.length !== finding.evidence.length) {
-    return inconclusive("verified evidence sides do not match the cited evidence items");
+  if (locations.length !== finding.evidence.length) {
+    return inconclusive("verified evidence locations do not match the cited evidence items");
   }
 
   const added = new Set<number>();
@@ -81,11 +83,13 @@ export function validateAttribution(input: AttributionInput): AttributionResult 
     changedFile.status === "renamed" && changedFile.oldPath !== null ? validateSnapshotPath(changedFile.oldPath) : null;
   const oldPath = oldChecked?.ok === true ? oldChecked.path : null;
 
-  for (const [index, item] of finding.evidence.entries()) {
-    if (sides[index] !== "head") continue;
-    const checked = validateSnapshotPath(item.file);
-    if (!checked.ok || checked.path !== canonicalPath) continue;
-    const overlap = intersectRange(item.startLine, item.endLine, added).filter((line) => symbolChanged.has(line));
+  for (let index = 0; index < finding.evidence.length; index += 1) {
+    const location = locations[index];
+    if (location === undefined || location.side !== "head") continue;
+    if (location.path !== canonicalPath) continue;
+    const overlap = intersectRange(location.startLine, location.endLine, added).filter((line) =>
+      symbolChanged.has(line),
+    );
     if (overlap.length > 0) {
       const basis: AttributionBasis = {
         kind: "added-lines",
@@ -98,24 +102,24 @@ export function validateAttribution(input: AttributionInput): AttributionResult 
           "introduced_by_pr",
           "passed",
           "introduced_by_pr_verified",
-          `added-line evidence ${canonicalPath}:${item.startLine}-${item.endLine} intersects added lines ${overlap.join(",")}`,
+          `added-line evidence ${canonicalPath}:${location.startLine}-${location.endLine} intersects added lines ${overlap.join(",")}`,
         ),
       );
       return { ok: true, checks, introducedByPr: true, basis };
     }
   }
 
-  for (const [index, item] of finding.evidence.entries()) {
-    if (sides[index] !== "base") continue;
-    const checked = validateSnapshotPath(item.file);
-    if (!checked.ok || (checked.path !== canonicalPath && checked.path !== oldPath)) continue;
+  for (let index = 0; index < finding.evidence.length; index += 1) {
+    const location = locations[index];
+    if (location === undefined || location.side !== "base") continue;
+    if (location.path !== canonicalPath && location.path !== oldPath) continue;
     const removed = new Set([...deleted, ...symbolDeleted]);
-    const overlap = intersectRange(item.startLine, item.endLine, removed);
+    const overlap = intersectRange(location.startLine, location.endLine, removed);
     if (overlap.length > 0) {
       const basis: AttributionBasis = {
         kind: "deleted-lines",
         evidenceIndex: index,
-        file: checked.path,
+        file: location.path,
         lines: overlap,
       };
       checks.push(
@@ -123,7 +127,7 @@ export function validateAttribution(input: AttributionInput): AttributionResult 
           "introduced_by_pr",
           "passed",
           "introduced_by_pr_verified",
-          `deleted-line evidence ${checked.path}:${item.startLine}-${item.endLine} intersects deleted lines ${overlap.join(",")}, anchored at ${target.file}:${target.line}`,
+          `deleted-line evidence ${location.path}:${location.startLine}-${location.endLine} intersects deleted lines ${overlap.join(",")}, anchored at ${target.file}:${target.line}`,
         ),
       );
       return { ok: true, checks, introducedByPr: true, basis };

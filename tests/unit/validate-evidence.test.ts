@@ -438,3 +438,195 @@ describe("unavailable snapshots (P5-04)", () => {
     });
   }
 });
+
+describe("verified locations (post-5 hardening)", () => {
+  test("exact match records side, path, and the cited range", async () => {
+    const reader = readerFor({ head: { "src/a.ts": ok("line-1\nline-2\nline-3") } });
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 2, endLine: 2, quote: "line-2" }], reader),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([{ side: "head", path: "src/a.ts", startLine: 2, endLine: 2 }]);
+    }
+  });
+
+  test("moved-by-one quote resolves to the actual lines", async () => {
+    const text = Array.from({ length: 20 }, (_, index) => `line-${index + 1}`).join("\n");
+    const reader = readerFor({ head: { "src/a.ts": ok(text) } });
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 10, endLine: 10, quote: "line-11" }], reader),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([{ side: "head", path: "src/a.ts", startLine: 11, endLine: 11 }]);
+    }
+  });
+
+  test("shifted multi-line quote resolves to the actual range", async () => {
+    const text = Array.from({ length: 20 }, (_, index) => `line-${index + 1}`).join("\n");
+    const reader = readerFor({ head: { "src/a.ts": ok(text) } });
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 2, endLine: 3, quote: "line-3\nline-4" }], reader),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([{ side: "head", path: "src/a.ts", startLine: 3, endLine: 4 }]);
+    }
+  });
+
+  test("max-distance neighborhood quote passes at its actual lines", async () => {
+    const text = Array.from({ length: 20 }, (_, index) => `line-${index + 1}`).join("\n");
+    const reader = readerFor({ head: { "src/a.ts": ok(text) } });
+    const result = await validateEvidence(
+      inputFor(
+        [{ file: "src/a.ts", startLine: 10, endLine: 10, quote: `line-${10 + EVIDENCE_SEARCH_RADIUS}` }],
+        reader,
+      ),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([
+        {
+          side: "head",
+          path: "src/a.ts",
+          startLine: 10 + EVIDENCE_SEARCH_RADIUS,
+          endLine: 10 + EVIDENCE_SEARCH_RADIUS,
+        },
+      ]);
+    }
+  });
+
+  test("quote past the neighborhood fails instead of attributing nearby lines", async () => {
+    const text = Array.from({ length: 20 }, (_, index) => `line-${index + 1}`).join("\n");
+    const reader = readerFor({ head: { "src/a.ts": ok(text) } });
+    const result = await validateEvidence(
+      inputFor(
+        [{ file: "src/a.ts", startLine: 10, endLine: 10, quote: `line-${10 + EVIDENCE_SEARCH_RADIUS + 1}` }],
+        reader,
+      ),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.inconclusive).toBe(false);
+  });
+
+  test("short generic quote with multiple neighborhood matches is inconclusive", async () => {
+    const reader = readerFor({ head: { "src/a.ts": ok("a\nx\nx\nx\nb") } });
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 1, endLine: 1, quote: "x" }], reader),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.inconclusive).toBe(true);
+      expect(result.checks.some((check) => check.code === "evidence_side_ambiguous")).toBe(true);
+    }
+  });
+
+  test("exact match is unaffected by the same quote on nearby lines", async () => {
+    const lines = Array.from({ length: 20 }, (_, index) => `line-${index + 1}`);
+    lines[9] = "dup";
+    lines[10] = "dup";
+    lines[11] = "dup";
+    const reader = readerFor({ head: { "src/a.ts": ok(lines.join("\n")) } });
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 11, endLine: 11, quote: "dup" }], reader),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([{ side: "head", path: "src/a.ts", startLine: 11, endLine: 11 }]);
+    }
+  });
+
+  test("off-range cite of a quote repeated on nearby lines is inconclusive", async () => {
+    const lines = Array.from({ length: 20 }, (_, index) => `line-${index + 1}`);
+    lines[9] = "dup";
+    lines[10] = "dup";
+    lines[11] = "dup";
+    const reader = readerFor({ head: { "src/a.ts": ok(lines.join("\n")) } });
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 9, endLine: 9, quote: "dup" }], reader),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.inconclusive).toBe(true);
+      expect(result.checks.some((check) => check.code === "evidence_side_ambiguous")).toBe(true);
+    }
+  });
+
+  test("cited added range with the quote on an unchanged line verifies off-range", async () => {
+    const text = Array.from({ length: 10 }, (_, index) => `line-${index + 1}`).join("\n");
+    const reader = readerFor({ head: { "src/a.ts": ok(text) } });
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 1, endLine: 2, quote: "line-5" }], reader),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([{ side: "head", path: "src/a.ts", startLine: 5, endLine: 5 }]);
+    }
+  });
+
+  test("replacement quote matching one side records that side's actual range", async () => {
+    const both: ChangedFile = {
+      ...testFile(),
+      hunks: [hunk([diffLine("del", 1, null), diffLine("add", null, 1)], 1)],
+    };
+    const reader = readerFor({ head: { "src/a.ts": ok("new-text") }, base: { "src/a.ts": ok("old-text") } });
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 1, endLine: 1, quote: "old-text" }], reader, { changedFile: both }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([{ side: "base", path: "src/a.ts", startLine: 1, endLine: 1 }]);
+    }
+  });
+
+  test("identical text on both sides stays inconclusive with the ambiguity code", async () => {
+    const both: ChangedFile = {
+      ...testFile(),
+      hunks: [hunk([diffLine("del", 1, null), diffLine("add", null, 1)], 1)],
+    };
+    const reader = readerFor({ head: { "src/a.ts": ok("same") }, base: { "src/a.ts": ok("same") } });
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 1, endLine: 1, quote: "same" }], reader, { changedFile: both }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.inconclusive).toBe(true);
+      expect(result.checks.some((check) => check.code === "evidence_side_ambiguous")).toBe(true);
+    }
+  });
+
+  test("redacted secret verifies consistently on both sides", async () => {
+    const reader = readerFor({ head: { "src/a.ts": ok('const password = "hunter2";\nconst a = 1;') } });
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 1, endLine: 1, quote: 'const password = "hunter2";' }], reader),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([{ side: "head", path: "src/a.ts", startLine: 1, endLine: 1 }]);
+    }
+  });
+
+  test("multi-evidence records each side and range in order", async () => {
+    const reader = readerFor({
+      head: { "src/a.ts": ok("line-1\nline-2\nline-3") },
+      base: { "src/a.ts": ok("old-1\nold-2\nold-3\nold-4\nold-5\nold-6") },
+    });
+    const result = await validateEvidence(
+      inputFor(
+        [
+          { file: "src/a.ts", startLine: 2, endLine: 2, quote: "line-2" },
+          { file: "src/a.ts", startLine: 5, endLine: 6, quote: "old-5\nold-6" },
+        ],
+        reader,
+      ),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([
+        { side: "head", path: "src/a.ts", startLine: 2, endLine: 2 },
+        { side: "base", path: "src/a.ts", startLine: 5, endLine: 6 },
+      ]);
+    }
+  });
+});
