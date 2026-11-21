@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import type { ResolvedConfig } from "../config/schema.ts";
 import type { Category } from "../types/finding.ts";
 import type { ReviewUnit } from "../types/context.ts";
+import { POLICY_GROUP_MEMBERS } from "../validate/policy.ts";
 import { estimateTokens } from "../utils/tokens.ts";
 import { redact, redactSource } from "../utils/redact.ts";
 
@@ -28,10 +29,10 @@ const CATEGORY_ORDER: Category[] = [
 ];
 
 const CATEGORY_FAMILIES = {
-  bugs: new Set<Category>(["bug", "null-handling", "error-handling", "breaking-change", "resource-leak", "api-usage"]),
-  security: new Set<Category>(["security"]),
-  performance: new Set<Category>(["performance"]),
-  concurrency: new Set<Category>(["concurrency"]),
+  bugs: new Set<Category>(POLICY_GROUP_MEMBERS.bugs),
+  security: new Set<Category>(POLICY_GROUP_MEMBERS.security),
+  performance: new Set<Category>(POLICY_GROUP_MEMBERS.performance),
+  concurrency: new Set<Category>(POLICY_GROUP_MEMBERS.concurrency),
 } as const;
 
 export interface BuiltReviewPrompt {
