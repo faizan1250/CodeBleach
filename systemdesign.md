@@ -125,7 +125,7 @@ Partial behavior: `ContextBuildResult.status` is `complete` (no issues) | `parti
 ### 4.3 Review Engine (`src/review`)
 - **MVP: one agent, one pass per ReviewUnit** with a single focused prompt (bugs, null handling, security, regressions). One unit maps to one provider request (plus bounded transport retries, one JSON repair, one `max_output_tokens` cap escalation, ADR 0024); never batch units or split a semantic unit. Add specialized passes (security, concurrency, perf) as separate prompt files only if evals show recall gaps. Separate agents are justified only when a pass needs different tools/context or different models for cost; not before.
 - Input: `ReviewUnit` (diff hunks with line numbers, symbol, context items, rules).
-- Output: `ReviewBuildResult` (ADR 0017) — `status` (`complete | partial | failed | skipped`), code-owned `Finding[]` (ids, `sha1(file + symbol + category + normalized title)` fingerprints, head SHA, symbol, origin), bounded redacted per-unit diagnostics, and usage (`requests/retries/repairRequests/incompleteRetries`, tokens/cost only when the provider reports them). Model output passes strict `RawReviewOutput` (Zod) validation first; the LLM never produces ids, SHAs or fingerprints. A failed unit never erases findings from successful ones. Bounded concurrency (default 3), stable result order. One stage deadline (`review_timeout_ms`, default 600000) plus caller `AbortSignal` bound the whole run (ADR 0018): stops skip queued units with `REVIEW_DEADLINE_EXCEEDED` / `REVIEW_CANCELLED` and abort in-flight requests, preserving completed findings.
+- Output: `ReviewBuildResult` (ADR 0017) — `status` (`complete | partial | failed | skipped`), code-owned `Finding[]` (ids, `sha1(file + symbol + category + evidence-anchored quote)` fingerprints, head SHA, symbol, origin), bounded redacted per-unit diagnostics, and usage (`requests/retries/repairRequests/incompleteRetries`, tokens/cost only when the provider reports them). Model output passes strict `RawReviewOutput` (Zod) validation first; the LLM never produces ids, SHAs or fingerprints. A failed unit never erases findings from successful ones. Bounded concurrency (default 3), stable result order. One stage deadline (`review_timeout_ms`, default 600000) plus caller `AbortSignal` bound the whole run (ADR 0018): stops skip queued units with `REVIEW_DEADLINE_EXCEEDED` / `REVIEW_CANCELLED` and abort in-flight requests, preserving completed findings.
 - Prompt rules: report only issues introduced by the PR; cite exact code in `evidence`; use only provided context; say nothing if no confirmed bug (`findings: []` is a valid answer); untrusted code goes inside delimited blocks and is declared as data.
 
 ### 4.4 Validation Engine (`src/validate`)
@@ -252,7 +252,7 @@ export interface RawFinding {            // produced by LLM, Zod-validated
 }
 export interface Finding extends RawFinding {   // produced by code
   id: string;                  // run-scoped uuid
-  fingerprint: string;         // sha1(file + symbol + category + normalized title) — stable across runs
+  fingerprint: string;         // sha1(file + symbol + category + evidence-anchored quote) — stable across runs
   headSha: string;
   symbol?: string;
   origin: { pass: string; unitId: string };
