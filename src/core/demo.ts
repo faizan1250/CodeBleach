@@ -216,11 +216,18 @@ export const demoValidationEngine: ValidationEngine = {
       finding,
       status: index === 0 ? ("accepted" as const) : ("rejected" as const),
       checks: [
-        { name: "schema", passed: true },
-        { name: "file-in-diff", passed: true },
+        { name: "schema", outcome: "passed", code: "evidence_bounds_ok" },
+        { name: "file-in-diff", outcome: "passed", code: "finding_path_resolved" },
         ...(index === 0
-          ? [{ name: "evidence", passed: true }]
-          : [{ name: "evidence", passed: false, detail: "quote not found in context" }]),
+          ? [{ name: "evidence", outcome: "passed", code: "evidence_quote_verified" } as const]
+          : [
+              {
+                name: "evidence",
+                outcome: "failed",
+                code: "evidence_quote_not_found",
+                detail: "quote not found in context",
+              } as const,
+            ]),
       ],
     }));
     return Promise.resolve(validated);

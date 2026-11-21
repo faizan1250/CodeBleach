@@ -11,6 +11,7 @@ import type {
 import type { ResolvedConfig } from "../config/schema.ts";
 import { GitValidationSnapshotReader } from "./snapshot.ts";
 import type { ValidationSnapshotReader } from "./snapshot.ts";
+import { makeCheck } from "./checks.ts";
 import { validateFindingProvenance } from "./provenance.ts";
 import { validateEvidence } from "./evidence.ts";
 import { validateLocation } from "./location.ts";
@@ -49,7 +50,7 @@ interface PendingAccepted {
 }
 
 /**
- * Phase 5 validation engine, P5-05 stage. Owns the per-run snapshot
+ * Phase 5 validation engine, P5-08 stage. Owns the per-run snapshot
  * reader lifecycle (create from the run's repoDir plus diff SHAs, clear after
  * the run) and enforces P5-02 provenance before any snapshot read: a finding
  * with failed provenance is rejected. P5-03 location resolves the head-side
@@ -125,6 +126,7 @@ export class ValidationEngineImpl implements ValidationEngine {
             finding,
             status: evidence.inconclusive ? "inconclusive" : "rejected",
             checks: evidenceChecks,
+            derivedTarget: location.target,
           };
           continue;
         }
@@ -143,13 +145,14 @@ export class ValidationEngineImpl implements ValidationEngine {
             status: "inconclusive",
             checks: attributionChecks,
             derivedAttribution: { introducedByPr: false },
+            derivedTarget: location.target,
           };
           continue;
         }
         const policy = validatePolicy({ finding, canonicalPath: provenance.canonicalPath, config });
         const policyChecks = [...attributionChecks, ...policy.checks];
         if (!policy.ok) {
-          slotted[slot] = { finding, status: "rejected", checks: policyChecks };
+          slotted[slot] = { finding, status: "rejected", checks: policyChecks, derivedTarget: location.target };
           continue;
         }
         pending.push({
@@ -180,6 +183,8 @@ export class ValidationEngineImpl implements ValidationEngine {
               finding: entry.finding,
               status: "rejected",
               checks: [...entry.checks, ...verdict.checks],
+              derivedTarget: entry.candidate.target,
+              duplicateOfId: verdict.duplicateOfId,
             };
           } else {
             survivors.push(entry);
@@ -200,8 +205,9 @@ export class ValidationEngineImpl implements ValidationEngine {
             slotted[entry.index] = {
               finding: entry.finding,
               status: "accepted",
-              checks: [...entry.checks, ...verdict.checks, { name: "max_findings", passed: true }],
+              checks: [...entry.checks, ...verdict.checks, makeCheck("max_findings", "passed", "max_findings_ok")],
               derivedAttribution: { introducedByPr: true, basis: entry.basis },
+              derivedTarget: entry.candidate.target,
             };
           } else {
             slotted[entry.index] = {
@@ -210,12 +216,14 @@ export class ValidationEngineImpl implements ValidationEngine {
               checks: [
                 ...entry.checks,
                 ...verdict.checks,
-                {
-                  name: "max_findings",
-                  passed: false,
-                  detail: `max_findings ${config.review.max_findings} exceeded: ranked ${kept.rank} of ${survivors.length} accepted candidates`,
-                },
+                makeCheck(
+                  "max_findings",
+                  "failed",
+                  "max_findings_exceeded",
+                  `max_findings ${config.review.max_findings} exceeded: ranked ${kept.rank} of ${survivors.length} accepted candidates`,
+                ),
               ],
+              derivedTarget: entry.candidate.target,
             };
           }
         });

@@ -99,7 +99,9 @@ describe("attribution ignores the model boolean (P5-05)", () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.inconclusive).toBe(true);
-    expect(result.checks.some((check) => check.name === "introduced_by_pr" && !check.passed)).toBe(true);
+    expect(result.checks.some((check) => check.name === "introduced_by_pr" && check.outcome === "inconclusive")).toBe(
+      true,
+    );
   });
 
   test("model false with added evidence still passes on code proof", () => {

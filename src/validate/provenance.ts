@@ -1,5 +1,6 @@
 import type { ChangedFile, DiffResult, Finding, ReviewUnit } from "../types/index.ts";
 import type { CheckResult } from "../types/validation.ts";
+import { SKIPPED_DETAIL, makeCheck } from "./checks.ts";
 import { validateSnapshotPath } from "./snapshot.ts";
 
 export type ProvenanceCheckName =
@@ -29,16 +30,6 @@ export interface ProvenanceFailure {
 
 export type ProvenanceResult = ProvenanceSuccess | ProvenanceFailure;
 
-const SKIPPED_DETAIL = "skipped: prerequisite check failed";
-
-function fail(checks: CheckResult[], name: ProvenanceCheckName, detail: string): void {
-  checks.push({ name, passed: false, detail });
-}
-
-function pass(checks: CheckResult[], name: ProvenanceCheckName, detail?: string): void {
-  checks.push(detail === undefined ? { name, passed: true } : { name, passed: true, detail });
-}
-
 /** Phase 4 stamps `symbol` from the originating unit, so only exact identity is valid. */
 function symbolMatches(finding: Finding, unit: ReviewUnit): boolean {
   return finding.symbol === unit.symbol.name;
@@ -61,8 +52,10 @@ export function validateFindingProvenance(finding: Finding, diff: DiffResult, un
     "finding_symbol",
     "evidence_provenance",
   ];
-  const skipRest = (): ProvenanceResult => {
-    for (const name of pending) fail(checks, name, SKIPPED_DETAIL);
+  const skipRest = (): ProvenanceFailure => {
+    for (const name of pending) {
+      checks.push(makeCheck(name, "skipped", "check_skipped_prerequisite_failed", SKIPPED_DETAIL));
+    }
     pending.length = 0;
     return { ok: false, checks };
   };
@@ -77,34 +70,62 @@ export function validateFindingProvenance(finding: Finding, diff: DiffResult, un
     finding.fingerprint.length === 0
   ) {
     next("finding_identity");
-    fail(checks, "finding_identity", "finding id and fingerprint must be non-empty Phase 4 values");
+    checks.push(
+      makeCheck(
+        "finding_identity",
+        "failed",
+        "finding_identity_invalid",
+        "finding id and fingerprint must be non-empty Phase 4 values",
+      ),
+    );
     return skipRest();
   }
   next("finding_identity");
-  pass(checks, "finding_identity");
+  checks.push(makeCheck("finding_identity", "passed", "finding_identity_verified"));
 
   if (finding.headSha !== diff.headSha) {
     next("finding_head_sha");
-    fail(checks, "finding_head_sha", "finding headSha does not exactly match the diff headSha");
+    checks.push(
+      makeCheck(
+        "finding_head_sha",
+        "failed",
+        "finding_head_sha_mismatch",
+        "finding headSha does not exactly match the diff headSha",
+      ),
+    );
     return skipRest();
   }
   next("finding_head_sha");
-  pass(checks, "finding_head_sha");
+  checks.push(makeCheck("finding_head_sha", "passed", "finding_head_sha_match"));
 
   const unitId = typeof finding.origin?.unitId === "string" ? finding.origin.unitId : "";
   const unit = units.find((candidate) => candidate.id === unitId);
   if (unit === undefined) {
     next("origin_unit");
-    fail(checks, "origin_unit", "finding origin unitId is not in the current review units");
+    checks.push(
+      makeCheck(
+        "origin_unit",
+        "failed",
+        "origin_unit_missing",
+        "finding origin unitId is not in the current review units",
+      ),
+    );
     return skipRest();
   }
   next("origin_unit");
-  pass(checks, "origin_unit");
+  checks.push(makeCheck("origin_unit", "passed", "origin_unit_resolved"));
 
   const unitChecked = validateSnapshotPath(unit.file.path);
   if (!unitChecked.ok) {
     next("origin_file");
-    fail(checks, "origin_file", `originating unit file is not a readable repo path: ${unitChecked.reason}`);
+    checks.push(
+      makeCheck(
+        "origin_file",
+        "failed",
+        "origin_file_mismatch",
+        `originating unit file is not a readable repo path: ${unitChecked.reason}`,
+      ),
+    );
     return skipRest();
   }
   const unitPath = unitChecked.path;
@@ -120,16 +141,30 @@ export function validateFindingProvenance(finding: Finding, diff: DiffResult, un
   }
   if (changedFile === undefined) {
     next("origin_file");
-    fail(checks, "origin_file", "originating unit does not map to a changed file in this diff");
+    checks.push(
+      makeCheck(
+        "origin_file",
+        "failed",
+        "origin_file_mismatch",
+        "originating unit does not map to a changed file in this diff",
+      ),
+    );
     return skipRest();
   }
   next("origin_file");
-  pass(checks, "origin_file");
+  checks.push(makeCheck("origin_file", "passed", "origin_file_resolved"));
 
   const checkedPath = validateSnapshotPath(finding.file);
   if (!checkedPath.ok) {
     next("finding_path");
-    fail(checks, "finding_path", `finding path is not a readable repo path: ${checkedPath.reason}`);
+    checks.push(
+      makeCheck(
+        "finding_path",
+        "failed",
+        "finding_path_invalid",
+        `finding path is not a readable repo path: ${checkedPath.reason}`,
+      ),
+    );
     return skipRest();
   }
   const canonical = checkedPath.path;
@@ -150,26 +185,64 @@ export function validateFindingProvenance(finding: Finding, diff: DiffResult, un
         const oldPathChecked = validateSnapshotPath(file.oldPath);
         return oldPathChecked.ok && oldPathChecked.path === canonical;
       });
-      fail(
-        checks,
-        "finding_path",
-        elsewhere === undefined
-          ? "finding file is not a changed file in this PR"
-          : "finding file belongs to another changed file, not the originating unit's file",
-      );
+      if (elsewhere === undefined) {
+        checks.push(
+          makeCheck(
+            "finding_path",
+            "failed",
+            "finding_path_not_in_diff",
+            "finding file is not a changed file in this PR",
+          ),
+        );
+      } else {
+        const oldPathChecked =
+          elsewhere.status === "renamed" && elsewhere.oldPath !== null ? validateSnapshotPath(elsewhere.oldPath) : null;
+        const viaRenameOldPath = oldPathChecked?.ok === true && oldPathChecked.path === canonical;
+        checks.push(
+          makeCheck(
+            "finding_path",
+            "failed",
+            viaRenameOldPath ? "rename_path_mapping_invalid" : "origin_file_mismatch",
+            viaRenameOldPath
+              ? "finding file matches another changed file's rename old path, not the originating unit's file"
+              : "finding file belongs to another changed file, not the originating unit's file",
+          ),
+        );
+      }
       return skipRest();
     }
   }
   next("finding_path");
-  pass(checks, "finding_path", viaOldPath ? "rename old path canonicalized to the head-side path" : undefined);
+  checks.push(
+    makeCheck(
+      "finding_path",
+      "passed",
+      "finding_path_resolved",
+      viaOldPath ? "rename old path canonicalized to the head-side path" : undefined,
+    ),
+  );
 
   if (finding.symbol !== undefined && !symbolMatches(finding, unit)) {
     next("finding_symbol");
-    fail(checks, "finding_symbol", "finding symbol does not match the originating unit's symbol");
+    checks.push(
+      makeCheck(
+        "finding_symbol",
+        "failed",
+        "finding_symbol_mismatch",
+        "finding symbol does not match the originating unit's symbol",
+      ),
+    );
     return skipRest();
   }
   next("finding_symbol");
-  pass(checks, "finding_symbol", finding.symbol === undefined ? "no symbol claimed" : undefined);
+  checks.push(
+    makeCheck(
+      "finding_symbol",
+      "passed",
+      "finding_symbol_match",
+      finding.symbol === undefined ? "no symbol claimed" : undefined,
+    ),
+  );
 
   const allowed = new Set<string>([headPath]);
   if (changedFile.status === "renamed" && changedFile.oldPath !== null) {
@@ -182,24 +255,38 @@ export function validateFindingProvenance(finding: Finding, diff: DiffResult, un
   }
   if (finding.evidence.length === 0) {
     next("evidence_provenance");
-    fail(checks, "evidence_provenance", "finding has no evidence");
+    checks.push(makeCheck("evidence_provenance", "failed", "evidence_range_invalid", "finding has no evidence"));
     return skipRest();
   }
   for (const [index, item] of finding.evidence.entries()) {
     const itemChecked = validateSnapshotPath(item.file);
     if (!itemChecked.ok) {
       next("evidence_provenance");
-      fail(checks, "evidence_provenance", `evidence[${index}] path is not a readable repo path`);
+      checks.push(
+        makeCheck(
+          "evidence_provenance",
+          "failed",
+          "evidence_path_not_allowed",
+          `evidence[${index}] path is not a readable repo path`,
+        ),
+      );
       return skipRest();
     }
     if (!allowed.has(itemChecked.path)) {
       next("evidence_provenance");
-      fail(checks, "evidence_provenance", `evidence[${index}] file was not supplied to the originating review unit`);
+      checks.push(
+        makeCheck(
+          "evidence_provenance",
+          "failed",
+          "evidence_path_not_allowed",
+          `evidence[${index}] file was not supplied to the originating review unit`,
+        ),
+      );
       return skipRest();
     }
   }
   next("evidence_provenance");
-  pass(checks, "evidence_provenance");
+  checks.push(makeCheck("evidence_provenance", "passed", "evidence_provenance_ok"));
 
   return { ok: true, checks, unit, changedFile, canonicalPath: headPath, viaOldPath };
 }

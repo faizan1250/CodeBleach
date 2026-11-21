@@ -2,7 +2,8 @@ import { loadConfig as defaultLoadConfig } from "../config/load.ts";
 import type { ResolvedConfig } from "../config/schema.ts";
 import { ReviewerError } from "./errors.ts";
 import type { ConfigSource, PipelineDeps, PipelineInput, RunSummary, StageName, StageResult } from "./contracts.ts";
-import { RUN_ARTIFACT_SCHEMA_VERSION, writeArtifact, type RunArtifact } from "./run-artifact.ts";
+import { RUN_ARTIFACT_SCHEMA_VERSION, summarizeValidation, writeArtifact, type RunArtifact } from "./run-artifact.ts";
+import type { ValidationSummary } from "../types/index.ts";
 import { requireLlmPreflight } from "../llm/preflight.ts";
 import type { DiffResult, Finding, PrMeta, PublishResult, ReviewUnit, ValidatedFinding } from "../types/index.ts";
 import type { ContextBuildDiagnostics } from "../types/context.ts";
@@ -32,6 +33,7 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
   let findings: Finding[] = [];
   let reviewResult: ReviewBuildResult | null = null;
   let validated: ValidatedFinding[] = [];
+  let validationSummary: ValidationSummary | null = null;
   let publishResult: PublishResult | null = null;
 
   const persist = async (status: RunArtifact["status"], failure?: ReviewerError): Promise<void> => {
@@ -61,6 +63,7 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
       reviewUsage: reviewResult?.usage ?? null,
       reviewDiagnostics: reviewResult?.diagnostics ?? null,
       validated,
+      validationSummary,
       publishResult,
       ...(failure === undefined
         ? {}
@@ -205,6 +208,7 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
       }
     }
     validated = validatedList;
+    validationSummary = summarizeValidation(validatedList);
     await persist("running");
 
     if (input.dryRun) {

@@ -9,11 +9,12 @@ import type {
   PublishResult,
   ReviewUnit,
   ValidatedFinding,
+  ValidationSummary,
 } from "../types/index.ts";
 import type { ReviewDiagnostic, ReviewStatus, ReviewUsage } from "../types/review.ts";
 import type { ConfigSource, StageResult } from "./contracts.ts";
 
-export const RUN_ARTIFACT_SCHEMA_VERSION = 1;
+export const RUN_ARTIFACT_SCHEMA_VERSION = 2;
 
 export interface SerializedError {
   code: string;
@@ -22,7 +23,7 @@ export interface SerializedError {
 }
 
 export interface RunArtifact {
-  schemaVersion: 1;
+  schemaVersion: 2;
   runId: string;
   startedAt: string;
   completedAt: string;
@@ -47,8 +48,45 @@ export interface RunArtifact {
   reviewUsage: ReviewUsage | null;
   reviewDiagnostics: ReviewDiagnostic[] | null;
   validated: ValidatedFinding[];
+  /** Null until the validation stage runs (skipped review, or stage failure). */
+  validationSummary: ValidationSummary | null;
   publishResult: PublishResult | null;
   error?: SerializedError | undefined;
+}
+
+const DUPLICATE_CODES: ReadonlySet<string> = new Set(["duplicate_fingerprint", "duplicate_secondary_key"]);
+const POLICY_CODES: ReadonlySet<string> = new Set([
+  "category_disabled",
+  "severity_below_threshold",
+  "confidence_below_threshold",
+  "rule_id_unknown",
+  "rule_path_mismatch",
+]);
+
+/** Pure aggregate counts over one validation run (P5-08 artifact). */
+export function summarizeValidation(results: ValidatedFinding[]): ValidationSummary {
+  let accepted = 0;
+  let rejected = 0;
+  let inconclusive = 0;
+  let duplicates = 0;
+  let policyFiltered = 0;
+  let checksSkipped = 0;
+  for (const item of results) {
+    if (item.status === "accepted") accepted += 1;
+    else if (item.status === "rejected") rejected += 1;
+    else inconclusive += 1;
+    let isDuplicate = false;
+    let isPolicyFiltered = false;
+    for (const check of item.checks) {
+      if (check.outcome === "skipped") checksSkipped += 1;
+      if (check.outcome !== "failed") continue;
+      if (DUPLICATE_CODES.has(check.code)) isDuplicate = true;
+      if (POLICY_CODES.has(check.code)) isPolicyFiltered = true;
+    }
+    if (isDuplicate) duplicates += 1;
+    if (isPolicyFiltered) policyFiltered += 1;
+  }
+  return { total: results.length, accepted, rejected, inconclusive, duplicates, policyFiltered, checksSkipped };
 }
 
 /** Atomically write pretty-printed, recursively redacted JSON to `<outDir>/run.json`. */

@@ -1,10 +1,13 @@
 import type { Finding, Severity } from "../types/index.ts";
 import type { CheckResult } from "../types/validation.ts";
 import type { ResolvedTarget } from "./location.ts";
+import { makeCheck } from "./checks.ts";
 import { SEVERITY_RANK } from "./policy.ts";
+import { validateSnapshotPath } from "./snapshot.ts";
 
-// Interim names; P5-08 owns the stable code set (suggested codes:
-// duplicate_fingerprint, duplicate_secondary_key, max_findings_exceeded).
+// Stable check names; P5-08 owns the code set (dedupe_unique,
+// duplicate_fingerprint, duplicate_secondary_key, max_findings_ok,
+// max_findings_exceeded).
 export type DedupeCheckName = "dedupe_fingerprint" | "dedupe_secondary" | "max_findings";
 
 export interface DedupeInput {
@@ -83,10 +86,18 @@ interface LineSpan {
   end: number;
 }
 
+/** Canonicalize evidence paths before comparing so `./x` and `x` spellings of
+ * the same file share overlap (safe direction only: false separation, never
+ * false merging). */
+function canonicalEvidenceFile(file: string): string {
+  const checked = validateSnapshotPath(file);
+  return checked.ok ? checked.path : file;
+}
+
 function candidateSpans(input: DedupeInput): LineSpan[] {
   const spans: LineSpan[] = [{ file: input.canonicalPath, start: input.target.line, end: input.target.line }];
   for (const item of input.finding.evidence) {
-    spans.push({ file: item.file, start: item.startLine, end: item.endLine });
+    spans.push({ file: canonicalEvidenceFile(item.file), start: item.startLine, end: item.endLine });
   }
   return spans;
 }
@@ -132,17 +143,20 @@ export function resolveDuplicates(inputs: readonly DedupeInput[]): DedupeVerdict
     const winnerVerdict = verdicts[first];
     if (winner === undefined || winnerVerdict === undefined) continue;
     winnerIndices.push(first);
-    winnerVerdict.checks.push({ name: "dedupe_fingerprint", passed: true });
+    winnerVerdict.checks.push(makeCheck("dedupe_fingerprint", "passed", "dedupe_unique"));
     for (const other of ordered.slice(1)) {
       const verdict = verdicts[other];
       if (verdict === undefined) continue;
       verdict.retained = false;
       verdict.duplicateOfId = winner.finding.id;
-      verdict.checks.push({
-        name: "dedupe_fingerprint",
-        passed: false,
-        detail: `duplicate of finding ${winner.finding.id} (shared fingerprint)`,
-      });
+      verdict.checks.push(
+        makeCheck(
+          "dedupe_fingerprint",
+          "failed",
+          "duplicate_fingerprint",
+          `duplicate of finding ${winner.finding.id} (shared fingerprint)`,
+        ),
+      );
     }
   }
 
@@ -153,10 +167,13 @@ export function resolveDuplicates(inputs: readonly DedupeInput[]): DedupeVerdict
     if (input === undefined || verdict === undefined) continue;
     const title = normalizeDedupeTitle(input.finding.title);
     if (title.length === 0) {
-      verdict.checks.push({ name: "dedupe_secondary", passed: true, detail: "no comparable title; kept as distinct" });
+      verdict.checks.push(
+        makeCheck("dedupe_secondary", "passed", "dedupe_unique", "no comparable title; kept as distinct"),
+      );
       continue;
     }
-    const key = `${input.canonicalPath}${input.symbol}${input.finding.category}${title}`;
+    // \0 separators: adjacent fields can never forge a cross-boundary collision.
+    const key = [input.canonicalPath, input.symbol, input.finding.category, title].join("\0");
     const group = secondary.get(key);
     if (group === undefined) secondary.set(key, [index]);
     else group.push(index);
@@ -174,16 +191,19 @@ export function resolveDuplicates(inputs: readonly DedupeInput[]): DedupeVerdict
       });
       if (match === undefined) {
         retained.push(index);
-        verdict.checks.push({ name: "dedupe_secondary", passed: true });
+        verdict.checks.push(makeCheck("dedupe_secondary", "passed", "dedupe_unique"));
       } else {
         const other = inputs[match];
         verdict.retained = false;
         verdict.duplicateOfId = other?.finding.id;
-        verdict.checks.push({
-          name: "dedupe_secondary",
-          passed: false,
-          detail: `secondary duplicate of finding ${other?.finding.id ?? "unknown"}: same path, symbol, category, and title with overlapping ranges`,
-        });
+        verdict.checks.push(
+          makeCheck(
+            "dedupe_secondary",
+            "failed",
+            "duplicate_secondary_key",
+            `secondary duplicate of finding ${other?.finding.id ?? "unknown"}: same path, symbol, category, and title with overlapping ranges`,
+          ),
+        );
       }
     }
   }

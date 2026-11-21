@@ -1,9 +1,10 @@
 import type { ChangedFile, Finding, ReviewUnit } from "../types/index.ts";
-import type { CheckResult } from "../types/validation.ts";
+import type { CheckResult, ValidationCheckCode } from "../types/validation.ts";
 import { normalizeQuoteForFingerprint } from "../review/normalize.ts";
 import { redactSource } from "../utils/redact.ts";
+import { SKIPPED_DETAIL, makeCheck } from "./checks.ts";
 import { validateSnapshotPath } from "./snapshot.ts";
-import type { ValidationSnapshotReader } from "./snapshot.ts";
+import type { SnapshotReadResult, ValidationSnapshotReader } from "./snapshot.ts";
 
 // P5-04 bounds (ADR 0028: named constants defined and tested here).
 export const EVIDENCE_MAX_ITEMS = 8;
@@ -40,14 +41,6 @@ export interface EvidenceInput {
   reader: ValidationSnapshotReader;
 }
 
-function fail(checks: CheckResult[], name: EvidenceCheckName, detail: string): void {
-  checks.push({ name, passed: false, detail });
-}
-
-function pass(checks: CheckResult[], name: EvidenceCheckName, detail?: string): void {
-  checks.push(detail === undefined ? { name, passed: true } : { name, passed: true, detail });
-}
-
 /** Symmetric comparison form: redactSource on both sides, then quote normalization. Case-sensitive. */
 function canonicalForm(text: string, path: string): string {
   return normalizeQuoteForFingerprint(redactSource(text, path));
@@ -73,6 +66,14 @@ function sliceLines(text: string, startLine: number, endLine: number): string {
     .join("\n");
 }
 
+/** Map a non-ok snapshot read to its stable unavailable code. */
+function unavailableCode(result: SnapshotReadResult): ValidationCheckCode {
+  if (result.status === "unsupported") return "snapshot_unsupported_object";
+  if (result.status === "binary") return "snapshot_binary";
+  if (result.status === "size_limit") return "snapshot_size_limit";
+  return "evidence_unavailable";
+}
+
 /**
  * P5-04 evidence verification. Bounds first (no reads), then per-item side
  * resolution from diff metadata, then exact-snapshot quote comparison via
@@ -84,15 +85,20 @@ export async function validateEvidence(input: EvidenceInput): Promise<EvidenceRe
   const checks: CheckResult[] = [];
 
   if (finding.evidence.length === 0) {
-    fail(checks, "evidence_bounds", "finding has no evidence");
+    checks.push(makeCheck("evidence_bounds", "failed", "evidence_range_invalid", "finding has no evidence"));
+    checks.push(makeCheck("evidence_quote", "skipped", "check_skipped_prerequisite_failed", SKIPPED_DETAIL));
     return { ok: false, checks, inconclusive: false };
   }
   if (finding.evidence.length > EVIDENCE_MAX_ITEMS) {
-    fail(
-      checks,
-      "evidence_bounds",
-      `finding has ${finding.evidence.length} evidence items, above the ${EVIDENCE_MAX_ITEMS}-item cap`,
+    checks.push(
+      makeCheck(
+        "evidence_bounds",
+        "failed",
+        "evidence_range_invalid",
+        `finding has ${finding.evidence.length} evidence items, above the ${EVIDENCE_MAX_ITEMS}-item cap`,
+      ),
     );
+    checks.push(makeCheck("evidence_quote", "skipped", "check_skipped_prerequisite_failed", SKIPPED_DETAIL));
     return { ok: false, checks, inconclusive: false };
   }
   for (const [index, item] of finding.evidence.entries()) {
@@ -102,32 +108,56 @@ export async function validateEvidence(input: EvidenceInput): Promise<EvidenceRe
       item.startLine < 1 ||
       item.endLine < item.startLine
     ) {
-      fail(checks, "evidence_bounds", `evidence[${index}] range is not a valid 1-based line span`);
+      checks.push(
+        makeCheck(
+          "evidence_bounds",
+          "failed",
+          "evidence_range_invalid",
+          `evidence[${index}] range is not a valid 1-based line span`,
+        ),
+      );
+      checks.push(makeCheck("evidence_quote", "skipped", "check_skipped_prerequisite_failed", SKIPPED_DETAIL));
       return { ok: false, checks, inconclusive: false };
     }
     if (item.endLine - item.startLine + 1 > EVIDENCE_MAX_LINE_SPAN) {
-      fail(
-        checks,
-        "evidence_bounds",
-        `evidence[${index}] spans ${item.endLine - item.startLine + 1} lines, above the ${EVIDENCE_MAX_LINE_SPAN}-line cap`,
+      checks.push(
+        makeCheck(
+          "evidence_bounds",
+          "failed",
+          "evidence_range_invalid",
+          `evidence[${index}] spans ${item.endLine - item.startLine + 1} lines, above the ${EVIDENCE_MAX_LINE_SPAN}-line cap`,
+        ),
       );
+      checks.push(makeCheck("evidence_quote", "skipped", "check_skipped_prerequisite_failed", SKIPPED_DETAIL));
       return { ok: false, checks, inconclusive: false };
     }
     if (item.quote.length > EVIDENCE_MAX_QUOTE_CHARS) {
-      fail(
-        checks,
-        "evidence_bounds",
-        `evidence[${index}] quote is ${item.quote.length} chars, above the ${EVIDENCE_MAX_QUOTE_CHARS}-char cap`,
+      checks.push(
+        makeCheck(
+          "evidence_bounds",
+          "failed",
+          "evidence_range_invalid",
+          `evidence[${index}] quote is ${item.quote.length} chars, above the ${EVIDENCE_MAX_QUOTE_CHARS}-char cap`,
+        ),
       );
+      checks.push(makeCheck("evidence_quote", "skipped", "check_skipped_prerequisite_failed", SKIPPED_DETAIL));
       return { ok: false, checks, inconclusive: false };
     }
     // An empty anchor never passes, even when the raw string is non-empty.
     if (normalizeQuoteForFingerprint(item.quote).length === 0) {
-      fail(checks, "evidence_bounds", `evidence[${index}] quote is empty after normalization`);
+      checks.push(
+        makeCheck(
+          "evidence_bounds",
+          "failed",
+          "evidence_range_invalid",
+          `evidence[${index}] quote is empty after normalization`,
+        ),
+      );
+      checks.push(makeCheck("evidence_quote", "skipped", "check_skipped_prerequisite_failed", SKIPPED_DETAIL));
       return { ok: false, checks, inconclusive: false };
     }
   }
-  pass(checks, "evidence_bounds");
+  checks.push(makeCheck("evidence_bounds", "passed", "evidence_bounds_ok"));
 
   // Allowed sources mirror P5-02 provenance: primary head path, rename old
   // path, and files actually supplied in the originating unit's context.
@@ -142,13 +172,24 @@ export async function validateEvidence(input: EvidenceInput): Promise<EvidenceRe
   }
 
   const { head, deleted } = lineSets(changedFile);
-  let sawInconclusive = false;
+  let sawInconclusive: ValidationCheckCode | undefined;
   const resolvedSides: EvidenceSide[] = [];
+
+  const noteUnavailable = (result: SnapshotReadResult): void => {
+    if (sawInconclusive === undefined) sawInconclusive = unavailableCode(result);
+  };
 
   for (const [index, item] of finding.evidence.entries()) {
     const checked = validateSnapshotPath(item.file);
     if (!checked.ok || !allowed.has(checked.path)) {
-      fail(checks, "evidence_quote", `evidence[${index}] file was not supplied to the originating review unit`);
+      checks.push(
+        makeCheck(
+          "evidence_quote",
+          "failed",
+          "evidence_path_not_allowed",
+          `evidence[${index}] file was not supplied to the originating review unit`,
+        ),
+      );
       return { ok: false, checks, inconclusive: false };
     }
     const evidencePath = checked.path;
@@ -157,15 +198,22 @@ export async function validateEvidence(input: EvidenceInput): Promise<EvidenceRe
 
     const verify = async (side: EvidenceSide, readPath: string, label: string): Promise<boolean> => {
       const outcome = await matchSide(reader, side, readPath, item.startLine, item.endLine, item.quote);
-      if (outcome === "match") {
+      if (outcome.kind === "match") {
         resolvedSides.push(side);
         return true;
       }
-      if (outcome === "unavailable") {
-        sawInconclusive = true;
+      if (outcome.kind === "unavailable") {
+        noteUnavailable(outcome.result);
         return true;
       }
-      fail(checks, "evidence_quote", `evidence[${index}] quote not found in the ${label} snapshot`);
+      checks.push(
+        makeCheck(
+          "evidence_quote",
+          "failed",
+          "evidence_quote_not_found",
+          `evidence[${index}] quote not found in the ${label} snapshot`,
+        ),
+      );
       return false;
     };
 
@@ -185,25 +233,48 @@ export async function validateEvidence(input: EvidenceInput): Promise<EvidenceRe
       // Replacement overlap: content disambiguates, guessing does not.
       const headOutcome = await matchExact(reader, "head", canonicalPath, item);
       const baseOutcome = await matchExact(reader, "base", oldPath ?? canonicalPath, item);
-      if (headOutcome === "unavailable" || baseOutcome === "unavailable") {
-        sawInconclusive = true;
-      } else if (headOutcome !== "match" && baseOutcome !== "match") {
-        fail(checks, "evidence_quote", `evidence[${index}] quote not found on either snapshot side`);
+      if (headOutcome.kind === "unavailable") noteUnavailable(headOutcome.result);
+      if (baseOutcome.kind === "unavailable") noteUnavailable(baseOutcome.result);
+      if (headOutcome.kind === "unavailable" || baseOutcome.kind === "unavailable") {
+        // Keep scanning: the run-level unavailable verdict is recorded below.
+      } else if (headOutcome.kind !== "match" && baseOutcome.kind !== "match") {
+        checks.push(
+          makeCheck(
+            "evidence_quote",
+            "failed",
+            "evidence_quote_not_found",
+            `evidence[${index}] quote not found on either snapshot side`,
+          ),
+        );
         return { ok: false, checks, inconclusive: false };
-      } else if (headOutcome === baseOutcome) {
-        fail(checks, "evidence_quote", `evidence[${index}] side is ambiguous: identical match on both snapshots`);
+      } else if (headOutcome.kind === baseOutcome.kind) {
+        checks.push(
+          makeCheck(
+            "evidence_quote",
+            "inconclusive",
+            "evidence_side_ambiguous",
+            `evidence[${index}] side is ambiguous: identical match on both snapshots`,
+          ),
+        );
         return { ok: false, checks, inconclusive: true };
       } else {
-        resolvedSides.push(headOutcome === "match" ? "head" : "base");
+        resolvedSides.push(headOutcome.kind === "match" ? "head" : "base");
       }
     }
   }
 
-  if (sawInconclusive) {
-    fail(checks, "evidence_quote", "evidence snapshot unavailable; validity is undecided");
+  if (sawInconclusive !== undefined) {
+    checks.push(
+      makeCheck(
+        "evidence_quote",
+        "inconclusive",
+        sawInconclusive,
+        "evidence snapshot unavailable; validity is undecided",
+      ),
+    );
     return { ok: false, checks, inconclusive: true };
   }
-  pass(checks, "evidence_quote");
+  checks.push(makeCheck("evidence_quote", "passed", "evidence_quote_verified"));
   return { ok: true, checks, sides: resolvedSides };
 }
 
@@ -214,15 +285,15 @@ function intersects(startLine: number, endLine: number, lines: Set<number>): boo
   return false;
 }
 
-type MatchOutcome = "match" | "mismatch" | "unavailable";
+type MatchOutcome = { kind: "match" } | { kind: "mismatch" } | { kind: "unavailable"; result: SnapshotReadResult };
 
 async function readSide(
   reader: ValidationSnapshotReader,
   side: EvidenceSide,
   path: string,
-): Promise<{ text: string } | null> {
+): Promise<{ text: string } | { result: SnapshotReadResult }> {
   const result = side === "head" ? await reader.readHead(path) : await reader.readBase(path);
-  if (result.status !== "ok") return null;
+  if (result.status !== "ok") return { result };
   return { text: result.text };
 }
 
@@ -233,12 +304,12 @@ async function matchExact(
   item: { startLine: number; endLine: number; quote: string },
 ): Promise<MatchOutcome> {
   const snapshot = await readSide(reader, side, path);
-  if (snapshot === null) return "unavailable";
+  if ("result" in snapshot) return { kind: "unavailable", result: snapshot.result };
   const lineCount = snapshot.text.length === 0 ? 0 : snapshot.text.split("\n").length;
-  if (item.startLine > lineCount) return "mismatch";
+  if (item.startLine > lineCount) return { kind: "mismatch" };
   const want = canonicalForm(item.quote, path);
   const exact = canonicalForm(sliceLines(snapshot.text, item.startLine, Math.min(item.endLine, lineCount)), path);
-  return want === exact ? "match" : "mismatch";
+  return want === exact ? { kind: "match" } : { kind: "mismatch" };
 }
 
 /** Exact-range match first, then a bounded neighborhood fallback. */
@@ -251,14 +322,14 @@ async function matchSide(
   quote: string,
 ): Promise<MatchOutcome> {
   const snapshot = await readSide(reader, side, path);
-  if (snapshot === null) return "unavailable";
+  if ("result" in snapshot) return { kind: "unavailable", result: snapshot.result };
   const lineCount = snapshot.text.length === 0 ? 0 : snapshot.text.split("\n").length;
-  if (startLine > lineCount) return "mismatch";
+  if (startLine > lineCount) return { kind: "mismatch" };
   const want = canonicalForm(quote, path);
   const clampedEnd = Math.min(endLine, lineCount);
-  if (want === canonicalForm(sliceLines(snapshot.text, startLine, clampedEnd), path)) return "match";
+  if (want === canonicalForm(sliceLines(snapshot.text, startLine, clampedEnd), path)) return { kind: "match" };
   const windowStart = Math.max(1, startLine - EVIDENCE_SEARCH_RADIUS);
   const windowEnd = Math.min(lineCount, endLine + EVIDENCE_SEARCH_RADIUS);
   const window = canonicalForm(sliceLines(snapshot.text, windowStart, windowEnd), path);
-  return window.includes(want) ? "match" : "mismatch";
+  return window.includes(want) ? { kind: "match" } : { kind: "mismatch" };
 }

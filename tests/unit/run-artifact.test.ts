@@ -31,6 +31,7 @@ function artifact(): RunArtifact {
     reviewUsage: null,
     reviewDiagnostics: null,
     validated: [],
+    validationSummary: null,
     publishResult: null,
   };
 }
@@ -43,7 +44,7 @@ describe("writeArtifact", () => {
       const text = await readFile(join(dir, "run.json"), "utf8");
       expect(text.endsWith("\n")).toBe(true);
       expect(text).toContain("\n  ");
-      expect(JSON.parse(text)).toMatchObject({ runId: "run-1", schemaVersion: 1 });
+      expect(JSON.parse(text)).toMatchObject({ runId: "run-1", schemaVersion: 2 });
       expect(await readdir(dir)).toEqual(["run.json"]);
     } finally {
       await rm(dir, { recursive: true, force: true });

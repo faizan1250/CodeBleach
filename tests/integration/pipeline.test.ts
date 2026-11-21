@@ -45,7 +45,7 @@ describe("runPipeline", () => {
 
       const artifact = await readArtifact(dir);
       expect(artifact.status).toBe("completed");
-      expect(artifact.schemaVersion).toBe(1);
+      expect(artifact.schemaVersion).toBe(2);
       expect(artifact.runId).toBe(summary.runId);
       expect(artifact.findings).toHaveLength(1);
       expect(artifact.validated).toHaveLength(1);

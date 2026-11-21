@@ -1,29 +1,20 @@
 import type { ChangedFile, Finding, ReviewUnit } from "../types/index.ts";
-import type { CheckResult } from "../types/validation.ts";
+import type { CheckResult, ValidationCheckCode, ValidationTarget } from "../types/validation.ts";
+import { SKIPPED_DETAIL, makeCheck } from "./checks.ts";
 import type { ValidationSnapshotReader } from "./snapshot.ts";
 
 // ADR 0028 default: relocation stays within the same symbol and this radius.
 export const LOCATION_RELOCATION_RADIUS = 5;
 
-export type ResolvedTargetKind = "added" | "context" | "relocated" | "deletion-anchor";
-
-export interface ResolvedTarget {
-  /** Canonical head-side path; the only future publishable identity. */
-  file: string;
-  /** 1-based head-side commentable line. */
-  line: number;
-  side: "RIGHT";
-  kind: ResolvedTargetKind;
-  /** Original finding line when the target differs (relocated, deletion-anchor). */
-  sourceLine?: number | undefined;
-}
+/** Re-exported for existing import sites; the type lives in `src/types`. */
+export type ResolvedTarget = ValidationTarget;
 
 export type LocationCheckName = "location_line" | "head_comment_target";
 
 export interface LocationSuccess {
   ok: true;
   checks: CheckResult[];
-  target: ResolvedTarget;
+  target: ValidationTarget;
 }
 
 export interface LocationFailure {
@@ -44,8 +35,6 @@ export interface LocationInput {
   reader: ValidationSnapshotReader;
 }
 
-const SKIPPED_DETAIL = "skipped: prerequisite check failed";
-
 function countHeadLines(text: string): number {
   if (text.length === 0) return 0;
   return text.split("\n").length;
@@ -62,28 +51,44 @@ export async function validateLocation(input: LocationInput): Promise<LocationRe
   const checks: CheckResult[] = [];
 
   if (!Number.isSafeInteger(finding.line) || finding.line < 1) {
-    checks.push({ name: "location_line", passed: false, detail: "finding line must be a positive integer" });
-    checks.push({ name: "head_comment_target", passed: false, detail: SKIPPED_DETAIL });
+    checks.push(
+      makeCheck("location_line", "failed", "finding_line_invalid", "finding line must be a positive integer"),
+    );
+    checks.push(makeCheck("head_comment_target", "skipped", "check_skipped_prerequisite_failed", SKIPPED_DETAIL));
     return { ok: false, checks, inconclusive: false };
   }
-  checks.push({ name: "location_line", passed: true });
+  checks.push(makeCheck("location_line", "passed", "location_line_valid"));
 
   if (changedFile.status === "deleted") {
-    checks.push({
-      name: "head_comment_target",
-      passed: false,
-      detail: "no head-side comment target: file is deleted in this PR",
-    });
+    checks.push(
+      makeCheck(
+        "head_comment_target",
+        "failed",
+        "no_commentable_target",
+        "no head-side comment target: file is deleted in this PR",
+      ),
+    );
     return { ok: false, checks, inconclusive: false };
   }
 
   const snapshot = await reader.readHead(canonicalPath);
   if (snapshot.status !== "ok") {
-    checks.push({
-      name: "head_comment_target",
-      passed: false,
-      detail: `head snapshot unavailable (${snapshot.status}); location is undecided`,
-    });
+    const code: ValidationCheckCode =
+      snapshot.status === "unsupported"
+        ? "snapshot_unsupported_object"
+        : snapshot.status === "binary"
+          ? "snapshot_binary"
+          : snapshot.status === "size_limit"
+            ? "snapshot_size_limit"
+            : "snapshot_unavailable";
+    checks.push(
+      makeCheck(
+        "head_comment_target",
+        "inconclusive",
+        code,
+        `head snapshot unavailable (${snapshot.status}); location is undecided`,
+      ),
+    );
     return { ok: false, checks, inconclusive: true };
   }
   const lineCount = countHeadLines(snapshot.text);
@@ -103,15 +108,25 @@ export async function validateLocation(input: LocationInput): Promise<LocationRe
   const commentableInHead = (line: number): boolean => line >= 1 && line <= lineCount && commentable.has(line);
 
   if (inHead && added.has(finding.line) && commentable.has(finding.line)) {
-    checks.push({ name: "head_comment_target", passed: true, detail: `added target ${canonicalPath}:${finding.line}` });
+    checks.push(
+      makeCheck(
+        "head_comment_target",
+        "passed",
+        "head_comment_target_ok",
+        `added target ${canonicalPath}:${finding.line}`,
+      ),
+    );
     return { ok: true, checks, target: { file: canonicalPath, line: finding.line, side: "RIGHT", kind: "added" } };
   }
   if (inHead && right.has(finding.line) && commentable.has(finding.line)) {
-    checks.push({
-      name: "head_comment_target",
-      passed: true,
-      detail: `context target ${canonicalPath}:${finding.line}`,
-    });
+    checks.push(
+      makeCheck(
+        "head_comment_target",
+        "passed",
+        "head_comment_target_ok",
+        `context target ${canonicalPath}:${finding.line}`,
+      ),
+    );
     return {
       ok: true,
       checks,
@@ -124,22 +139,28 @@ export async function validateLocation(input: LocationInput): Promise<LocationRe
   if (deletedLines.includes(finding.line)) {
     const anchor = unit.symbol.anchorLine;
     if (anchor !== undefined && Number.isSafeInteger(anchor) && commentableInHead(anchor)) {
-      checks.push({
-        name: "head_comment_target",
-        passed: true,
-        detail: `deletion-anchor ${canonicalPath}:${anchor} for deleted line ${finding.line}`,
-      });
+      checks.push(
+        makeCheck(
+          "head_comment_target",
+          "passed",
+          "head_comment_target_ok",
+          `deletion-anchor ${canonicalPath}:${anchor} for deleted line ${finding.line}`,
+        ),
+      );
       return {
         ok: true,
         checks,
         target: { file: canonicalPath, line: anchor, side: "RIGHT", kind: "deletion-anchor", sourceLine: finding.line },
       };
     }
-    checks.push({
-      name: "head_comment_target",
-      passed: false,
-      detail: "deleted line has no valid head-side deletion anchor",
-    });
+    checks.push(
+      makeCheck(
+        "head_comment_target",
+        "failed",
+        "deletion_anchor_missing",
+        "deleted line has no valid head-side deletion anchor",
+      ),
+    );
     return { ok: false, checks, inconclusive: false };
   }
 
@@ -153,11 +174,14 @@ export async function validateLocation(input: LocationInput): Promise<LocationRe
   candidates.sort((a, b) => Math.abs(a - finding.line) - Math.abs(b - finding.line) || a - b);
   const relocated = candidates[0];
   if (relocated !== undefined) {
-    checks.push({
-      name: "head_comment_target",
-      passed: true,
-      detail: `relocated target ${canonicalPath}:${relocated} from line ${finding.line}`,
-    });
+    checks.push(
+      makeCheck(
+        "head_comment_target",
+        "passed",
+        "target_relocated",
+        `relocated target ${canonicalPath}:${relocated} from line ${finding.line}`,
+      ),
+    );
     return {
       ok: true,
       checks,
@@ -165,10 +189,24 @@ export async function validateLocation(input: LocationInput): Promise<LocationRe
     };
   }
 
-  checks.push({
-    name: "head_comment_target",
-    passed: false,
-    detail: "no commentable head-side target in the same symbol within the relocation radius",
-  });
+  if (inHead) {
+    checks.push(
+      makeCheck(
+        "head_comment_target",
+        "failed",
+        "finding_line_not_commentable",
+        "no commentable head-side target in the same symbol within the relocation radius",
+      ),
+    );
+  } else {
+    checks.push(
+      makeCheck(
+        "head_comment_target",
+        "failed",
+        "no_commentable_target",
+        "finding line is outside the head snapshot; no commentable target",
+      ),
+    );
+  }
   return { ok: false, checks, inconclusive: false };
 }
