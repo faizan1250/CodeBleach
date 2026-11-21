@@ -282,6 +282,7 @@ export interface ValidatedFinding {
   status: "accepted" | "rejected" | "inconclusive";
   checks: CheckResult[];
   llmVerdict?: { verdict: "confirmed" | "refuted" | "inconclusive"; reasoning: string };
+  derivedAttribution?: { introducedByPr: boolean; basis?: { kind: "added-lines" | "deleted-lines"; evidenceIndex: number; file: string; lines: number[] } }; // P5-05 code-owned, model boolean ignored (ADR 0028 D3)
 }
 
 // ---- Stage interfaces (each independently testable) ----

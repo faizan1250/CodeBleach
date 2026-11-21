@@ -7,6 +7,7 @@ import type { ValidationSnapshotReader } from "./snapshot.ts";
 import { validateFindingProvenance } from "./provenance.ts";
 import { validateEvidence } from "./evidence.ts";
 import { validateLocation } from "./location.ts";
+import { validateAttribution } from "./attribution.ts";
 
 function internal(message: string): ReviewerError {
   return new ReviewerError({ code: "INTERNAL", message });
@@ -29,16 +30,18 @@ export function createValidationEngine(options: ValidationEngineOptions): Valida
 }
 
 /**
- * Phase 5 validation engine, P5-04 stage. Owns the per-run snapshot
+ * Phase 5 validation engine, P5-05 stage. Owns the per-run snapshot
  * reader lifecycle (create from the run's repoDir plus diff SHAs, clear after
  * the run) and enforces P5-02 provenance before any snapshot read: a finding
  * with failed provenance is rejected. P5-03 location resolves the head-side
- * target and P5-04 verifies every evidence quote against its exact snapshot
- * side via redactSource; both keep the inconclusive ceiling, so wiring alone
- * can never mark findings accepted (attribution, policy, and dedupe land in
- * P5-05 through P5-07). Provenance performs no reads, so an unproven path can
- * never become a Git lookup; location reads only the P5-02 canonical path at
- * head and evidence reads only provenance-allowed paths at their diff side.
+ * target, P5-04 verifies every evidence quote against its exact snapshot
+ * side via redactSource, and P5-05 derives code-owned introducedByPr from
+ * verified evidence intersecting PR added/deleted lines — the first stage
+ * that can mark findings accepted (policy and dedupe land in P5-06/P5-07).
+ * Provenance performs no reads, so an unproven path can never become a Git
+ * lookup; location reads only the P5-02 canonical path at head, evidence
+ * reads only provenance-allowed paths at their diff side, and attribution is
+ * pure (no reads, model boolean ignored).
  */
 export class ValidationEngineImpl implements ValidationEngine {
   readonly repoDir: string;
@@ -92,10 +95,30 @@ export class ValidationEngineImpl implements ValidationEngine {
           canonicalPath: provenance.canonicalPath,
           reader,
         });
+        const evidenceChecks = [...checks, ...evidence.checks];
+        if (!evidence.ok) {
+          results.push({
+            finding,
+            status: evidence.inconclusive ? "inconclusive" : "rejected",
+            checks: evidenceChecks,
+          });
+          continue;
+        }
+        const attribution = validateAttribution({
+          finding,
+          unit: provenance.unit,
+          changedFile: provenance.changedFile,
+          canonicalPath: provenance.canonicalPath,
+          target: location.target,
+          sides: evidence.sides,
+        });
         results.push({
           finding,
-          status: evidence.ok ? "inconclusive" : evidence.inconclusive ? "inconclusive" : "rejected",
-          checks: [...checks, ...evidence.checks],
+          status: attribution.ok ? "accepted" : "inconclusive",
+          checks: [...evidenceChecks, ...attribution.checks],
+          derivedAttribution: attribution.ok
+            ? { introducedByPr: true, basis: attribution.basis }
+            : { introducedByPr: false },
         });
       }
       return results;
