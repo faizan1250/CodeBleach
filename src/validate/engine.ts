@@ -4,6 +4,7 @@ import type { DiffResult, Finding, ReviewUnit, ValidatedFinding } from "../types
 import type { ResolvedConfig } from "../config/schema.ts";
 import { GitValidationSnapshotReader } from "./snapshot.ts";
 import type { ValidationSnapshotReader } from "./snapshot.ts";
+import { validateFindingProvenance } from "./provenance.ts";
 
 function internal(message: string): ReviewerError {
   return new ReviewerError({ code: "INTERNAL", message });
@@ -26,12 +27,13 @@ export function createValidationEngine(options: ValidationEngineOptions): Valida
 }
 
 /**
- * Phase 5 validation engine, P5-01 wiring stage. Owns the per-run snapshot
+ * Phase 5 validation engine, P5-02 stage. Owns the per-run snapshot
  * reader lifecycle (create from the run's repoDir plus diff SHAs, clear after
- * the run) but performs no acceptance yet: provenance, location, evidence,
- * and attribution checks land in P5-02 through P5-07. Every finding stays
- * inconclusive with a fail-closed check until then, so no pipeline can mark
- * findings accepted on wiring alone.
+ * the run) and enforces P5-02 provenance before any snapshot read: a finding
+ * with failed provenance is rejected, and a finding with passing provenance
+ * stays inconclusive until location, evidence, and attribution checks land in
+ * P5-03 through P5-07. Provenance performs no reads, so an unproven path can
+ * never become a Git lookup.
  */
 export class ValidationEngineImpl implements ValidationEngine {
   readonly repoDir: string;
@@ -51,7 +53,7 @@ export class ValidationEngineImpl implements ValidationEngine {
   async validate(
     findings: Finding[],
     diff: DiffResult,
-    _units: ReviewUnit[],
+    units: ReviewUnit[],
     _config: ResolvedConfig,
   ): Promise<ValidatedFinding[]> {
     if (diff === null || diff === undefined || typeof diff !== "object") {
@@ -59,20 +61,13 @@ export class ValidationEngineImpl implements ValidationEngine {
     }
     const reader = this.createReader({ repoDir: this.repoDir, headSha: diff.headSha, mergeBase: diff.mergeBase });
     try {
-      return findings.map(
-        (finding): ValidatedFinding => ({
-          finding,
-          status: "inconclusive",
-          checks: [
-            {
-              name: "snapshot_reader_wiring",
-              passed: false,
-              detail:
-                "P5-01 wires exact-snapshot access only; provenance, location, evidence, and attribution land in P5-02 through P5-07",
-            },
-          ],
-        }),
-      );
+      return findings.map((finding): ValidatedFinding => {
+        const provenance = validateFindingProvenance(finding, diff, units);
+        if (!provenance.ok) {
+          return { finding, status: "rejected", checks: provenance.checks };
+        }
+        return { finding, status: "inconclusive", checks: provenance.checks };
+      });
     } finally {
       reader.clear();
     }
