@@ -136,7 +136,7 @@ export class ValidationEngineImpl implements ValidationEngine {
           changedFile: provenance.changedFile,
           canonicalPath: provenance.canonicalPath,
           target: location.target,
-          sides: evidence.sides,
+          locations: evidence.locations,
         });
         const attributionChecks = [...evidenceChecks, ...attribution.checks];
         if (!attribution.ok) {

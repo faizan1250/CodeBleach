@@ -121,6 +121,52 @@ export function isGitOutputLimit(error: unknown): boolean {
   return (cause as { reason: unknown }).reason === "output-limit";
 }
 
+/**
+ * True only for an aborted Git subprocess (`runProcess` reason "abort").
+ * Pre-spawn abort rejections carry the same cause; timeouts, exits, and
+ * output-limits never qualify.
+ */
+export function isGitAbort(error: unknown): boolean {
+  if (!(error instanceof ReviewerError) || error.code !== "GIT_FAILED") return false;
+  const cause = error.cause;
+  if (typeof cause !== "object" || cause === null) return false;
+  if (!("reason" in cause)) return false;
+  return (cause as { reason: unknown }).reason === "abort";
+}
+
+/** Typed blob-content failure: the only blob states the validation adapter maps to statuses. */
+export type SnapshotBlobFailureKind = "missing" | "per-file-limit" | "cumulative-limit";
+
+/**
+ * Structured cause for blob-content failures. Classification ground truth for
+ * the validation adapter; the message stays human-readable and is never parsed.
+ */
+export interface SnapshotBlobFailureDetails {
+  kind: SnapshotBlobFailureKind;
+  oid?: string | undefined;
+  sizeBytes?: number | undefined;
+  limitBytes?: number | undefined;
+}
+
+function snapshotBlobFailure(message: string, details: SnapshotBlobFailureDetails): ReviewerError {
+  return gitFailed(message, details);
+}
+
+/**
+ * True only for a typed blob-content failure (missing, per-file-limit,
+ * cumulative-limit). Transport outcomes (timeout, output-limit, abort, exit),
+ * protocol corruption, and untyped Git failures never qualify.
+ */
+export function isSnapshotBlobFailure(error: unknown, kind?: SnapshotBlobFailureKind | undefined): boolean {
+  if (!(error instanceof ReviewerError) || error.code !== "GIT_FAILED") return false;
+  const cause = error.cause;
+  if (typeof cause !== "object" || cause === null) return false;
+  if (!("kind" in cause)) return false;
+  const actual = (cause as { kind: unknown }).kind;
+  if (kind === undefined) return actual === "missing" || actual === "per-file-limit" || actual === "cumulative-limit";
+  return actual === kind;
+}
+
 /** Parse `git ls-tree -r -z --full-tree` output; split metadata from path at the first tab only. */
 export function parseLsTreeZ(bytes: Uint8Array): Map<string, TreeEntry> {
   const index = new Map<string, TreeEntry>();
@@ -396,16 +442,23 @@ export class SnapshotReader {
     const frames = parseBatchContent(stdout, [normalized]);
     const frame = frames.get(normalized);
     if (frame === undefined || frame.status === "missing") {
-      throw gitFailed(`blob ${normalized} is missing`);
+      throw snapshotBlobFailure(`blob ${normalized} is missing`, { kind: "missing", oid: normalized });
     }
     if (frame.size > this.maxBlobBytes) {
-      throw gitFailed(
+      throw snapshotBlobFailure(
         `blob ${normalized} is ${frame.size} bytes, above the ${this.maxBlobBytes}-byte per-blob snapshot cap`,
+        { kind: "per-file-limit", oid: normalized, sizeBytes: frame.size, limitBytes: this.maxBlobBytes },
       );
     }
     if (this.cachedTotalBytes + frame.size > this.maxTotalBytes) {
-      throw gitFailed(
+      throw snapshotBlobFailure(
         `snapshot total ${this.cachedTotalBytes + frame.size} bytes would exceed the ${this.maxTotalBytes}-byte run cap`,
+        {
+          kind: "cumulative-limit",
+          oid: normalized,
+          sizeBytes: this.cachedTotalBytes + frame.size,
+          limitBytes: this.maxTotalBytes,
+        },
       );
     }
     const text = decodeText(frame.bytes);
@@ -532,16 +585,23 @@ export class SnapshotReader {
       throw gitFailed(`cannot determine size of blob ${normalized}`);
     }
     if (entry.type === "missing" || entry.size === null || entry.oid !== normalized) {
-      throw gitFailed(`blob ${normalized} is missing`);
+      throw snapshotBlobFailure(`blob ${normalized} is missing`, { kind: "missing", oid: normalized });
     }
     if (entry.size > this.maxBlobBytes) {
-      throw gitFailed(
+      throw snapshotBlobFailure(
         `blob ${normalized} is ${entry.size} bytes, above the ${this.maxBlobBytes}-byte per-blob snapshot cap`,
+        { kind: "per-file-limit", oid: normalized, sizeBytes: entry.size, limitBytes: this.maxBlobBytes },
       );
     }
     if (this.cachedTotalBytes + entry.size > this.maxTotalBytes) {
-      throw gitFailed(
+      throw snapshotBlobFailure(
         `snapshot total ${this.cachedTotalBytes + entry.size} bytes would exceed the ${this.maxTotalBytes}-byte run cap`,
+        {
+          kind: "cumulative-limit",
+          oid: normalized,
+          sizeBytes: this.cachedTotalBytes + entry.size,
+          limitBytes: this.maxTotalBytes,
+        },
       );
     }
     // Size fits after all; the batch spawn must have failed another way.

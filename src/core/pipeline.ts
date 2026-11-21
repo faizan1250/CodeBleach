@@ -2,6 +2,7 @@ import { loadConfig as defaultLoadConfig } from "../config/load.ts";
 import type { ResolvedConfig } from "../config/schema.ts";
 import { ReviewerError } from "./errors.ts";
 import type { ConfigSource, PipelineDeps, PipelineInput, RunSummary, StageName, StageResult } from "./contracts.ts";
+import { isAcceptedFinding } from "./contracts.ts";
 import { RUN_ARTIFACT_SCHEMA_VERSION, summarizeValidation, writeArtifact, type RunArtifact } from "./run-artifact.ts";
 import type { ValidationSummary } from "../types/index.ts";
 import { requireLlmPreflight } from "../llm/preflight.ts";
@@ -185,7 +186,7 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
     const validatedList: ValidatedFinding[] = await runStage(
       "validation",
       () => deps.validation.validate(findings, diffResult, contextResult.units, resolved),
-      (result) => result.filter((item) => item.status === "accepted").length,
+      (result) => result.filter(isAcceptedFinding).length,
     );
     validated = validatedList;
     validationSummary = summarizeValidation(validatedList);
@@ -194,7 +195,7 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
     if (input.dryRun) {
       stages.push({ name: "publish", status: "skipped", ms: 0, reason: "dry-run" });
     } else {
-      const accepted = validatedList.filter((item) => item.status === "accepted");
+      const accepted = validatedList.filter(isAcceptedFinding);
       const meta: PrMeta = input.pr ?? {
         owner: "unknown",
         repo: "unknown",

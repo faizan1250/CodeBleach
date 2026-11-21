@@ -166,6 +166,9 @@ export interface ValidatedFinding {
   duplicateOfId?: string | undefined;
 }
 
+/** Publish-eligible subset: the publisher contract accepts only these. */
+export type AcceptedValidatedFinding = Omit<ValidatedFinding, "status"> & { status: "accepted" };
+
 /** Aggregate counts over one validation run (artifact v2). */
 export interface ValidationSummary {
   total: number;

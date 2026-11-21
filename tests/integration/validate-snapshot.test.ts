@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { ConfigFileSchema } from "../../src/config/schema.ts";
 import { ReviewerError } from "../../src/core/errors.ts";
 import type { DiffResult } from "../../src/types/index.ts";
+import { runProcess } from "../../src/utils/spawn.ts";
 import { GitValidationSnapshotReader } from "../../src/validate/snapshot.ts";
 import { createValidationEngine } from "../../src/validate/engine.ts";
 import { git, makeRepo } from "../helpers/git-repo.ts";
@@ -112,6 +113,44 @@ describe("validation snapshot against real commits", () => {
       const base = await writeAndCommit(dir, { "src/a.ts": `${"x".repeat(100)}\n` }, "base");
       const reader = readerFor(dir, base, base, { maxFileBytes: 10 });
       expect((await reader.readHead("src/a.ts")).status).toBe("size_limit");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("cumulative total cap is enforced deterministically", async () => {
+    const { dir, cleanup } = await makeRepo();
+    try {
+      const base = await writeAndCommit(dir, { "src/a.ts": "aaa", "src/b.ts": "bbb" }, "base");
+      const reader = readerFor(dir, base, base, { maxTotalBytes: 5 });
+      expect((await reader.readHead("src/a.ts")).status).toBe("ok");
+      expect((await reader.readHead("src/b.ts")).status).toBe("size_limit");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("committed tree pointing at a missing blob reads as not_found", async () => {
+    const { dir, cleanup } = await makeRepo();
+    let head = "";
+    try {
+      const base = await writeAndCommit(dir, { "src/a.ts": "const v = 1;\n" }, "base");
+      const ghostOid = "f".repeat(40);
+      const treeOut = await runProcess({
+        cmd: ["git", "mktree", "--missing"],
+        cwd: dir,
+        stdinData: `100644 blob ${ghostOid}\tghost.ts\n`,
+      });
+      const tree = new TextDecoder().decode(treeOut.stdout).trim();
+      const commitOut = await runProcess({
+        cmd: ["git", "commit-tree", tree, "-p", base, "-m", "ghost"],
+        cwd: dir,
+      });
+      head = new TextDecoder().decode(commitOut.stdout).trim();
+      await git(dir, ["update-ref", "HEAD", head]);
+      const reader = readerFor(dir, head, base);
+      expect((await reader.readHead("ghost.ts")).status).toBe("not_found");
+      expect((await reader.readBase("src/a.ts")).status).toBe("ok");
     } finally {
       await cleanup();
     }

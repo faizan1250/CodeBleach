@@ -69,7 +69,11 @@ Check families (`name`) and codes:
 - Quote comparison is `normalizeQuoteForFingerprint(redactSource(text, path))`
   on both sides — CRLF/CR→LF plus horizontal-whitespace collapse,
   case-sensitive. No fuzzy matching. Exact cited-range match first, then a
-  bounded ±3-line neighborhood fallback (`EVIDENCE_SEARCH_RADIUS`).
+  bounded ±3-line neighborhood fallback (`EVIDENCE_SEARCH_RADIUS`) that
+  locates the single actual range and rejects multiples as ambiguous
+  (`evidence_side_ambiguous`, never accepted). Each item records a verified
+  location (side, canonical path, actual matched lines) that attribution
+  intersects — never the model-cited range.
 - Bounds: at most 8 evidence items per finding
   (`EVIDENCE_MAX_ITEMS`), 2000 chars per quote
   (`EVIDENCE_MAX_QUOTE_CHARS`), 50 cited lines per item
@@ -91,11 +95,13 @@ Accepted findings carry a code-owned head-side `derivedTarget`
 ## Attribution
 
 `introducedByPr` is code-derived; the model's boolean is ignored. Accepted
-introduction needs verified evidence intersecting real PR lines: head-side
-evidence spanning an `add` line in the originating symbol (`added-lines`
-basis), or old-side evidence spanning a `del`/`deletedLines` line plus a
-valid head-side anchor (`deleted-lines` basis). Anything else is
-`introduction_inconclusive` — never accepted.
+introduction needs a verified evidence location intersecting real PR lines:
+head-side verified location in the primary file spanning an `add` line in
+the originating symbol (`changedLines` basis), or old-side verified location
+spanning a `del` line owned by the originating symbol (`deletedLines` basis)
+plus a valid head-side anchor. Anything else is `introduction_inconclusive` —
+never accepted. Replacement hunks keep the head/base distinction; identical
+matches on both sides stay `evidence_side_ambiguous`.
 
 ## Policy
 

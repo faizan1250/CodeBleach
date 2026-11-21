@@ -83,6 +83,10 @@ const LOG_LEVELS: readonly string[] = ["debug", "info", "warn", "error"];
 export const VALIDATION_SCOPE_NOTE =
   "validation verifies diff/path/location/evidence/provenance/policy only; it does not prove a finding is semantically correct.";
 
+/** Stderr warning when the run completes but run.json cannot be read/parsed. */
+export const VALIDATION_SUMMARY_UNAVAILABLE_WARNING =
+  "review completed but validation summary unavailable: run.json unreadable or unparseable; see the run.json artifact path in the stage line above";
+
 /** One-line CLI validation counts; null when validation did not run (skipped review). */
 export function formatValidationLine(args: {
   outDir: string;
@@ -192,6 +196,35 @@ interface ResolvedReviewOptions extends ReviewOptions {
   head: string;
 }
 
+/**
+ * Prints the one-line validation summary from the run artifact. Warns on
+ * stderr (exit stays 0) when the artifact is missing or unparseable.
+ */
+export async function printValidationSummary(outDir: string): Promise<void> {
+  // Bounded CLI visibility (P5-10): counts only, never evidence quotes or
+  // source text. The artifact holds per-finding reasons.
+  try {
+    const raw = await readFile(join(outDir, "run.json"), "utf8");
+    const artifact = JSON.parse(raw) as {
+      findings?: unknown[] | undefined;
+      validationSummary?: ValidationSummary | null | undefined;
+    };
+    const line = formatValidationLine({
+      outDir,
+      findingsTotal: Array.isArray(artifact.findings) ? artifact.findings.length : 0,
+      summary: artifact.validationSummary ?? null,
+    });
+    if (line !== null) {
+      console.log(line);
+      console.log(VALIDATION_SCOPE_NOTE);
+    }
+  } catch {
+    // Static text only — never the raw error, evidence, or source — and no
+    // validation counts are claimed.
+    console.error(VALIDATION_SUMMARY_UNAVAILABLE_WARNING);
+  }
+}
+
 async function runEngines(
   engines: {
     diff: GitDiffEngine | typeof demoDiffEngine;
@@ -222,27 +255,7 @@ async function runEngines(
       },
     );
     console.log(`review ${summary.status}: ${summary.stages.length} stages, ${summary.configSource} config`);
-    // Bounded CLI visibility (P5-10): counts only, never evidence quotes or
-    // source text. The artifact holds per-finding reasons.
-    try {
-      const raw = await readFile(join(options.out, "run.json"), "utf8");
-      const artifact = JSON.parse(raw) as {
-        findings?: unknown[] | undefined;
-        validationSummary?: ValidationSummary | null | undefined;
-      };
-      const line = formatValidationLine({
-        outDir: options.out,
-        findingsTotal: Array.isArray(artifact.findings) ? artifact.findings.length : 0,
-        summary: artifact.validationSummary ?? null,
-      });
-      if (line !== null) {
-        console.log(line);
-        console.log(VALIDATION_SCOPE_NOTE);
-      }
-    } catch {
-      // Artifact unreadable after a successful run (unexpected): the stage
-      // line above already printed, so stay silent rather than fail the CLI.
-    }
+    await printValidationSummary(options.out);
     if (options.noLlm && !options.demo) {
       console.log("offline preview: no model review or validation occurred (--no-llm)");
     }

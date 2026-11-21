@@ -4,9 +4,10 @@ import {
   DEFAULT_MAX_SNAPSHOT_TOTAL_BYTES,
   DEFAULT_SNAPSHOT_TIMEOUT_MS,
   SnapshotReader,
-  isGitOutputLimit,
+  isGitAbort,
   isGitTimeout,
   isRegularBlob,
+  isSnapshotBlobFailure,
 } from "../context/snapshot.ts";
 import type { TreeEntry } from "../context/snapshot.ts";
 import { normalizeRepoPath } from "../review/normalize.ts";
@@ -135,14 +136,6 @@ export interface GitValidationSnapshotReaderOptions {
   source?: ValidationSnapshotSource | undefined;
 }
 
-function isCapError(error: unknown): boolean {
-  return error instanceof ReviewerError && error.code === "GIT_FAILED" && /cap/.test(error.message);
-}
-
-function isMissingError(error: unknown): boolean {
-  return error instanceof ReviewerError && error.code === "GIT_FAILED" && /is missing/.test(error.message);
-}
-
 /**
  * Read-only adapter over exact commit snapshots for validation. Head-side
  * reads are pinned to `diff.headSha`, removed-line reads to `diff.mergeBase`;
@@ -230,6 +223,7 @@ export class GitValidationSnapshotReader implements ValidationSnapshotReader {
       index = side === "head" ? await this.source.listHeadFiles() : await this.source.listBaseFiles();
     } catch (error) {
       if (isGitTimeout(error)) return { status: "timeout", reason: "snapshot index read timed out" };
+      if (isGitAbort(error)) return { status: "aborted", reason: "snapshot index read aborted" };
       throw error;
     }
     const entry = index.get(canonical);
@@ -245,10 +239,15 @@ export class GitValidationSnapshotReader implements ValidationSnapshotReader {
       text = await this.source.readBlobText(entry.oid);
     } catch (error) {
       if (isGitTimeout(error)) return { status: "timeout", reason: "snapshot blob read timed out" };
-      if (isGitOutputLimit(error) || isCapError(error)) {
+      if (isGitAbort(error)) return { status: "aborted", reason: "snapshot blob read aborted" };
+      if (isSnapshotBlobFailure(error, "missing")) {
+        return { status: "not_found", reason: "snapshot blob is missing at this commit" };
+      }
+      // Transport output-limit is not a content cap: raw overflow propagates
+      // as a stage failure, never a success-shaped status.
+      if (isSnapshotBlobFailure(error, "per-file-limit") || isSnapshotBlobFailure(error, "cumulative-limit")) {
         return { status: "size_limit", reason: "snapshot blob exceeds the per-file snapshot cap" };
       }
-      if (isMissingError(error)) return { status: "not_found", reason: "snapshot blob is missing at this commit" };
       throw error;
     }
     if (text.includes("\u0000"))

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ConfigFileSchema } from "../../src/config/schema.ts";
 import { createLogger } from "../../src/core/logger.ts";
+import { isAcceptedFinding } from "../../src/core/contracts.ts";
 import { runPipeline } from "../../src/core/pipeline.ts";
 import { ReviewerError } from "../../src/core/errors.ts";
 import { stubPublisher } from "../../src/core/stubs.ts";
@@ -83,6 +84,14 @@ describe("p5-09 pipeline validation wiring", () => {
     }
   });
 
+  test("isAcceptedFinding narrows mixed outcomes to accepted-only", () => {
+    const [a, b, c] = [finding("a"), finding("b"), finding("c")];
+    const mixed = [validatedAs(a, "accepted"), validatedAs(b, "rejected"), validatedAs(c, "inconclusive")];
+    const accepted = mixed.filter(isAcceptedFinding);
+    expect(accepted.map((item) => item.finding.id)).toEqual(["a"]);
+    expect(accepted.every((item) => item.status === "accepted")).toBe(true);
+  });
+
   test("non-dry-run passes only accepted findings to the publisher", async () => {
     const { dir, cleanup } = await makeOutDir();
     try {
@@ -101,6 +110,7 @@ describe("p5-09 pipeline validation wiring", () => {
       );
       expect(summary.status).toBe("completed");
       expect(published.map((item) => item.finding.id)).toEqual(["a"]);
+      expect(published.every((item) => item.status === "accepted")).toBe(true);
       const artifact = JSON.parse(await readFile(join(dir, "run.json"), "utf8"));
       expect(artifact.publishResult).toMatchObject({ published: 1, skipped: 0 });
     } finally {

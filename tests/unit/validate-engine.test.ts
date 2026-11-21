@@ -271,6 +271,57 @@ describe("validation engine provenance (P5-02)", () => {
     expect("llmVerdict" in (result[0] ?? {})).toBe(false);
   });
 
+  test("verified off-range quote never attributes through the cited added range", async () => {
+    // The model cites added lines 5-6, but the quote actually lives at
+    // unchanged line 8. Occurrence-only matching would accept this via the
+    // cited range; verified locations fail it closed at attribution.
+    const engine = engineWithHeadText(headText(10));
+    const config = ConfigFileSchema.parse({});
+    const file: ChangedFile = {
+      path: "src/a.ts",
+      oldPath: null,
+      status: "modified",
+      language: "typescript",
+      hunks: [
+        {
+          oldStart: 5,
+          oldLines: 0,
+          newStart: 5,
+          newLines: 2,
+          lines: [
+            { kind: "add", oldLine: null, newLine: 5, position: 5, text: "code" },
+            { kind: "add", oldLine: null, newLine: 6, position: 6, text: "code" },
+          ],
+        },
+      ],
+      commentableLines: [5, 6],
+      symbols: [{ name: "render", kind: "function", startLine: 1, endLine: 10, changedLines: [5, 6] }],
+    };
+    const diff: DiffResult = { baseSha: BASE, headSha: HEAD, mergeBase: BASE, files: [file] };
+    const unit: ReviewUnit = {
+      ...testUnit(),
+      file: {
+        path: file.path,
+        oldPath: file.oldPath,
+        status: file.status,
+        language: file.language,
+        commentableLines: [...file.commentableLines],
+      },
+      symbol: { name: "render", kind: "function", startLine: 1, endLine: 10, changedLines: [5, 6] },
+    };
+    const finding = testFinding();
+    finding.line = 5;
+    finding.evidence = [{ file: "src/a.ts", startLine: 5, endLine: 6, quote: "line-8" }];
+    const result = await engine.validate([finding], diff, [unit], config);
+    expect(result[0]?.status).toBe("inconclusive");
+    expect(result[0]?.status).not.toBe("accepted");
+    expect(result[0]?.checks.some((check) => check.name === "evidence_quote" && check.outcome === "passed")).toBe(true);
+    expect(
+      result[0]?.checks.some((check) => check.name === "introduced_by_pr" && check.outcome === "inconclusive"),
+    ).toBe(true);
+    expect(result[0]?.derivedAttribution).toEqual({ introducedByPr: false });
+  });
+
   test("relocated target with context-only evidence is inconclusive", async () => {
     const engine = engineWithHeadText(headText(10));
     const config = ConfigFileSchema.parse({});

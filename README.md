@@ -21,8 +21,8 @@ bun run format:check  # Biome format check (non-mutating; CI runs this)
 bun run format        # Biome format write (run before commit if format:check fails)
 ```
 
-Formatter notes: line width 120, double quotes, CRLF line endings (matches the
-line endings committed in this repo; do not convert to LF). The Biome version is
+Formatter notes: line width 120, double quotes, LF line endings (matches
+`.gitattributes` `eol=lf` and Biome `lineEnding: lf`; do not commit CRLF). The Biome version is
 pinned in `package.json`; run `bun install --frozen-lockfile` after pulling.
 
 ## Review
