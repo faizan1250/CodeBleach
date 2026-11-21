@@ -5,6 +5,7 @@ import type { ResolvedConfig } from "../config/schema.ts";
 import { GitValidationSnapshotReader } from "./snapshot.ts";
 import type { ValidationSnapshotReader } from "./snapshot.ts";
 import { validateFindingProvenance } from "./provenance.ts";
+import { validateLocation } from "./location.ts";
 
 function internal(message: string): ReviewerError {
   return new ReviewerError({ code: "INTERNAL", message });
@@ -27,13 +28,15 @@ export function createValidationEngine(options: ValidationEngineOptions): Valida
 }
 
 /**
- * Phase 5 validation engine, P5-02 stage. Owns the per-run snapshot
+ * Phase 5 validation engine, P5-03 stage. Owns the per-run snapshot
  * reader lifecycle (create from the run's repoDir plus diff SHAs, clear after
  * the run) and enforces P5-02 provenance before any snapshot read: a finding
  * with failed provenance is rejected, and a finding with passing provenance
- * stays inconclusive until location, evidence, and attribution checks land in
- * P5-03 through P5-07. Provenance performs no reads, so an unproven path can
- * never become a Git lookup.
+ * stays inconclusive until evidence, attribution, and policy checks land in
+ * P5-04 through P5-07. P5-03 location resolves the head-side target but keeps
+ * the inconclusive ceiling, so wiring alone can never mark findings accepted.
+ * Provenance performs no reads, so an unproven path can never become a Git
+ * lookup; location reads only the P5-02 canonical path at head.
  */
 export class ValidationEngineImpl implements ValidationEngine {
   readonly repoDir: string;
@@ -61,13 +64,28 @@ export class ValidationEngineImpl implements ValidationEngine {
     }
     const reader = this.createReader({ repoDir: this.repoDir, headSha: diff.headSha, mergeBase: diff.mergeBase });
     try {
-      return findings.map((finding): ValidatedFinding => {
+      const results: ValidatedFinding[] = [];
+      for (const finding of findings) {
         const provenance = validateFindingProvenance(finding, diff, units);
         if (!provenance.ok) {
-          return { finding, status: "rejected", checks: provenance.checks };
+          results.push({ finding, status: "rejected", checks: provenance.checks });
+          continue;
         }
-        return { finding, status: "inconclusive", checks: provenance.checks };
-      });
+        const location = await validateLocation({
+          finding,
+          unit: provenance.unit,
+          changedFile: provenance.changedFile,
+          canonicalPath: provenance.canonicalPath,
+          reader,
+        });
+        const checks = [...provenance.checks, ...location.checks];
+        if (!location.ok) {
+          results.push({ finding, status: location.inconclusive ? "inconclusive" : "rejected", checks });
+          continue;
+        }
+        results.push({ finding, status: "inconclusive", checks });
+      }
+      return results;
     } finally {
       reader.clear();
     }
