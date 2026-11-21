@@ -9,6 +9,7 @@ import {
   demoValidationEngine,
 } from "../../src/core/demo.ts";
 import { ConfigFileSchema } from "../../src/config/schema.ts";
+import { isAcceptedFinding } from "../../src/core/contracts.ts";
 
 const config = ConfigFileSchema.parse({});
 
@@ -38,7 +39,7 @@ describe("demo engines", () => {
     expect(validated.filter((v) => v.status === "accepted")).toHaveLength(1);
     expect(validated[0]?.finding).toBe(findings[0]);
 
-    const result = await demoPublisher.publish(validated, diff, {
+    const result = await demoPublisher.publish(validated.filter(isAcceptedFinding), diff, {
       owner: "o",
       repo: "r",
       number: 1,

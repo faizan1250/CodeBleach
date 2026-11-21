@@ -1,6 +1,14 @@
 import type { loadConfig } from "../config/load.ts";
 import type { Logger } from "./logger.ts";
-import type { DiffResult, Finding, PrMeta, PublishResult, ReviewUnit, ValidatedFinding } from "../types/index.ts";
+import type {
+  AcceptedValidatedFinding,
+  DiffResult,
+  Finding,
+  PrMeta,
+  PublishResult,
+  ReviewUnit,
+  ValidatedFinding,
+} from "../types/index.ts";
 import type { ContextBuildResult } from "../types/context.ts";
 import type { ReviewBuildResult } from "../types/review.ts";
 import type { ResolvedConfig } from "../config/schema.ts";
@@ -42,7 +50,12 @@ export interface ValidationEngine {
 }
 
 export interface Publisher {
-  publish(findings: ValidatedFinding[], diff: DiffResult, meta: PrMeta): Promise<PublishResult>;
+  publish(findings: AcceptedValidatedFinding[], diff: DiffResult, meta: PrMeta): Promise<PublishResult>;
+}
+
+/** Narrowing guard for the accepted-only publisher contract. */
+export function isAcceptedFinding(finding: ValidatedFinding): finding is AcceptedValidatedFinding {
+  return finding.status === "accepted";
 }
 
 export type StageName = "config" | "diff" | "context" | "review" | "validation" | "publish";
