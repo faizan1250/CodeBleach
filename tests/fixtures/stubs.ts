@@ -124,7 +124,7 @@ export function createFixtureEngines(options: FixtureOptions = {}): FixtureEngin
   const accepted: ValidatedFinding = {
     finding,
     status: "accepted",
-    checks: [{ name: "schema", passed: true }],
+    checks: [{ name: "schema", outcome: "passed", code: "evidence_bounds_ok" }],
   };
 
   const loadConfig = ((_repoDir: string) =>

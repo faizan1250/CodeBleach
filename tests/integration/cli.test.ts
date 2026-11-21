@@ -128,7 +128,7 @@ describe("cli", () => {
         publishResult: null;
       };
       expect(artifact.status).toBe("completed");
-      expect(artifact.schemaVersion).toBe(1);
+      expect(artifact.schemaVersion).toBe(2);
       expect(artifact.stages.map((stage) => [stage.name, stage.status])).toEqual([
         ["config", "completed"],
         ["diff", "completed"],

@@ -74,8 +74,8 @@ function testFinding(overrides?: Partial<Finding>): Finding {
   };
 }
 
-function failedNames(result: { checks: { name: string; passed: boolean }[] }): string[] {
-  return result.checks.filter((c) => !c.passed).map((c) => c.name);
+function failedNames(result: { checks: { name: string; outcome: string }[] }): string[] {
+  return result.checks.filter((c) => c.outcome !== "passed").map((c) => c.name);
 }
 
 describe("finding provenance (P5-02)", () => {
@@ -116,7 +116,11 @@ describe("finding provenance (P5-02)", () => {
     expect(result.checks).toHaveLength(7);
     for (const check of result.checks) {
       if (check.name !== "finding_identity" && check.name !== "finding_head_sha" && check.name !== "origin_unit") {
-        expect(check.detail).toBe("skipped: prerequisite check failed");
+        expect(check).toMatchObject({
+          outcome: "skipped",
+          code: "check_skipped_prerequisite_failed",
+          detail: "skipped: prerequisite check failed",
+        });
       }
     }
   });

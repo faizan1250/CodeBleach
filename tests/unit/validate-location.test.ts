@@ -99,7 +99,7 @@ describe("location line guard (P5-03)", () => {
       reader,
     });
     expect(result.ok).toBe(false);
-    expect(result.checks[0]).toMatchObject({ name: "location_line", passed: false });
+    expect(result.checks[0]).toMatchObject({ name: "location_line", outcome: "failed", code: "finding_line_invalid" });
     expect(reader.reads).toEqual([]);
   });
 
@@ -113,7 +113,7 @@ describe("location line guard (P5-03)", () => {
       reader,
     });
     expect(result.ok).toBe(false);
-    expect(result.checks[0]).toMatchObject({ name: "location_line", passed: false });
+    expect(result.checks[0]).toMatchObject({ name: "location_line", outcome: "failed", code: "finding_line_invalid" });
     expect(reader.reads).toEqual([]);
   });
 
@@ -199,7 +199,9 @@ describe("head-side target resolution (P5-03)", () => {
       reader: readerWithHead(headText(30)),
     });
     expect(result.ok).toBe(false);
-    expect(result.checks.some((check) => check.name === "head_comment_target" && !check.passed)).toBe(true);
+    expect(result.checks.some((check) => check.name === "head_comment_target" && check.outcome === "failed")).toBe(
+      true,
+    );
   });
 
   test("radius boundary accepts distance 5 and rejects distance 6", async () => {

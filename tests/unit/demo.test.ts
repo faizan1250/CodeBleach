@@ -87,7 +87,12 @@ describe("demo engines", () => {
       }
     }
     for (const v of rejected) {
-      expect(v.checks).toContainEqual({ name: "evidence", passed: false, detail: "quote not found in context" });
+      expect(v.checks).toContainEqual({
+        name: "evidence",
+        outcome: "failed",
+        code: "evidence_quote_not_found",
+        detail: "quote not found in context",
+      });
       for (const evidence of v.finding.evidence) {
         expect(lines.some((line) => line.includes(evidence.quote))).toBe(false);
       }

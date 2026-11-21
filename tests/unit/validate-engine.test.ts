@@ -137,15 +137,15 @@ describe("validation engine provenance (P5-02)", () => {
     for (const item of result) {
       expect(item.status).toBe("accepted");
       expect(item.checks).toHaveLength(19);
-      expect(item.checks.every((check) => check.passed)).toBe(true);
+      expect(item.checks.every((check) => check.outcome === "passed")).toBe(true);
       expect(item.checks.some((check) => check.name === "location_line")).toBe(true);
       expect(item.checks.some((check) => check.name === "head_comment_target")).toBe(true);
-      expect(item.checks.some((check) => check.name === "evidence_bounds" && check.passed)).toBe(true);
-      expect(item.checks.some((check) => check.name === "evidence_quote" && check.passed)).toBe(true);
-      expect(item.checks.some((check) => check.name === "introduced_by_pr" && check.passed)).toBe(true);
-      expect(item.checks.some((check) => check.name === "dedupe_fingerprint" && check.passed)).toBe(true);
-      expect(item.checks.some((check) => check.name === "dedupe_secondary" && check.passed)).toBe(true);
-      expect(item.checks.some((check) => check.name === "max_findings" && check.passed)).toBe(true);
+      expect(item.checks.some((check) => check.name === "evidence_bounds" && check.outcome === "passed")).toBe(true);
+      expect(item.checks.some((check) => check.name === "evidence_quote" && check.outcome === "passed")).toBe(true);
+      expect(item.checks.some((check) => check.name === "introduced_by_pr" && check.outcome === "passed")).toBe(true);
+      expect(item.checks.some((check) => check.name === "dedupe_fingerprint" && check.outcome === "passed")).toBe(true);
+      expect(item.checks.some((check) => check.name === "dedupe_secondary" && check.outcome === "passed")).toBe(true);
+      expect(item.checks.some((check) => check.name === "max_findings" && check.outcome === "passed")).toBe(true);
       expect(item.derivedAttribution).toEqual({
         introducedByPr: true,
         basis: { kind: "added-lines", evidenceIndex: 0, file: "src/a.ts", lines: [1] },
@@ -183,11 +183,11 @@ describe("validation engine provenance (P5-02)", () => {
       expect(rejected).toHaveLength(1);
       expect(accepted[0]?.finding.id).toBe("hi");
       expect(accepted[0]?.checks).toHaveLength(19);
-      expect(accepted[0]?.checks.every((check) => check.passed)).toBe(true);
+      expect(accepted[0]?.checks.every((check) => check.outcome === "passed")).toBe(true);
       expect(rejected[0]?.finding.id).toBe("lo");
       expect(rejected[0]?.checks).toHaveLength(17);
       expect(rejected[0]?.checks).toContainEqual(
-        expect.objectContaining({ name: "dedupe_fingerprint", passed: false }),
+        expect.objectContaining({ name: "dedupe_fingerprint", outcome: "failed", code: "duplicate_fingerprint" }),
       );
       expect(rejected[0]?.checks.some((check) => check.name === "max_findings")).toBe(false);
     }
@@ -202,8 +202,10 @@ describe("validation engine provenance (P5-02)", () => {
     const result = await engine.validate([first, second], testAddedDiff(), [testUnit()], config);
     expect(result.filter((item) => item.status === "accepted")).toHaveLength(1);
     const loser = result.find((item) => item.status === "rejected");
-    expect(loser?.checks).toContainEqual(expect.objectContaining({ name: "dedupe_secondary", passed: false }));
-    expect(loser?.checks.some((check) => check.name === "dedupe_fingerprint" && check.passed)).toBe(true);
+    expect(loser?.checks).toContainEqual(
+      expect.objectContaining({ name: "dedupe_secondary", outcome: "failed", code: "duplicate_secondary_key" }),
+    );
+    expect(loser?.checks.some((check) => check.name === "dedupe_fingerprint" && check.outcome === "passed")).toBe(true);
   });
 
   test("max findings keeps severity order and leaves the surplus visible", async () => {
@@ -222,7 +224,9 @@ describe("validation engine provenance (P5-02)", () => {
     expect(accepted[0]?.finding.id).toBe("high");
     expect(rejected).toHaveLength(1);
     expect(rejected[0]?.finding.id).toBe("low");
-    expect(rejected[0]?.checks).toContainEqual(expect.objectContaining({ name: "max_findings", passed: false }));
+    expect(rejected[0]?.checks).toContainEqual(
+      expect.objectContaining({ name: "max_findings", outcome: "failed", code: "max_findings_exceeded" }),
+    );
   });
 
   test("rejected and inconclusive findings never consume the accepted cap", async () => {
@@ -260,7 +264,9 @@ describe("validation engine provenance (P5-02)", () => {
     const result = await engine.validate([finding], testAddedDiff(), [testUnit()], config);
     expect(result[0]?.status).toBe("inconclusive");
     expect(result[0]?.status).not.toBe("accepted");
-    expect(result[0]?.checks.some((check) => check.name === "introduced_by_pr" && !check.passed)).toBe(true);
+    expect(
+      result[0]?.checks.some((check) => check.name === "introduced_by_pr" && check.outcome === "inconclusive"),
+    ).toBe(true);
     expect(result[0]?.derivedAttribution).toEqual({ introducedByPr: false });
     expect("llmVerdict" in (result[0] ?? {})).toBe(false);
   });
@@ -273,8 +279,12 @@ describe("validation engine provenance (P5-02)", () => {
     finding.evidence = [{ file: "src/a.ts", startLine: 2, endLine: 2, quote: "line-2" }];
     const result = await engine.validate([finding], testAddedDiff(), [testUnit()], config);
     expect(result[0]?.status).toBe("inconclusive");
-    expect(result[0]?.checks.some((check) => check.name === "head_comment_target" && check.passed)).toBe(true);
-    expect(result[0]?.checks.some((check) => check.name === "introduced_by_pr" && !check.passed)).toBe(true);
+    expect(result[0]?.checks.some((check) => check.name === "head_comment_target" && check.outcome === "passed")).toBe(
+      true,
+    );
+    expect(
+      result[0]?.checks.some((check) => check.name === "introduced_by_pr" && check.outcome === "inconclusive"),
+    ).toBe(true);
   });
 
   test("findings with failed provenance are rejected", async () => {
@@ -283,7 +293,7 @@ describe("validation engine provenance (P5-02)", () => {
     const result = await engine.validate([testFinding()], testDiff(), [], config);
     expect(result).toHaveLength(1);
     expect(result[0]?.status).toBe("rejected");
-    expect(result[0]?.checks.some((check) => !check.passed)).toBe(true);
+    expect(result[0]?.checks.some((check) => check.outcome !== "passed")).toBe(true);
     expect("llmVerdict" in (result[0] ?? {})).toBe(false);
   });
 
@@ -314,7 +324,9 @@ describe("validation engine provenance (P5-02)", () => {
     finding.line = 99;
     const result = await engine.validate([finding], testAddedDiff(), [testUnit()], config);
     expect(result[0]?.status).toBe("rejected");
-    expect(result[0]?.checks.some((check) => check.name === "head_comment_target" && !check.passed)).toBe(true);
+    expect(result[0]?.checks.some((check) => check.name === "head_comment_target" && check.outcome !== "passed")).toBe(
+      true,
+    );
   });
 
   test("missing head snapshot is inconclusive, never accepted", async () => {
@@ -340,7 +352,7 @@ describe("validation engine provenance (P5-02)", () => {
     finding.evidence = [{ file: "src/a.ts", startLine: 1, endLine: 1, quote: "fabricated-quote" }];
     const result = await engine.validate([finding], testAddedDiff(), [testUnit()], config);
     expect(result[0]?.status).toBe("rejected");
-    expect(result[0]?.checks.some((check) => check.name === "evidence_quote" && !check.passed)).toBe(true);
+    expect(result[0]?.checks.some((check) => check.name === "evidence_quote" && check.outcome !== "passed")).toBe(true);
   });
 
   test("unavailable evidence snapshot is inconclusive, never accepted", async () => {
@@ -389,7 +401,7 @@ describe("validation engine provenance (P5-02)", () => {
     finding.evidence = [{ file: "src/a.ts", startLine: 5, endLine: 5, quote: "old-code" }];
     const result = await engine.validate([finding], diff, [anchorUnit], ConfigFileSchema.parse({}));
     expect(result[0]?.status).toBe("inconclusive");
-    expect(result[0]?.checks.some((check) => check.name === "evidence_quote" && !check.passed)).toBe(true);
+    expect(result[0]?.checks.some((check) => check.name === "evidence_quote" && check.outcome !== "passed")).toBe(true);
   });
 
   test("deleted-line evidence with a valid anchor is accepted", async () => {
@@ -441,7 +453,9 @@ describe("validation engine provenance (P5-02)", () => {
     finding.evidence = [{ file: "src/a.ts", startLine: 5, endLine: 5, quote: "old-code" }];
     const result = await engine.validate([finding], diff, [anchorUnit], ConfigFileSchema.parse({}));
     expect(result[0]?.status).toBe("accepted");
-    expect(result[0]?.checks.some((check) => check.name === "introduced_by_pr" && check.passed)).toBe(true);
+    expect(result[0]?.checks.some((check) => check.name === "introduced_by_pr" && check.outcome === "passed")).toBe(
+      true,
+    );
     expect(result[0]?.derivedAttribution).toEqual({
       introducedByPr: true,
       basis: { kind: "deleted-lines", evidenceIndex: 0, file: "src/a.ts", lines: [5] },
@@ -476,8 +490,12 @@ describe("validation engine provenance (P5-02)", () => {
     const result = await engine.validate([testFinding()], testAddedDiff(), [testUnit()], config);
     expect(result[0]?.status).toBe("rejected");
     expect(result[0]?.checks).toHaveLength(15);
-    expect(result[0]?.checks.some((check) => check.name === "severity_policy" && !check.passed)).toBe(true);
-    expect(result[0]?.checks.some((check) => check.name === "introduced_by_pr" && check.passed)).toBe(true);
+    expect(result[0]?.checks.some((check) => check.name === "severity_policy" && check.outcome !== "passed")).toBe(
+      true,
+    );
+    expect(result[0]?.checks.some((check) => check.name === "introduced_by_pr" && check.outcome === "passed")).toBe(
+      true,
+    );
   });
 
   test("policy rejects a proven finding in a disabled category", async () => {
@@ -485,7 +503,9 @@ describe("validation engine provenance (P5-02)", () => {
     const config = ConfigFileSchema.parse({ review: { categories: { bugs: false } } });
     const result = await engine.validate([testFinding()], testAddedDiff(), [testUnit()], config);
     expect(result[0]?.status).toBe("rejected");
-    expect(result[0]?.checks.some((check) => check.name === "category_policy" && !check.passed)).toBe(true);
+    expect(result[0]?.checks.some((check) => check.name === "category_policy" && check.outcome !== "passed")).toBe(
+      true,
+    );
   });
 
   test("policy rejects a proven finding with an unknown rule id", async () => {
@@ -495,7 +515,7 @@ describe("validation engine provenance (P5-02)", () => {
     finding.ruleId = "ghost-rule";
     const result = await engine.validate([finding], testAddedDiff(), [testUnit()], config);
     expect(result[0]?.status).toBe("rejected");
-    expect(result[0]?.checks.some((check) => check.name === "rule_policy" && !check.passed)).toBe(true);
+    expect(result[0]?.checks.some((check) => check.name === "rule_policy" && check.outcome !== "passed")).toBe(true);
   });
 
   test("path override at the canonical path rejects a proven finding", async () => {
@@ -505,7 +525,9 @@ describe("validation engine provenance (P5-02)", () => {
     });
     const result = await engine.validate([testFinding()], testAddedDiff(), [testUnit()], config);
     expect(result[0]?.status).toBe("rejected");
-    expect(result[0]?.checks.some((check) => check.name === "severity_policy" && !check.passed)).toBe(true);
+    expect(result[0]?.checks.some((check) => check.name === "severity_policy" && check.outcome !== "passed")).toBe(
+      true,
+    );
   });
 
   test("input findings are preserved, never mutated", async () => {

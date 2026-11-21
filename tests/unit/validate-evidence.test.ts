@@ -122,7 +122,11 @@ describe("evidence bounds (P5-04)", () => {
     const reader = readerFor({ head: { "src/a.ts": ok("line-1") } });
     const result = await validateEvidence(inputFor(evidence, reader));
     expect(result.ok).toBe(false);
-    expect(result.checks[0]).toMatchObject({ name: "evidence_bounds", passed: false });
+    expect(result.checks[0]).toMatchObject({
+      name: "evidence_bounds",
+      outcome: "failed",
+      code: "evidence_range_invalid",
+    });
     expect(reader.reads).toEqual([]);
   });
 
@@ -135,7 +139,11 @@ describe("evidence bounds (P5-04)", () => {
       ),
     );
     expect(result.ok).toBe(false);
-    expect(result.checks[0]).toMatchObject({ name: "evidence_bounds", passed: false });
+    expect(result.checks[0]).toMatchObject({
+      name: "evidence_bounds",
+      outcome: "failed",
+      code: "evidence_range_invalid",
+    });
     expect(reader.reads).toEqual([]);
   });
 
@@ -145,7 +153,11 @@ describe("evidence bounds (P5-04)", () => {
       inputFor([{ file: "src/a.ts", startLine: 1, endLine: EVIDENCE_MAX_LINE_SPAN + 1, quote: "line-1" }], reader),
     );
     expect(result.ok).toBe(false);
-    expect(result.checks[0]).toMatchObject({ name: "evidence_bounds", passed: false });
+    expect(result.checks[0]).toMatchObject({
+      name: "evidence_bounds",
+      outcome: "failed",
+      code: "evidence_range_invalid",
+    });
     expect(reader.reads).toEqual([]);
   });
 
@@ -155,7 +167,11 @@ describe("evidence bounds (P5-04)", () => {
       inputFor([{ file: "src/a.ts", startLine: 3, endLine: 2, quote: "line-1" }], reader),
     );
     expect(result.ok).toBe(false);
-    expect(result.checks[0]).toMatchObject({ name: "evidence_bounds", passed: false });
+    expect(result.checks[0]).toMatchObject({
+      name: "evidence_bounds",
+      outcome: "failed",
+      code: "evidence_range_invalid",
+    });
     expect(reader.reads).toEqual([]);
   });
 
@@ -177,8 +193,8 @@ describe("head-side quote verification (P5-04)", () => {
     );
     expect(result).toMatchObject({ ok: true });
     expect(result.checks).toMatchObject([
-      { name: "evidence_bounds", passed: true },
-      { name: "evidence_quote", passed: true },
+      { name: "evidence_bounds", outcome: "passed", code: "evidence_bounds_ok" },
+      { name: "evidence_quote", outcome: "passed", code: "evidence_quote_verified" },
     ]);
     expect(reader.reads).toEqual([{ side: "head", path: "src/a.ts" }]);
   });
@@ -206,7 +222,11 @@ describe("head-side quote verification (P5-04)", () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.inconclusive).toBe(false);
-    expect(result.checks[1]).toMatchObject({ name: "evidence_quote", passed: false });
+    expect(result.checks[1]).toMatchObject({
+      name: "evidence_quote",
+      outcome: "failed",
+      code: "evidence_quote_not_found",
+    });
   });
 
   test("punctuation mutation fails", async () => {

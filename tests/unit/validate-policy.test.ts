@@ -53,7 +53,7 @@ describe("category to toggle mapping", () => {
     for (const category of ["bug", "null-handling", "error-handling"] as const) {
       const result = validatePolicy({ finding: policyFinding({ category }), canonicalPath: "src/a.ts", config });
       expect(result.ok).toBe(false);
-      expect(result.checks.some((check) => check.name === "category_policy" && !check.passed)).toBe(true);
+      expect(result.checks.some((check) => check.name === "category_policy" && check.outcome === "failed")).toBe(true);
     }
     const convention = validatePolicy({
       finding: policyFinding({ category: "convention" }),
@@ -113,7 +113,9 @@ describe("severity thresholds", () => {
     for (const { severity, ok } of expectations) {
       const result = validatePolicy({ finding: policyFinding({ severity }), canonicalPath: "src/a.ts", config });
       expect(result.ok).toBe(ok);
-      expect(result.checks.some((check) => check.name === "severity_policy" && check.passed === ok)).toBe(true);
+      expect(
+        result.checks.some((check) => check.name === "severity_policy" && (check.outcome === "passed") === ok),
+      ).toBe(true);
     }
   });
 
@@ -126,7 +128,7 @@ describe("severity thresholds", () => {
     });
     expect(result.ok).toBe(false);
     const check = result.checks.find((entry) => entry.name === "severity_policy");
-    expect(check?.passed).toBe(false);
+    expect(check?.outcome).toBe("failed");
     expect(check?.detail).toContain("high");
     expect(check?.detail).toContain("critical");
   });
@@ -144,7 +146,7 @@ describe("confidence thresholds", () => {
       config,
     });
     expect(below.ok).toBe(false);
-    expect(below.checks.some((check) => check.name === "confidence_policy" && !check.passed)).toBe(true);
+    expect(below.checks.some((check) => check.name === "confidence_policy" && check.outcome === "failed")).toBe(true);
   });
 
   test("NaN confidence fails closed", () => {
@@ -255,7 +257,7 @@ describe("explicit rule references", () => {
       config: ruleConfig,
     });
     expect(result.ok).toBe(false);
-    expect(result.checks.some((check) => check.name === "rule_policy" && !check.passed)).toBe(true);
+    expect(result.checks.some((check) => check.name === "rule_policy" && check.outcome === "failed")).toBe(true);
   });
 
   test("rule path mismatch fails", () => {
@@ -265,7 +267,7 @@ describe("explicit rule references", () => {
       config: ruleConfig,
     });
     expect(result.ok).toBe(false);
-    expect(result.checks.some((check) => check.name === "rule_policy" && !check.passed)).toBe(true);
+    expect(result.checks.some((check) => check.name === "rule_policy" && check.outcome === "failed")).toBe(true);
   });
 
   test("matching rule passes and unscoped rules apply everywhere", () => {
@@ -294,7 +296,7 @@ describe("explicit rule references", () => {
     expect(result.ok).toBe(false);
     expect(finding.severity).toBe("high");
     const check = result.checks.find((entry) => entry.name === "rule_policy");
-    expect(check?.passed).toBe(true);
+    expect(check?.outcome).toBe("passed");
     expect(check?.detail).toContain("low");
   });
 
@@ -305,6 +307,6 @@ describe("explicit rule references", () => {
       config: configWith({}),
     });
     expect(result.ok).toBe(true);
-    expect(result.checks.some((check) => check.name === "rule_policy" && check.passed)).toBe(true);
+    expect(result.checks.some((check) => check.name === "rule_policy" && check.outcome === "passed")).toBe(true);
   });
 });

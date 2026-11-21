@@ -64,7 +64,7 @@ describe("primary fingerprint duplicates", () => {
     const retained = verdicts.filter((verdict) => verdict.retained);
     expect(retained).toHaveLength(1);
     expect(verdicts.find((verdict) => !verdict.retained)?.checks).toContainEqual(
-      expect.objectContaining({ name: "dedupe_fingerprint", passed: false }),
+      expect.objectContaining({ name: "dedupe_fingerprint", outcome: "failed", code: "duplicate_fingerprint" }),
     );
   });
 
@@ -92,7 +92,7 @@ describe("secondary conservative duplicates", () => {
     const verdicts = resolveDuplicates([a, b]);
     expect(verdicts.filter((verdict) => verdict.retained)).toHaveLength(1);
     expect(verdicts.find((verdict) => !verdict.retained)?.checks).toContainEqual(
-      expect.objectContaining({ name: "dedupe_secondary", passed: false }),
+      expect.objectContaining({ name: "dedupe_secondary", outcome: "failed", code: "duplicate_secondary_key" }),
     );
   });
 
