@@ -199,7 +199,22 @@ const ASSIGNMENT_SECRET_RE =
 // and TOKEN_PATTERNS above keep full recall on short values.
 const MIN_LITERAL_SECRET_LENGTH = 8;
 
-export function redact(text: string, extraSecrets: string[] = []): string {
+export type AssignmentMode = "all" | "literal" | "none";
+
+export interface RedactOptions {
+  /**
+   * How the `key=value` / `key: value` pass treats sensitive-looking keys.
+   * - "all" (default): any value, for logs/artifacts/config text.
+   * - "literal": only quoted, non-empty string literals; identifiers, types and
+   *   expressions are code, never secrets (use for source files).
+   * - "none": skip the pass; literal secrets and high-precision token shapes only
+   *   (use at transport boundaries that cannot know the content type).
+   */
+  assignments?: AssignmentMode;
+}
+
+export function redact(text: string, extraSecrets: string[] = [], options: RedactOptions = {}): string {
+  const mode: AssignmentMode = options.assignments ?? "all";
   let out = text;
   const secrets = [...new Set(extraSecrets.filter((s) => s.length >= MIN_LITERAL_SECRET_LENGTH))].sort(
     (a, b) => b.length - a.length,
@@ -225,6 +240,7 @@ export function redact(text: string, extraSecrets: string[] = []): string {
       return `${mark}${key}=[REDACTED]`;
     },
   );
+  if (mode === "none") return out;
   ASSIGNMENT_SECRET_RE.lastIndex = 0;
   out = out.replace(
     ASSIGNMENT_SECRET_RE,
@@ -251,6 +267,13 @@ export function redact(text: string, extraSecrets: string[] = []): string {
       const value = dqValue !== undefined ? dqValue : sqValue !== undefined ? (sqValue as string) : uqValue;
       const closeValue = dqValue !== undefined ? (dqClose as string) : sqValue !== undefined ? (sqClose as string) : "";
       if (value === REDACTED || !isSensitiveAssignmentKey(key)) return match;
+      const quoted = dqValue !== undefined || sqValue !== undefined;
+      // `a === b`, `a == b`, `a => b` are operators, not assignments: the lazy value
+      // class would otherwise swallow the operator and corrupt the code.
+      if (sep === "=" && !quoted && (uqValue.startsWith("=") || uqValue.startsWith(">"))) return match;
+      // Interpolation-free template strings are literals too; `${...}` makes it an expression.
+      const templateLiteral = !quoted && /^`[^`$\\]+`$/.test(uqValue);
+      if (mode === "literal" && ((!quoted && !templateLiteral) || value.length === 0)) return match;
       // Fragments are opaque to generic assignments too: skip pairs inside
       // the current URL's `#` scope. Outside any fragment this is a no-op,
       // so env/JSON/`;`-separated forms keep redacting.
@@ -264,6 +287,56 @@ export function redact(text: string, extraSecrets: string[] = []): string {
     },
   );
   return out;
+}
+
+const CODE_EXTENSIONS: ReadonlySet<string> = new Set([
+  "ts",
+  "tsx",
+  "mts",
+  "cts",
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
+  "json",
+  "py",
+  "go",
+  "rs",
+  "java",
+  "kt",
+  "rb",
+  "php",
+  "cs",
+  "c",
+  "cc",
+  "cpp",
+  "h",
+  "hpp",
+  "swift",
+  "scala",
+]);
+
+function isCodePath(path: string): boolean {
+  const ext = /\.([A-Za-z0-9]+)$/.exec(path)?.[1];
+  return ext !== undefined && CODE_EXTENSIONS.has(ext.toLowerCase());
+}
+
+/** Redact repository text bound for a model: code files keep identifiers/types/operators intact. */
+export function redactSource(text: string, path: string, extraSecrets: string[] = []): string {
+  return redact(text, extraSecrets, { assignments: isCodePath(path) ? "literal" : "all" });
+}
+
+// Key classification is pure and keys repeat thousands of times in large artifacts.
+const KEY_DROP_CACHE = new Map<string, boolean>();
+const KEY_DROP_CACHE_MAX = 4096;
+
+function dropsKeyValue(key: string): boolean {
+  const cached = KEY_DROP_CACHE.get(key);
+  if (cached !== undefined) return cached;
+  const drop = isSensitiveKey(key) || (hasSensitiveSegment(key) && !isTelemetryKey(key));
+  if (KEY_DROP_CACHE.size >= KEY_DROP_CACHE_MAX) KEY_DROP_CACHE.clear();
+  KEY_DROP_CACHE.set(key, drop);
+  return drop;
 }
 
 /** Recursively redact nested payloads; values under sensitive keys are always dropped. */
@@ -306,17 +379,7 @@ function sanitizeValue(value: unknown, extraSecrets: string[], seen: WeakSet<obj
       // Whole-key and segment-only hits drop the entire value (any type);
       // never recurse under a sensitive parent. Only exact-key telemetry
       // on segment-only hits passes through. Mirrors redact().
-      if (isSensitiveKey(key)) {
-        out[key] = REDACTED;
-      } else if (hasSensitiveSegment(key)) {
-        if (isTelemetryKey(key)) {
-          out[key] = sanitizeValue(entry, extraSecrets, seen);
-        } else {
-          out[key] = REDACTED;
-        }
-      } else {
-        out[key] = sanitizeValue(entry, extraSecrets, seen);
-      }
+      out[key] = dropsKeyValue(key) ? REDACTED : sanitizeValue(entry, extraSecrets, seen);
     }
     result = out;
   }

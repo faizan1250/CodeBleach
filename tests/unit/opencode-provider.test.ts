@@ -605,7 +605,7 @@ describe("opencode provider redaction", () => {
       "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----",
       "auth Bearer hunter2value and Basic dXNlcjpwYXNzd29yZA== end",
       "https://x.test/cb?api_key=SECRET123&b=1",
-      "MY_SECRET=hunter2 password: hunter2 OPENCODE_API_KEY=dummy-key",
+      "OPENCODE_API_KEY=dummy-key",
     ].join("\n");
     const { calls, fetchFn } = captureFetch([jsonResponse(okBody())]);
     const provider = new OpenCodeProvider({ env: GATE, version: "0.1.0", fetchFn });
@@ -620,12 +620,19 @@ describe("opencode provider redaction", () => {
       "hunter2value",
       "dXNlcjpwYXNzd29yZA==",
       "api_key=SECRET123",
-      "hunter2",
       "dummy-key",
     ]) {
       expect(raw).not.toContain(secret);
     }
     expect(raw).toContain("[REDACTED]");
+  });
+
+  test("transport redaction leaves code-shaped text intact", async () => {
+    const code = "if (token === expectedToken && user.password == input.password) { password: string }";
+    const { calls, fetchFn } = captureFetch([jsonResponse(okBody())]);
+    const provider = new OpenCodeProvider({ env: GATE, version: "0.1.0", fetchFn });
+    await provider.complete({ system: "s", user: code });
+    expect(String(calls[0]?.init.body)).toContain(code);
   });
 
   test("redacts the api key from provider error messages", async () => {

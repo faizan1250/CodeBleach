@@ -4,7 +4,7 @@ import type { ResolvedConfig } from "../config/schema.ts";
 import type { Category } from "../types/finding.ts";
 import type { ReviewUnit } from "../types/context.ts";
 import { estimateTokens } from "../utils/tokens.ts";
-import { sanitizePayload } from "../utils/redact.ts";
+import { redact, redactSource } from "../utils/redact.ts";
 
 // Versioned review prompt. Template holds trusted instructions; this module
 // appends the per-review scope and serializes the ReviewUnit as JSON data so
@@ -109,18 +109,22 @@ interface UnitPayload {
 // Faithful projection: whole hunks with line numbers, ranked context, explicit
 // rules. Optional symbol fields stay absent when undefined.
 function toUnitPayload(unit: ReviewUnit, language: string): UnitPayload {
+  // Source text is redacted per file type (code keeps identifiers/types/operators);
+  // metadata and prose get literal-secret and token-shape redaction only.
+  const prose = (text: string): string => redact(text, [], { assignments: "none" });
+  const source = (text: string, path: string): string => redactSource(text, path);
   return {
     file: {
-      path: unit.file.path,
-      oldPath: unit.file.oldPath,
+      path: prose(unit.file.path),
+      oldPath: unit.file.oldPath === null ? null : prose(unit.file.oldPath),
       status: unit.file.status,
       language: unit.file.language,
       commentableLines: [...unit.file.commentableLines],
     },
     symbol: {
-      name: unit.symbol.name,
+      name: prose(unit.symbol.name),
       kind: unit.symbol.kind,
-      ...(unit.symbol.container === undefined ? {} : { container: unit.symbol.container }),
+      ...(unit.symbol.container === undefined ? {} : { container: prose(unit.symbol.container) }),
       startLine: unit.symbol.startLine,
       endLine: unit.symbol.endLine,
       changedLines: [...unit.symbol.changedLines],
@@ -136,18 +140,18 @@ function toUnitPayload(unit: ReviewUnit, language: string): UnitPayload {
         kind: line.kind,
         oldLine: line.oldLine,
         newLine: line.newLine,
-        text: line.text,
+        text: source(line.text, unit.file.path),
       })),
     })),
     context: unit.context.map((item) => ({
-      file: item.file,
+      file: prose(item.file),
       startLine: item.startLine,
       endLine: item.endLine,
       kind: item.kind,
-      reason: item.reason,
-      text: item.text,
+      reason: prose(item.reason),
+      text: source(item.text, item.file),
     })),
-    rules: unit.rules.map((rule) => ({ id: rule.id, kind: rule.kind, text: rule.text })),
+    rules: unit.rules.map((rule) => ({ id: rule.id, kind: rule.kind, text: prose(rule.text) })),
     language,
   };
 }
@@ -163,7 +167,7 @@ export function buildReviewPrompt(unit: ReviewUnit, config: ResolvedConfig): Bui
   // no braces so the payload stays one trailing JSON object. The provider
   // re-redacts pre-send with key bytes (defense in depth).
   const data = JSON.stringify({
-    reviewUnit: sanitizePayload(toUnitPayload(unit, language)) as UnitPayload,
+    reviewUnit: toUnitPayload(unit, language),
   });
   const { version, hash } = getCodeReviewPromptIdentity();
   const system =
