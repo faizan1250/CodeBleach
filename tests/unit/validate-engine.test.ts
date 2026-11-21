@@ -94,7 +94,7 @@ function testFinding(id: string = "finding-1"): Finding {
     line: 1,
     description: "name may be null at runtime.",
     confidence: 0.9,
-    evidence: [{ file: "src/a.ts", startLine: 1, endLine: 1, quote: "q" }],
+    evidence: [{ file: "src/a.ts", startLine: 1, endLine: 1, quote: "line-1" }],
     introducedByPr: true,
   };
 }
@@ -134,13 +134,17 @@ describe("validation engine provenance (P5-02)", () => {
     for (const item of result) {
       expect(item.status).toBe("inconclusive");
       expect(item.status).not.toBe("accepted");
-      expect(item.checks).toHaveLength(9);
+      expect(item.checks).toHaveLength(11);
       expect(item.checks.every((check) => check.passed)).toBe(true);
       expect(item.checks.some((check) => check.name === "location_line")).toBe(true);
       expect(item.checks.some((check) => check.name === "head_comment_target")).toBe(true);
+      expect(item.checks.some((check) => check.name === "evidence_bounds" && check.passed)).toBe(true);
+      expect(item.checks.some((check) => check.name === "evidence_quote" && check.passed)).toBe(true);
       expect("llmVerdict" in item).toBe(false);
     }
     expect(readers[0]?.reads).toEqual([
+      { side: "head", path: "src/a.ts" },
+      { side: "head", path: "src/a.ts" },
       { side: "head", path: "src/a.ts" },
       { side: "head", path: "src/a.ts" },
     ]);
@@ -200,6 +204,65 @@ describe("validation engine provenance (P5-02)", () => {
     });
     const result = await engine.validate([testFinding()], testAddedDiff(), [testUnit()], ConfigFileSchema.parse({}));
     expect(result[0]?.status).toBe("inconclusive");
+  });
+
+  test("fabricated evidence quote rejects the finding", async () => {
+    const engine = engineWithHeadText(headText(10));
+    const config = ConfigFileSchema.parse({});
+    const finding = testFinding();
+    finding.evidence = [{ file: "src/a.ts", startLine: 1, endLine: 1, quote: "fabricated-quote" }];
+    const result = await engine.validate([finding], testAddedDiff(), [testUnit()], config);
+    expect(result[0]?.status).toBe("rejected");
+    expect(result[0]?.checks.some((check) => check.name === "evidence_quote" && !check.passed)).toBe(true);
+  });
+
+  test("unavailable evidence snapshot is inconclusive, never accepted", async () => {
+    const deletedLineFile: ChangedFile = {
+      ...testAddedFile(),
+      hunks: [
+        ...testAddedFile().hunks,
+        {
+          oldStart: 5,
+          oldLines: 1,
+          newStart: 2,
+          newLines: 0,
+          lines: [{ kind: "del" as const, oldLine: 5, newLine: null, position: 5, text: "code" }],
+        },
+      ],
+    };
+    const anchorUnit: ReviewUnit = {
+      ...testUnit(),
+      symbol: {
+        name: "render",
+        kind: "function",
+        startLine: 1,
+        endLine: 10,
+        changedLines: [1],
+        deletedLines: [5],
+        anchorLine: 1,
+      },
+    };
+    const engine = createValidationEngine({
+      repoDir: "/repo",
+      createReader: (input) => {
+        const text = headText(10);
+        return new FakeValidationSnapshotReader({
+          headSha: input.headSha,
+          mergeBase: input.mergeBase,
+          script: {
+            head: { "src/a.ts": { status: "ok" as const, text, bytes: text.length } },
+            base: { "src/a.ts": { status: "binary" as const, reason: "snapshot blob is binary content" } },
+          },
+        });
+      },
+    });
+    const diff: DiffResult = { baseSha: BASE, headSha: HEAD, mergeBase: BASE, files: [deletedLineFile] };
+    const finding = testFinding();
+    finding.line = 5;
+    finding.evidence = [{ file: "src/a.ts", startLine: 5, endLine: 5, quote: "old-code" }];
+    const result = await engine.validate([finding], diff, [anchorUnit], ConfigFileSchema.parse({}));
+    expect(result[0]?.status).toBe("inconclusive");
+    expect(result[0]?.checks.some((check) => check.name === "evidence_quote" && !check.passed)).toBe(true);
   });
 
   test("deleted file has no head-side target and performs no snapshot read", async () => {
