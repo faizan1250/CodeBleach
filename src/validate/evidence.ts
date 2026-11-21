@@ -11,11 +11,15 @@ export const EVIDENCE_MAX_QUOTE_CHARS = 2000;
 export const EVIDENCE_MAX_LINE_SPAN = 50;
 export const EVIDENCE_SEARCH_RADIUS = 3;
 
+export type EvidenceSide = "head" | "base";
+
 export type EvidenceCheckName = "evidence_bounds" | "evidence_quote";
 
 export interface EvidenceSuccess {
   ok: true;
   checks: CheckResult[];
+  /** Verified snapshot side per finding.evidence item, in order (P5-05 attribution input). */
+  sides: EvidenceSide[];
 }
 
 export interface EvidenceFailure {
@@ -35,8 +39,6 @@ export interface EvidenceInput {
   canonicalPath: string;
   reader: ValidationSnapshotReader;
 }
-
-type EvidenceSide = "head" | "base";
 
 function fail(checks: CheckResult[], name: EvidenceCheckName, detail: string): void {
   checks.push({ name, passed: false, detail });
@@ -141,6 +143,7 @@ export async function validateEvidence(input: EvidenceInput): Promise<EvidenceRe
 
   const { head, deleted } = lineSets(changedFile);
   let sawInconclusive = false;
+  const resolvedSides: EvidenceSide[] = [];
 
   for (const [index, item] of finding.evidence.entries()) {
     const checked = validateSnapshotPath(item.file);
@@ -154,8 +157,12 @@ export async function validateEvidence(input: EvidenceInput): Promise<EvidenceRe
 
     const verify = async (side: EvidenceSide, readPath: string, label: string): Promise<boolean> => {
       const outcome = await matchSide(reader, side, readPath, item.startLine, item.endLine, item.quote);
-      if (outcome === "match" || outcome === "unavailable") {
-        if (outcome === "unavailable") sawInconclusive = true;
+      if (outcome === "match") {
+        resolvedSides.push(side);
+        return true;
+      }
+      if (outcome === "unavailable") {
+        sawInconclusive = true;
         return true;
       }
       fail(checks, "evidence_quote", `evidence[${index}] quote not found in the ${label} snapshot`);
@@ -186,6 +193,8 @@ export async function validateEvidence(input: EvidenceInput): Promise<EvidenceRe
       } else if (headOutcome === baseOutcome) {
         fail(checks, "evidence_quote", `evidence[${index}] side is ambiguous: identical match on both snapshots`);
         return { ok: false, checks, inconclusive: true };
+      } else {
+        resolvedSides.push(headOutcome === "match" ? "head" : "base");
       }
     }
   }
@@ -195,7 +204,7 @@ export async function validateEvidence(input: EvidenceInput): Promise<EvidenceRe
     return { ok: false, checks, inconclusive: true };
   }
   pass(checks, "evidence_quote");
-  return { ok: true, checks };
+  return { ok: true, checks, sides: resolvedSides };
 }
 
 function intersects(startLine: number, endLine: number, lines: Set<number>): boolean {
