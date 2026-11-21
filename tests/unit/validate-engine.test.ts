@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { ConfigFileSchema } from "../../src/config/schema.ts";
 import { ReviewerError } from "../../src/core/errors.ts";
-import type { DiffResult, Finding } from "../../src/types/index.ts";
+import type { ChangedFile, DiffResult, Finding, ReviewUnit } from "../../src/types/index.ts";
 import { FakeValidationSnapshotReader } from "../../src/validate/snapshot.ts";
 import { createValidationEngine } from "../../src/validate/engine.ts";
 import type { ValidationReaderInput } from "../../src/validate/engine.ts";
@@ -9,8 +9,38 @@ import type { ValidationReaderInput } from "../../src/validate/engine.ts";
 const HEAD = "c".repeat(40);
 const BASE = "d".repeat(40);
 
+function testChangedFile(): ChangedFile {
+  return {
+    path: "src/a.ts",
+    oldPath: null,
+    status: "modified",
+    language: "typescript",
+    hunks: [],
+    commentableLines: [1],
+    symbols: [{ name: "render", kind: "function", startLine: 1, endLine: 10, changedLines: [1] }],
+  };
+}
+
+function testUnit(id = "unit-1"): ReviewUnit {
+  const file = testChangedFile();
+  return {
+    id,
+    file: {
+      path: file.path,
+      oldPath: file.oldPath,
+      status: file.status,
+      language: file.language,
+      commentableLines: [...file.commentableLines],
+    },
+    diff: { hunks: [], originalHunkCount: 0, includedHunkCount: 0, omittedHunkCount: 0, truncated: false },
+    symbol: { name: "render", kind: "function", startLine: 1, endLine: 10, changedLines: [1] },
+    context: [],
+    rules: [],
+  };
+}
+
 function testDiff(): DiffResult {
-  return { baseSha: BASE, headSha: HEAD, mergeBase: BASE, files: [] };
+  return { baseSha: BASE, headSha: HEAD, mergeBase: BASE, files: [testChangedFile()] };
 }
 
 function testFinding(id: string = "finding-1"): Finding {
@@ -50,25 +80,55 @@ describe("validation engine construction", () => {
   });
 });
 
-describe("validation engine wiring (P5-01)", () => {
+describe("validation engine provenance (P5-02)", () => {
   test("empty findings validate to an empty result", async () => {
     const engine = createValidationEngine({ repoDir: "/repo" });
     const result = await engine.validate([], testDiff(), [], ConfigFileSchema.parse({}));
     expect(result).toEqual([]);
   });
 
-  test("findings are inconclusive and never accepted before P5-02 checks exist", async () => {
+  test("findings with valid provenance are inconclusive and never accepted", async () => {
     const engine = createValidationEngine({ repoDir: "/repo" });
     const config = ConfigFileSchema.parse({});
-    const result = await engine.validate([testFinding("a"), testFinding("b")], testDiff(), [], config);
+    const result = await engine.validate([testFinding("a"), testFinding("b")], testDiff(), [testUnit()], config);
     expect(result).toHaveLength(2);
     for (const item of result) {
       expect(item.status).toBe("inconclusive");
       expect(item.status).not.toBe("accepted");
-      expect(item.checks).toHaveLength(1);
-      expect(item.checks[0]?.passed).toBe(false);
+      expect(item.checks.length).toBeGreaterThan(0);
+      expect(item.checks.every((check) => check.passed)).toBe(true);
       expect("llmVerdict" in item).toBe(false);
     }
+  });
+
+  test("findings with failed provenance are rejected", async () => {
+    const engine = createValidationEngine({ repoDir: "/repo" });
+    const config = ConfigFileSchema.parse({});
+    const result = await engine.validate([testFinding()], testDiff(), [], config);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.status).toBe("rejected");
+    expect(result[0]?.checks.some((check) => !check.passed)).toBe(true);
+    expect("llmVerdict" in (result[0] ?? {})).toBe(false);
+  });
+
+  test("unproven paths never reach the snapshot reader", async () => {
+    const readers: FakeValidationSnapshotReader[] = [];
+    const engine = createValidationEngine({
+      repoDir: "/repo",
+      createReader: (input) => {
+        const reader = new FakeValidationSnapshotReader({ headSha: input.headSha, mergeBase: input.mergeBase });
+        readers.push(reader);
+        return reader;
+      },
+    });
+    const config = ConfigFileSchema.parse({});
+    const finding = testFinding();
+    finding.file = "/etc/passwd";
+    const result = await engine.validate([finding], testDiff(), [testUnit()], config);
+    expect(result[0]?.status).toBe("rejected");
+    expect(readers).toHaveLength(1);
+    expect(readers[0]?.reads).toEqual([]);
+    expect(readers[0]?.cleared).toBe(1);
   });
 
   test("input findings are preserved, never mutated", async () => {
