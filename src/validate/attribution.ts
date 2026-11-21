@@ -1,10 +1,13 @@
 import type { ChangedFile, Finding, ReviewUnit } from "../types/index.ts";
 import type { AttributionBasis, CheckResult } from "../types/validation.ts";
+import { makeCheck } from "./checks.ts";
 import type { EvidenceSide } from "./evidence.ts";
 import type { ResolvedTarget } from "./location.ts";
 import { validateSnapshotPath } from "./snapshot.ts";
 
-// Interim check name; P5-08 owns the stable code set.
+// Check name is stable; P5-08 owns the code set (introduced_by_pr_verified /
+// introduction_inconclusive). Attribution never rejects: unprovable linkage
+// fails closed, never accepted.
 export type AttributionCheckName = "introduced_by_pr";
 
 export interface AttributionSuccess {
@@ -56,7 +59,7 @@ export function validateAttribution(input: AttributionInput): AttributionResult 
   const { finding, unit, changedFile, canonicalPath, target, sides } = input;
   const checks: CheckResult[] = [];
   const inconclusive = (detail: string): AttributionFailure => {
-    checks.push({ name: "introduced_by_pr", passed: false, detail });
+    checks.push(makeCheck("introduced_by_pr", "inconclusive", "introduction_inconclusive", detail));
     return { ok: false, checks, introducedByPr: false, inconclusive: true };
   };
 
@@ -90,11 +93,14 @@ export function validateAttribution(input: AttributionInput): AttributionResult 
         file: canonicalPath,
         lines: overlap,
       };
-      checks.push({
-        name: "introduced_by_pr",
-        passed: true,
-        detail: `added-line evidence ${canonicalPath}:${item.startLine}-${item.endLine} intersects added lines ${overlap.join(",")}`,
-      });
+      checks.push(
+        makeCheck(
+          "introduced_by_pr",
+          "passed",
+          "introduced_by_pr_verified",
+          `added-line evidence ${canonicalPath}:${item.startLine}-${item.endLine} intersects added lines ${overlap.join(",")}`,
+        ),
+      );
       return { ok: true, checks, introducedByPr: true, basis };
     }
   }
@@ -112,11 +118,14 @@ export function validateAttribution(input: AttributionInput): AttributionResult 
         file: checked.path,
         lines: overlap,
       };
-      checks.push({
-        name: "introduced_by_pr",
-        passed: true,
-        detail: `deleted-line evidence ${checked.path}:${item.startLine}-${item.endLine} intersects deleted lines ${overlap.join(",")}, anchored at ${target.file}:${target.line}`,
-      });
+      checks.push(
+        makeCheck(
+          "introduced_by_pr",
+          "passed",
+          "introduced_by_pr_verified",
+          `deleted-line evidence ${checked.path}:${item.startLine}-${item.endLine} intersects deleted lines ${overlap.join(",")}, anchored at ${target.file}:${target.line}`,
+        ),
+      );
       return { ok: true, checks, introducedByPr: true, basis };
     }
   }

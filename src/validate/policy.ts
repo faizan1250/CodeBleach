@@ -1,6 +1,7 @@
 import type { Category, Finding, Severity } from "../types/index.ts";
 import type { ResolvedConfig } from "../config/schema.ts";
 import type { CheckResult } from "../types/validation.ts";
+import { makeCheck } from "./checks.ts";
 import { matchGlob } from "../utils/glob.ts";
 
 export type PolicyConfigGroup = "bugs" | "security" | "performance" | "concurrency";
@@ -46,7 +47,9 @@ export const SEVERITY_RANK: Record<Severity, number> = {
   critical: 4,
 };
 
-// interim: P5-08 owns stable codes
+// Stable check names; P5-08 owns the code set (category_disabled,
+// rule_id_unknown, rule_path_mismatch, severity_below_threshold,
+// confidence_below_threshold).
 export type PolicyCheckName = "category_policy" | "rule_policy" | "severity_policy" | "confidence_policy";
 
 export interface EffectivePolicy {
@@ -113,46 +116,59 @@ export function resolveEffectivePolicy(config: ResolvedConfig, canonicalPath: st
 export function validatePolicy(input: PolicyInput): PolicyResult {
   const { finding, canonicalPath, config } = input;
   const checks: CheckResult[] = [];
-  const fail = (name: PolicyCheckName, detail: string): PolicyFailure => {
-    checks.push({ name, passed: false, detail });
+  const fail = (name: PolicyCheckName, code: CheckResult["code"], detail: string): PolicyFailure => {
+    checks.push(makeCheck(name, "failed", code, detail));
     return { ok: false, checks };
   };
 
   const effective = resolveEffectivePolicy(config, canonicalPath);
   const group = CATEGORY_POLICY_GROUP[finding.category];
   if (group === "convention") {
-    checks.push({ name: "category_policy", passed: true, detail: "convention has no toggle; category gate passes" });
+    checks.push(
+      makeCheck("category_policy", "passed", "category_enabled", "convention has no toggle; category gate passes"),
+    );
   } else {
     if (!effective.categories[group]) {
-      return fail("category_policy", `category ${finding.category} is disabled via the ${group} toggle`);
+      return fail(
+        "category_policy",
+        "category_disabled",
+        `category ${finding.category} is disabled via the ${group} toggle`,
+      );
     }
-    checks.push({ name: "category_policy", passed: true });
+    checks.push(makeCheck("category_policy", "passed", "category_enabled"));
   }
 
   let effectiveSeverity: Severity = finding.severity;
   if (finding.ruleId !== undefined) {
     const rule = config.rules.find((candidate) => candidate.id === finding.ruleId);
     if (rule === undefined) {
-      return fail("rule_policy", `unknown ruleId ${JSON.stringify(finding.ruleId)}`);
+      return fail("rule_policy", "rule_id_unknown", `unknown ruleId ${JSON.stringify(finding.ruleId)}`);
     }
     if (rule.paths !== undefined && rule.paths.length > 0) {
       const applies = rule.paths.some((pattern) => matchGlob(canonicalPath, pattern));
       if (!applies) {
-        return fail("rule_policy", `rule ${JSON.stringify(rule.id)} does not apply to ${canonicalPath}`);
+        return fail(
+          "rule_policy",
+          "rule_path_mismatch",
+          `rule ${JSON.stringify(rule.id)} does not apply to ${canonicalPath}`,
+        );
       }
     }
     if (rule.severity !== undefined) {
       effectiveSeverity = rule.severity;
-      checks.push({
-        name: "rule_policy",
-        passed: true,
-        detail: `rule ${JSON.stringify(rule.id)} applies; effective severity ${rule.severity} (model: ${finding.severity})`,
-      });
+      checks.push(
+        makeCheck(
+          "rule_policy",
+          "passed",
+          "rule_ok",
+          `rule ${JSON.stringify(rule.id)} applies; effective severity ${rule.severity} (model: ${finding.severity})`,
+        ),
+      );
     } else {
-      checks.push({ name: "rule_policy", passed: true, detail: `rule ${JSON.stringify(rule.id)} applies` });
+      checks.push(makeCheck("rule_policy", "passed", "rule_ok", `rule ${JSON.stringify(rule.id)} applies`));
     }
   } else {
-    checks.push({ name: "rule_policy", passed: true, detail: "no explicit rule claimed" });
+    checks.push(makeCheck("rule_policy", "passed", "rule_ok", "no explicit rule claimed"));
   }
 
   // Documented policy (.reviewer.yml.example): a violation may use the rule
@@ -162,24 +178,33 @@ export function validatePolicy(input: PolicyInput): PolicyResult {
   const severityThreshold =
     effective.severityThreshold ?? groupOverride?.severity_threshold ?? config.review.severity_threshold;
   if (SEVERITY_RANK[effectiveSeverity] < SEVERITY_RANK[severityThreshold]) {
-    return fail("severity_policy", `severity ${effectiveSeverity} is below threshold ${severityThreshold}`);
+    return fail(
+      "severity_policy",
+      "severity_below_threshold",
+      `severity ${effectiveSeverity} is below threshold ${severityThreshold}`,
+    );
   }
-  checks.push({
-    name: "severity_policy",
-    passed: true,
-    detail: `severity ${effectiveSeverity} meets ${severityThreshold}`,
-  });
+  checks.push(
+    makeCheck("severity_policy", "passed", "severity_ok", `severity ${effectiveSeverity} meets ${severityThreshold}`),
+  );
 
   const confidenceThreshold =
     effective.confidenceThreshold ?? groupOverride?.confidence_threshold ?? config.review.confidence_threshold;
   if (!(finding.confidence >= confidenceThreshold)) {
-    return fail("confidence_policy", `confidence ${finding.confidence} is below threshold ${confidenceThreshold}`);
+    return fail(
+      "confidence_policy",
+      "confidence_below_threshold",
+      `confidence ${finding.confidence} is below threshold ${confidenceThreshold}`,
+    );
   }
-  checks.push({
-    name: "confidence_policy",
-    passed: true,
-    detail: `confidence ${finding.confidence} meets ${confidenceThreshold}`,
-  });
+  checks.push(
+    makeCheck(
+      "confidence_policy",
+      "passed",
+      "confidence_ok",
+      `confidence ${finding.confidence} meets ${confidenceThreshold}`,
+    ),
+  );
 
   return { ok: true, checks, effectiveSeverity };
 }
