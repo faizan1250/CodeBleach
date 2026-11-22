@@ -140,6 +140,8 @@ Ordered; cheap/deterministic first. Any hard failure → reject. Deterministic-o
 
 **Cancellation (ADR 0034):** an optional caller `AbortSignal` threads `PipelineInput.signal` → `ValidationEngine.validate` → location/evidence reads → the underlying Git subprocess (`runProcess` kills and reaps on abort). Aborted reads are the typed `"aborted"` status and always resolve to `inconclusive` (never accepted); timeout/output-limit/protocol failures keep their own outcomes. The reader is still released (`clear()`) on cancel. The CLI wires no caller signal, so cancellation is programmatic-only in v1.
 
+**Accepted invariant (ADR 0035):** publish eligibility needs the complete invariant — status `accepted` plus a valid head-side `derivedTarget` plus `derivedAttribution.introducedByPr: true` with a defined valid `AttributionBasis`. `isAcceptedFinding` enforces all of it (status alone never passes); the pipeline fails closed (`INTERNAL`, nothing published or counted) on any status-`accepted` item that fails the guard. Size diagnostics keep their typed kind: `per-file-limit` names the per-file byte cap, `cumulative-limit` names the total run cap, both preserving typed byte counts/limits; untyped cap wording and transport output-limit still propagate as stage failures, never content-size statuses.
+
 ### 4.5 GitHub Publisher (`src/github`)
 - One `pulls.createReview` call (`event: "COMMENT"`) with `comments[]` + summary body; `commit_id` = head SHA.
 - If a comment 422s (bad position), drop it and list it in the summary instead of failing the review.

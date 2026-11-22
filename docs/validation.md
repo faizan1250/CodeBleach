@@ -17,8 +17,14 @@ It does not prove the semantic bug claim is correct.
 or a same-run duplicate), `inconclusive` (required evidence/source data is
 unavailable, ambiguous, truncated, or exceeds a bound). Rejected and
 inconclusive findings persist in `run.json`; only `accepted` findings reach
-`Publisher.publish`. The CLI prints counts plus a `run.json` pointer — never
-evidence quotes or source text.
+`Publisher.publish`. Accepted additionally requires the complete publish
+invariant: a valid head-side `derivedTarget` plus `derivedAttribution` with
+`introducedByPr: true` and a defined valid `AttributionBasis` (ADR 0035) —
+status alone never publishes, and the pipeline fails closed (`INTERNAL`,
+nothing published or counted) on a status-`accepted` item missing any part.
+The CLI prints counts plus a `run.json` pointer — never evidence quotes or
+source text. When `run.json` itself is unreadable, the CLI warns on stderr
+naming the configured artifact path (never contents or counts).
 
 ## Check results
 
@@ -81,6 +87,11 @@ Check families (`name`) and codes:
   (`EVIDENCE_MAX_QUOTE_CHARS`), 50 cited lines per item
   (`EVIDENCE_MAX_LINE_SPAN`). Oversized claims fail instead of being
   silently truncated.
+- Size diagnostics keep their typed kind: `per-file-limit` names the
+  per-file byte cap, `cumulative-limit` names the total run cap, both
+  preserving byte counts/limits; untyped cap wording and transport
+  output-limit propagate as failures, never size statuses
+  (`snapshot_size_limit`, still `inconclusive`).
 
 ## Location targets
 
