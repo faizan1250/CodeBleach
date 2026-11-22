@@ -857,17 +857,25 @@ conflict candidate, never added to `ValidatedFinding` or `run.json`.
 | both-sides-identical | n/a (inconclusive in validation) | n/a — never reaches conflict | n/a |
 | cited-only, unverified | none | none | NO — never treated as exact |
 
-**Metadata-internal rule.** The conflict step persists ONLY ids, canonical
-paths, symbol names, head line intervals, and counts in `run.json`
-diagnostics (existing v2 shape — counts/diagnostics fields, no new
-fields). NO evidence quotes/excerpts, NO secrets, NO snapshot text, NO
-source. Verified locations beyond side/path/actual-lines stay
-orchestration-transient (as in Phase 5, where they are fed to attribution
-then dropped). Unmappable findings are recorded as excluded-by-rule
-(count), never expanded into a manufactured conflict. **No prose
-similarity, ever:** title/description/category are not compared (model
-prose is untrusted and non-deterministic); same prose at disjoint locations
-is NOT a conflict.
+**Metadata-internal rule (transient-only, ADR 0041).** The conflict step
+persists NO per-finding conflict metadata in `run.json`: no per-finding
+ids, canonical paths, symbol names, head line intervals, or counts in
+`run.json` diagnostics. `run.json` v2 is unchanged (existing aggregate
+`validationSummary` counts only, no new fields). Conflict outcome is
+transient-only: aggregate counts + stable codes on the
+orchestration-internal `AdvisoryExecutionResult.conflictMetadata`
+(`suppressed` / `advisoryDuplicates` / `unmappableExcluded` counts plus a
+closed stable code set, no prose), surfaced through bounded logger
+aggregates via the actual `src/core/logger.ts` interface (stderr JSON,
+redacted). Per-finding detail (ids, paths, symbols, head intervals, and
+the run-scoped §5.5 handoff envelope carrying verified actuals) stays
+function-local, keyed by `findingId`, and is discarded after the run —
+never written to `run.json`. NO evidence quotes/excerpts, NO secrets, NO
+snapshot text, NO source — anywhere. Unmappable findings contribute only
+an aggregate excluded-by-rule count, never a manufactured conflict.
+**No prose similarity, ever:** title/description/category are not
+compared (model prose is untrusted and non-deterministic); same prose at
+disjoint locations is NOT a conflict.
 
 ### Conflict acceptance matrix (12 — each a test in P6-04/P6-05/§6)
 
@@ -900,9 +908,12 @@ is NOT a conflict.
   the naive comparator would have merged and the canonical one does not).
 - **C11** Advisory-advisory same A–E identity ⇒ collapse to first in
   deterministic winner order + bounded diagnostic; primary set untouched.
-- **C12** Metadata + prose guards: conflict diagnostics carry
-  ids/paths/symbol/lines/counts ONLY (assert no quote/excerpt/secret/
-  snapshot text in `run.json` conflict records); identical titles/
+- **C12** Metadata + prose guards: `run.json` carries NO per-finding
+  conflict metadata (assert byte-identical artifact with/without
+  conflicts beyond the unchanged aggregate `validationSummary`);
+  transient orchestration `conflictMetadata` holds aggregate counts +
+  stable codes ONLY (assert no quote/excerpt/secret/snapshot text in
+  bounded logger output); identical titles/
   descriptions at disjoint locations ⇒ both kept (prose never compared).
 
 ### 5.5 Validation metadata handoff envelope (Blocker A)
@@ -953,7 +964,9 @@ canonical path + fallback symbol resolved pre-validate so the conflict
 resolver (`§5.4` rules A–E) receives entry + `ValidatedFinding`
 (`derivedTarget`) jointly without re-derivation; discarded after run
 (function-local / run-scoped object, no module-global, no file, no
-cross-run cache).
+cross-run cache). The envelope (per-finding, internal carrier) and the
+result `conflictMetadata` (aggregate counts + codes) are separate objects;
+neither persists to `run.json`.
 
 **Constraints:** `ValidatedFinding` unchanged (no locations field);
 `validate()` consumer contract preserved where feasible (primary call
