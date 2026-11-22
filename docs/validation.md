@@ -6,7 +6,7 @@ calls; `ValidatedFinding.llmVerdict` stays absent. Decisions: ADR 0028
 (decision matrix), ADR 0029 (result contract, artifact v2), ADR 0030 (P5-10
 hardening), ADRs 0040–0042 (Phase 6 advisory/merge/handoff/API integration,
 planning-only). Plan: `implementation-phase5.md` + `implementation-phase6.md`
-§§5–5.5 (normative; not duplicated here).
+§§4–13 (normative; not duplicated here).
 
 Limitation on record: deterministic validation proves a finding is
 structurally valid, tied to the PR, accurately located, and evidence-grounded.
@@ -178,22 +178,26 @@ still fails `NOT_IMPLEMENTED` (no GitHub calls). `--no-llm`: review,
 validation, and publish are skipped with explicit reasons (offline preview).
 Demo uses its own canned engine and never touches git or the network.
 
-## Inferred conventions (Phase 6, planning-only)
+## Inferred conventions (Phase 6, P6-00 contracts locked)
 
 Inferred conventions are advisory review input only — never validation
 evidence. Validation checks, codes, and statuses are unchanged by Phase 6
-(see ADR 0039 and `implementation-phase6.md` §§5–5.4): advisory findings
-arrive via a SEPARATE validation run under the isolated §5.2 policy
+(see ADR 0039 and `implementation-phase6.md` §§4–13): advisory findings
+arrive via a SEPARATE validation run under the isolated §10.2 policy
 (internal advisory entry sharing the per-finding core, batch deferred —
-§5.3.1, ADR 0042; severity threshold pinned to `low`, no inherited path thresholds,
+plan §§10–12, ADRs 0042–0043 with the ADR 0043 entry shape:
+`ConventionAdvisoryUnit[]` in, `PendingAdvisoryCandidate[]` out,
+finalization only after all advisory filters; severity threshold pinned
+to `low`, no inherited path thresholds,
 confidence bar preserved, convention gate kept, no `ruleId`), merge in
-their own domain with the named advisory cap at orchestration (§5.3 order
-1–9, never a combined cap), and lose explicit conflicts under the §5.4
-head-coordinate contract (verified head actuals only; base evidence maps
-solely via exact one-to-one diff correspondence; unmappable excluded; no
+their own domain with the named advisory cap at orchestration (plan §12
+order 1–9, never a combined cap), and lose explicit conflicts under the
+§11 verified-head-interval contract (same canonical path plus overlapping
+verified head-side intervals only; no symbol, title, fingerprint, rename,
+or base-to-head mapping; unmappable excluded; no
 manufactured conflict; conflict metadata carries aggregate counts +
-stable codes only, no per-finding records). Verified locations ride the run-scoped §5.5 handoff envelope
-(`findingId`/canonical path/fallback symbol/verified actuals, discarded
+stable codes only, no per-finding records). Verified locations ride the run-scoped §4.2 handoff envelope
+(`findingId`/`headLocations` with `[]` valid as no-overlap, discarded
 after run; `ValidatedFinding` and `run.json` v2 unchanged — ADR 0041).
 Conflict/advisory diagnostics are transient-only (orchestration return +
 bounded logger aggregates; no `run.json` per-finding conflict records).
