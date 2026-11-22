@@ -214,7 +214,7 @@ export interface ReviewUnit {
   diff: ReviewUnitDiff;        // only the budgeted whole hunks for this unit
   symbol: ChangedSymbol;
   context: ContextItem[];
-  rules: Rule[];               // explicit first, inferred second (flagged)
+  rules: Rule[];               // explicit only; inferred travels on a separate advisory carrier (Phase 6 plan, ADR 0039)
 }
 export interface ReviewUnitFile {
   path: string; oldPath: string | null;
@@ -306,7 +306,7 @@ export interface ValidatedFinding {
 
 **Two knowledge sources, strictly ranked:**
 - **Explicit** (`.reviewer.yml`): authoritative. Injected as numbered rules with ids (`rule:arch-001`). Findings may cite `ruleId`. Rule violations may be reported at the rule's severity.
-- **Inferred** (Phase 6): derived by deterministic scans (naming/export patterns, error-handling idioms, test layout, common wrappers). Stored as `{pattern, evidence files, support ratio}`; only patterns with high support are kept. Injected in a separate "advisory" section. **Inferred knowledge can never raise severity, never be the sole basis for a finding above `low`, and never override an explicit rule.** Cache in `.reviewer-cache/inferred.json` keyed by hash of sampled file list; restore via `actions/cache`; refresh when the key changes. This is a cache, not "learning".
+- **Inferred** (Phase 6, planning-only — ADR 0039, plan `implementation-phase6.md`): derived by deterministic scans (naming/export patterns, error-handling idioms, test layout, common wrappers), each with a locked eligibility predicate. Stored as `{pattern, evidence[{file,startLine,endLine}], matching/eligible/sampled counts, supportRatio = matching/eligible}`; only high-support patterns are kept. Injected via a SEPARATE convention-advisory pass with bounded context, labeled advisory. **App-enforced invariants (not prompt obedience): advisory output is `convention`-category ONLY at severity ≤ `low`, provenance stamped by orchestration, deterministic merge never alters primary findings, inferred `inf-*` ids are never valid `ruleId`, explicit wins on conflict.** Cache in `.reviewer-cache/inferred.json` keyed by hash of sampled OIDs + detector versions + schema + sampling-policy version; restore via `actions/cache`; refresh when the key changes. This is a cache, not "learning".
 
 **Schema v1 (strict):**
 
@@ -505,7 +505,7 @@ evals/                 cases/, run.ts   (Phase 8)
 | 3 Context Engine | TS adapter, definitions, callers, callees, tests, ranking, budget | `ReviewUnit`s for a fixture repo contain expected items within budget |
 | 4 Review Engine | OpenCode spike → provider, prompts, Zod parse, repair retry, result/usage/artifact | Done (P4-10, ADR 0020): deterministic seeded-bug smoke green, garbage/incomplete handled, suite + types green, x-plat CI |
 | 5 Validation | Deterministic checks, same-run dedupe (no LLM check in v1) | Hallucinated file/line/evidence rejected in tests |
-| 6 Repo awareness | Rules → prompt, path overrides, inferred conventions + cache | Explicit rules affect prompts; inferred never overrides |
+| 6 Repo awareness | Rules → prompt, path overrides, inferred conventions + cache (planning-only, ADR 0039) | Explicit rules affect prompts; inferred advisory-only via separate pass, never overrides |
 | 7 GitHub | Octokit publisher, workflow, dedupe markers, SHA recheck | Real PR gets correct inline comments, no dupes on re-push |
 | 8 Eval/optimize | Eval harness, baselines, caching, incremental review | Precision/cost tracked per change |
 

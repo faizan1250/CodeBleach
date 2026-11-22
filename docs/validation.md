@@ -169,3 +169,9 @@ Live without `--dry-run`: validation runs, then the Phase 7 publisher stub
 still fails `NOT_IMPLEMENTED` (no GitHub calls). `--no-llm`: review,
 validation, and publish are skipped with explicit reasons (offline preview).
 Demo uses its own canned engine and never touches git or the network.
+
+## Inferred conventions (Phase 6, planning-only)
+
+Inferred conventions are advisory review input only — never validation
+evidence. Validation checks, codes, and statuses are unchanged by Phase 6
+(see ADR 0039 and `implementation-phase6.md` §5).
