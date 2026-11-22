@@ -76,8 +76,8 @@ Check families (`name`) and codes:
   the snapshot side. Fully-deleted files have no head-side target and are
   never accepted for inline publication.
 - Quote comparison is `normalizeQuoteForFingerprint(redactSource(text, path))`
-  on both sides — CRLF/CR→LF plus horizontal-whitespace collapse,
-  case-sensitive. No fuzzy matching. Exact cited-range match first, then a
+  on both sides — CRLF/CR→LF plus all-whitespace-runs-to-single-space
+  collapse (newlines included), case-sensitive. No fuzzy matching. Exact cited-range match first, then a
   bounded ±3-line neighborhood fallback (`EVIDENCE_SEARCH_RADIUS`) that
   redacts the window as one source string and searches the normalized quote
   as a literal substring (partial first/last lines and multiline spans
@@ -87,14 +87,20 @@ Check families (`name`) and codes:
   over cached lines, ADR 0038; supersedes the ADR 0037 probe design, which
   was never implemented — no `isSecretFragment`, no scan radius) then
   rejects any exact or fallback match whose span is a fragment of a PEM
-  block: every BEGIN/END occurrence is scanned in source order (multiple
-  per line included), sequential completes verify only on full coverage,
+  block: the index covers the whole snapshot (single combined delimiter
+  scan in source order, no per-line sort), so PEM protection does not
+  depend on the ±3 window; every BEGIN/END occurrence is scanned in source
+  order (multiple per line included), sequential completes verify only on
+  full coverage,
   and trailing-BEGIN, orphan-END, and unterminated-to-EOF shapes stay
-  fail-closed. Full-block quotes still verify; suspect matches fail
+  fail-closed. Other `TOKEN_PATTERNS` rely on the full-window redaction gate
+  alone (ADR 0036 limitation, unchanged) — no universal-detection claim.
+  Full-block quotes still verify; suspect matches fail
   closed as `evidence_quote_not_found`. No occurrence
   is a mismatch, one distinct range verifies at its actual lines, and
   several distinct ranges are ambiguous (`evidence_side_ambiguous`, never
-  accepted). Each item records a verified location (side, canonical path,
+  accepted; zero minima is defensive-ambiguous, unreachable since the whole
+  window always explains a gated match). Each item records a verified location (side, canonical path,
   actual matched lines) that attribution intersects — never the
   model-cited range.
 - Bounds: at most 8 evidence items per finding
