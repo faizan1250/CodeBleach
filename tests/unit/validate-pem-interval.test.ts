@@ -34,7 +34,11 @@ const LONE_THEN_COMPLETE = [BEGIN, "X-01-QQQQ1111RRRR2222", BEGIN, "Y-01-SSSS333
 // A trailing BEGIN after BEGIN..END on one line stays open to EOF; the
 // per-line boolean builder drops it and verifies the tail.
 const SAME_LINE_TRAILING = [`${BEGIN} ${A1} ${END} ${BEGIN}`, "TAIL-01-ZZZZ1111WWWW2222"].join("\n");
-const SAME_LINE_TRAILING_GAP = [`${BEGIN} ${A1} ${END} ${BEGIN}`, "// ordinary comment", "TAIL-06-QQQQ1111RRRR2222"].join("\n");
+const SAME_LINE_TRAILING_GAP = [
+  `${BEGIN} ${A1} ${END} ${BEGIN}`,
+  "// ordinary comment",
+  "TAIL-06-QQQQ1111RRRR2222",
+].join("\n");
 const SAME_LINE_END_BEGIN = ["code-top()", `${END} ${BEGIN}`, "TAIL-02-AAAA1111BBBB2222"].join("\n");
 const SAME_LINE_PAYLOAD_AFTER_BEGIN = `${BEGIN} ${A1} ${END} ${BEGIN} TAIL-03-CCCC3333DDDD4444`;
 const SAME_LINE_TWO_COMPLETE = `${BEGIN} ${A1} ${END} ${BEGIN} ${B1} ${END}`;
@@ -410,14 +414,20 @@ describe("pem interval same-line", () => {
 
   test("two complete blocks one line verify", async () => {
     const result = await validateEvidence(
-      inputFor([{ file: "src/a.ts", startLine: 1, endLine: 1, quote: SAME_LINE_TWO_COMPLETE }], readerFor(SAME_LINE_TWO_COMPLETE)),
+      inputFor(
+        [{ file: "src/a.ts", startLine: 1, endLine: 1, quote: SAME_LINE_TWO_COMPLETE }],
+        readerFor(SAME_LINE_TWO_COMPLETE),
+      ),
     );
     expect(result.ok).toBe(true);
   });
 
   test("multiple BEGINs one END same line reject", async () => {
     const result = await validateEvidence(
-      inputFor([{ file: "src/a.ts", startLine: 1, endLine: 1, quote: SAME_LINE_MULTI_BEGIN }], readerFor(SAME_LINE_MULTI_BEGIN)),
+      inputFor(
+        [{ file: "src/a.ts", startLine: 1, endLine: 1, quote: SAME_LINE_MULTI_BEGIN }],
+        readerFor(SAME_LINE_MULTI_BEGIN),
+      ),
     );
     rejects(result);
   });
