@@ -23,8 +23,9 @@ export const EVIDENCE_SEARCH_RADIUS = 3;
 // enforced): sequential completes verify; multi-BEGIN-before-END,
 // END-then-BEGIN, BEGIN-END-BEGIN, and trailing/orphan END cases reject
 // (fail-closed where the regex view diverges — security over permissiveness).
-const PEM_BEGIN_RE = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/g;
-const PEM_END_RE = /-----END [A-Z0-9 ]*PRIVATE KEY-----/g;
+// One combined delimiter scan: matchAll yields matches in source order, so
+// no per-line sort is needed to interleave BEGIN/END occurrences.
+const PEM_DELIMITER_RE = /-----(BEGIN|END) [A-Z0-9 ]*PRIVATE KEY-----/g;
 
 interface PemInterval {
   startLine: number;
@@ -39,9 +40,9 @@ function buildPemIntervals(lines: readonly string[]): PemInterval[] {
   for (let line = 1; line <= lines.length; line += 1) {
     const text = lines[line - 1] ?? "";
     const events: Array<{ index: number; begin: boolean }> = [];
-    for (const match of text.matchAll(PEM_BEGIN_RE)) events.push({ index: match.index ?? 0, begin: true });
-    for (const match of text.matchAll(PEM_END_RE)) events.push({ index: match.index ?? 0, begin: false });
-    events.sort((a, b) => a.index - b.index);
+    for (const match of text.matchAll(PEM_DELIMITER_RE)) {
+      events.push({ index: match.index ?? 0, begin: match[1] === "BEGIN" });
+    }
     for (const event of events) {
       if (event.begin) {
         open.push(line);

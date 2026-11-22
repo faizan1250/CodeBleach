@@ -507,3 +507,62 @@ describe("pem interval same-line engine", () => {
     for (const token of [A1, TAIL]) expect(details.includes(token)).toBe(false);
   });
 });
+
+describe("pem interval linear scan", () => {
+  test("many sequential completes verify", async () => {
+    const text = [BEGIN, A1, END, BEGIN, B1, END, BEGIN, A2, END, BEGIN, B2, END].join("\n");
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 1, endLine: 12, quote: text }], readerFor(text)),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  test("many occurrences one line verify", async () => {
+    const text = `${BEGIN} ${A1} ${END} ${BEGIN} ${B1} ${END} ${BEGIN} ${A2} ${END}`;
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 1, endLine: 1, quote: text }], readerFor(text)),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  test("trailing BEGIN after many one-line completes rejects", async () => {
+    const text = `${BEGIN} ${A1} ${END} ${BEGIN} ${B1} ${END} ${BEGIN} TAIL-07-AAAA1111BBBB2222`;
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 1, endLine: 1, quote: "TAIL-07-AAAA1111BBBB2222" }], readerFor(text)),
+    );
+    rejects(result);
+  });
+
+  test("alternating END BEGIN markers reject", async () => {
+    const text = [END, BEGIN, "ALT-01-AAAA1111BBBB2222", END].join("\n");
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 1, endLine: 4, quote: text }], readerFor(text)),
+    );
+    rejects(result);
+  });
+
+  test("multiple orphan ENDs reject", async () => {
+    const text = ["code-top()", END, "MID-09-AAAA1111BBBB2222", END, "code-bot()"].join("\n");
+    const quote = [END, "MID-09-AAAA1111BBBB2222", END].join("\n");
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 2, endLine: 4, quote }], readerFor(text)),
+    );
+    rejects(result);
+  });
+
+  test("multiple BEGINs before END reject", async () => {
+    const text = [BEGIN, BEGIN, "STACK-01-AAAA1111BBBB2222", END].join("\n");
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 1, endLine: 4, quote: text }], readerFor(text)),
+    );
+    rejects(result);
+  });
+
+  test("sequential completes plus trailing BEGIN reject", async () => {
+    const text = [BEGIN, A1, END, BEGIN, B1, END, BEGIN, "TAIL-05-CCCC3333DDDD4444"].join("\n");
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 8, endLine: 8, quote: "TAIL-05-CCCC3333DDDD4444" }], readerFor(text)),
+    );
+    rejects(result);
+  });
+});
