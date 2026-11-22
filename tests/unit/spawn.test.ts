@@ -99,6 +99,43 @@ describe("runProcess failures", () => {
     expect(details?.reason).toBe("abort");
   });
 
+  test("pre-aborted signal rejects without spawning", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const error = await runProcess({
+      cmd: [BUN, "-e", "process.stdout.write('must never run');"],
+      signal: controller.signal,
+    }).then(
+      () => null,
+      (caught: unknown) => caught,
+    );
+    const { code, details } = failureOf(error);
+    expect(code).toBe("GIT_FAILED");
+    expect(details?.reason).toBe("abort");
+  });
+
+  test("abort kills and reaps the child promptly", async () => {
+    const controller = new AbortController();
+    const started = Date.now();
+    const pending = runProcess({
+      cmd: [BUN, "-e", "await new Promise((r) => setTimeout(r, 30000));"],
+      timeoutMs: 20000,
+      signal: controller.signal,
+    });
+    setTimeout(() => controller.abort(), 50);
+    const error = await pending.then(
+      () => null,
+      (caught: unknown) => caught,
+    );
+    // Settling quickly proves the child was killed and reaped: runProcess
+    // awaits the pump and proc.exited before rejecting, so a lingering child
+    // would hold this open for the full 30s sleep.
+    expect(Date.now() - started).toBeLessThan(10000);
+    const { code, details } = failureOf(error);
+    expect(code).toBe("GIT_FAILED");
+    expect(details?.reason).toBe("abort");
+  });
+
   test("rejects an empty cmd as INTERNAL", async () => {
     const error = await runProcess({ cmd: [] }).then(
       () => null,

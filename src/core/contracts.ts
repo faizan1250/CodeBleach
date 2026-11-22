@@ -46,7 +46,13 @@ export interface ValidationEngine {
     diff: DiffResult,
     units: ReviewUnit[],
     config: ResolvedConfig,
+    options?: ValidationOptions | undefined,
   ): Promise<ValidatedFinding[]>;
+}
+
+/** Optional per-run caller cancellation; forwarded to every snapshot Git read. */
+export interface ValidationOptions {
+  signal?: AbortSignal | undefined;
 }
 
 export interface Publisher {
@@ -91,6 +97,12 @@ export interface PipelineInput {
   /** Single execution id, minted once by the CLI and shared by logger + artifact. */
   runId: string;
   secrets?: string[] | undefined;
+  /**
+   * Optional per-run caller cancellation. The pipeline forwards it to
+   * validation snapshot reads; the CLI does not yet wire a caller signal,
+   * so cancellation today comes only from programmatic pipeline use.
+   */
+  signal?: AbortSignal | undefined;
   /**
    * Per-run environment for the LLM preflight (consent/key checks). Defaults
    * to process.env; tests pass explicit maps. Ignored when the review engine

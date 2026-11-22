@@ -49,6 +49,8 @@ export interface EvidenceInput {
   /** P5-02 head-side identity; old-path evidence still reads the merge-base side. */
   canonicalPath: string;
   reader: ValidationSnapshotReader;
+  /** Caller cancellation, forwarded verbatim to every snapshot read. */
+  signal?: AbortSignal | undefined;
 }
 
 /** Symmetric comparison form: redactSource on both sides, then quote normalization. Case-sensitive. */
@@ -87,7 +89,7 @@ function unavailableCode(result: SnapshotReadResult): ValidationCheckCode {
  * never trusts the model boolean (P5-05 owns introduction).
  */
 export async function validateEvidence(input: EvidenceInput): Promise<EvidenceResult> {
-  const { finding, unit, changedFile, canonicalPath, reader } = input;
+  const { finding, unit, changedFile, canonicalPath, reader, signal } = input;
   const checks: CheckResult[] = [];
 
   if (finding.evidence.length === 0) {
@@ -178,7 +180,7 @@ export async function validateEvidence(input: EvidenceInput): Promise<EvidenceRe
   }
 
   const { head, deleted } = lineSets(changedFile);
-  const loadSide = createSideLoader(reader);
+  const loadSide = createSideLoader(reader, signal);
   let sawInconclusive: ValidationCheckCode | undefined;
   const resolved: VerifiedEvidenceLocation[] = [];
 
@@ -358,8 +360,10 @@ async function readSide(
   reader: ValidationSnapshotReader,
   side: EvidenceSide,
   path: string,
+  signal?: AbortSignal | undefined,
 ): Promise<{ text: string } | { result: SnapshotReadResult }> {
-  const result = side === "head" ? await reader.readHead(path) : await reader.readBase(path);
+  const readOptions = { signal };
+  const result = side === "head" ? await reader.readHead(path, readOptions) : await reader.readBase(path, readOptions);
   if (result.status !== "ok") return { result };
   return { text: result.text };
 }
@@ -370,13 +374,16 @@ async function readSide(
  * bounded window over the cached lines. */
 type LoadedSide = { lines: string[] } | { result: SnapshotReadResult };
 
-function createSideLoader(reader: ValidationSnapshotReader): (side: EvidenceSide, path: string) => Promise<LoadedSide> {
+function createSideLoader(
+  reader: ValidationSnapshotReader,
+  signal?: AbortSignal | undefined,
+): (side: EvidenceSide, path: string) => Promise<LoadedSide> {
   const cache = new Map<string, LoadedSide>();
   return async (side, path) => {
     const key = `${side}\u0000${path}`;
     const hit = cache.get(key);
     if (hit !== undefined) return hit;
-    const snapshot = await readSide(reader, side, path);
+    const snapshot = await readSide(reader, side, path, signal);
     const loaded: LoadedSide =
       "result" in snapshot ? snapshot : { lines: snapshot.text.length === 0 ? [] : snapshot.text.split("\n") };
     cache.set(key, loaded);

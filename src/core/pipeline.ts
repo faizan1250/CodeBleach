@@ -185,7 +185,7 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
     // tolerance is removed.
     const validatedList: ValidatedFinding[] = await runStage(
       "validation",
-      () => deps.validation.validate(findings, diffResult, contextResult.units, resolved),
+      () => deps.validation.validate(findings, diffResult, contextResult.units, resolved, { signal: input.signal }),
       (result) => result.filter(isAcceptedFinding).length,
     );
     validated = validatedList;

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { ConfigFileSchema } from "../../src/config/schema.ts";
+import { SnapshotReader, isGitAbort, isGitTimeout } from "../../src/context/snapshot.ts";
 import { ReviewerError } from "../../src/core/errors.ts";
 import type { DiffResult } from "../../src/types/index.ts";
 import { runProcess } from "../../src/utils/spawn.ts";
@@ -209,6 +210,39 @@ describe("validation snapshot against real commits", () => {
       await rm(missing, { recursive: true, force: true });
       const reader = readerFor(missing, "c".repeat(40), "d".repeat(40));
       await expect(reader.readHead("src/a.ts")).rejects.toThrow(ReviewerError);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("pre-aborted signal aborts real reads without poisoning the reader", async () => {
+    const { dir, cleanup } = await makeRepo();
+    try {
+      const base = await writeAndCommit(dir, { "src/a.ts": "const v = 1;\n" }, "base");
+      const reader = readerFor(dir, base, base);
+      const controller = new AbortController();
+      controller.abort();
+      expect((await reader.readHead("src/a.ts", { signal: controller.signal })).status).toBe("aborted");
+      expect((await reader.readHead("src/a.ts")).status).toBe("ok");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("pre-aborted signal rejects real SnapshotReader git calls as abort, not timeout", async () => {
+    const { dir, cleanup } = await makeRepo();
+    try {
+      const base = await writeAndCommit(dir, { "src/a.ts": "const v = 1;\n" }, "base");
+      const snapshot = new SnapshotReader({ repoRoot: dir, headSha: base, mergeBase: base });
+      const controller = new AbortController();
+      controller.abort();
+      const error = await snapshot.listHeadFiles({ signal: controller.signal }).then(
+        () => null,
+        (caught: unknown) => caught,
+      );
+      expect(isGitAbort(error)).toBe(true);
+      expect(isGitTimeout(error)).toBe(false);
+      expect((await snapshot.listHeadFiles()).has("src/a.ts")).toBe(true);
     } finally {
       await cleanup();
     }

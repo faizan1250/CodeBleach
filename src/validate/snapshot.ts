@@ -83,14 +83,22 @@ export interface ValidationSnapshotStats {
  * Narrow structural source behind the validation adapter. The production
  * source is the Phase 4 `SnapshotReader` (exact commit snapshots, never the
  * working tree); tests inject a scripted source with the same shape.
+ * The optional signal is the SAME AbortSignal the caller passed to the
+ * reader: the source must forward it to the underlying Git subprocess so
+ * in-flight reads are killed and reaped, never orphaned.
  */
 export interface ValidationSnapshotSource {
   readonly headSha: string;
   readonly mergeBase: string;
-  listHeadFiles(): Promise<Map<string, TreeEntry>>;
-  listBaseFiles(): Promise<Map<string, TreeEntry>>;
-  readBlobText(oid: string): Promise<string>;
+  listHeadFiles(options?: ValidationSourceReadOptions | undefined): Promise<Map<string, TreeEntry>>;
+  listBaseFiles(options?: ValidationSourceReadOptions | undefined): Promise<Map<string, TreeEntry>>;
+  readBlobText(oid: string, options?: ValidationSourceReadOptions | undefined): Promise<string>;
   stats(): { gitCalls: number };
+}
+
+/** Caller cancellation for one source read; the reader forwards its own signal verbatim. */
+export interface ValidationSourceReadOptions {
+  signal?: AbortSignal | undefined;
 }
 
 /**
@@ -220,7 +228,13 @@ export class GitValidationSnapshotReader implements ValidationSnapshotReader {
     const side: ValidationSnapshotSide = sha === this.headSha ? "head" : "base";
     let index: Map<string, TreeEntry>;
     try {
-      index = side === "head" ? await this.source.listHeadFiles() : await this.source.listBaseFiles();
+      // The SAME caller signal reaches the Git subprocess: abort kills and
+      // reaps the in-flight child, surfacing below as typed "aborted".
+      const sourceOptions = { signal: options?.signal };
+      index =
+        side === "head"
+          ? await this.source.listHeadFiles(sourceOptions)
+          : await this.source.listBaseFiles(sourceOptions);
     } catch (error) {
       if (isGitTimeout(error)) return { status: "timeout", reason: "snapshot index read timed out" };
       if (isGitAbort(error)) return { status: "aborted", reason: "snapshot index read aborted" };
@@ -236,7 +250,7 @@ export class GitValidationSnapshotReader implements ValidationSnapshotReader {
     }
     let text: string;
     try {
-      text = await this.source.readBlobText(entry.oid);
+      text = await this.source.readBlobText(entry.oid, { signal: options?.signal });
     } catch (error) {
       if (isGitTimeout(error)) return { status: "timeout", reason: "snapshot blob read timed out" };
       if (isGitAbort(error)) return { status: "aborted", reason: "snapshot blob read aborted" };
@@ -314,15 +328,28 @@ export class FakeValidationSnapshotReader implements ValidationSnapshotReader {
     }
   }
 
-  readHead(path: string): Promise<SnapshotReadResult> {
+  readHead(path: string, options?: ValidationSnapshotReadOptions | undefined): Promise<SnapshotReadResult> {
+    if (options?.signal?.aborted === true) {
+      return Promise.resolve({ status: "aborted", reason: "snapshot read aborted before the first Git call" });
+    }
     return Promise.resolve(this.lookup("head", path));
   }
 
-  readBase(path: string): Promise<SnapshotReadResult> {
+  readBase(path: string, options?: ValidationSnapshotReadOptions | undefined): Promise<SnapshotReadResult> {
+    if (options?.signal?.aborted === true) {
+      return Promise.resolve({ status: "aborted", reason: "snapshot read aborted before the first Git call" });
+    }
     return Promise.resolve(this.lookup("base", path));
   }
 
-  readAt(commitSha: string, path: string): Promise<SnapshotReadResult> {
+  readAt(
+    commitSha: string,
+    path: string,
+    options?: ValidationSnapshotReadOptions | undefined,
+  ): Promise<SnapshotReadResult> {
+    if (options?.signal?.aborted === true) {
+      return Promise.resolve({ status: "aborted", reason: "snapshot read aborted before the first Git call" });
+    }
     const sha = typeof commitSha === "string" ? commitSha.toLowerCase() : "";
     if (!FULL_SHA_PATTERN.test(sha)) {
       throw internal("ValidationSnapshotReader requires commitSha to be a full 40- or 64-character hex commit SHA");
