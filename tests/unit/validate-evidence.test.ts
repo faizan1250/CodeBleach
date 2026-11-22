@@ -844,6 +844,125 @@ describe("substring evidence matching (P1)", () => {
   });
 });
 
+describe("cross-line secret redaction fallback (P1)", () => {
+  const BLOCK = [
+    "// config",
+    "-----BEGIN PRIVATE KEY-----",
+    "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC",
+    "-----END PRIVATE KEY-----",
+    "// end",
+    "trailer()",
+  ].join("\n");
+  const BLOCK_QUOTE = [
+    "  -----BEGIN PRIVATE KEY-----",
+    "  MIIEvQIBADANBgkqhkiG9w0BAQEFAASC",
+    "  -----END PRIVATE KEY-----",
+  ].join("\n");
+
+  test("reindented PEM block verifies at its actual lines", async () => {
+    const result = await validateEvidence(
+      inputFor(
+        [{ file: "src/a.ts", startLine: 3, endLine: 3, quote: BLOCK_QUOTE }],
+        readerFor({ head: { "src/a.ts": ok(BLOCK) } }),
+      ),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([{ side: "head", path: "src/a.ts", startLine: 2, endLine: 4 }]);
+    }
+  });
+
+  test("payload fragment of a consumed block never verifies", async () => {
+    const result = await validateEvidence(
+      inputFor(
+        [{ file: "src/a.ts", startLine: 3, endLine: 3, quote: "MIIEvQIBADANBgkq" }],
+        readerFor({ head: { "src/a.ts": ok(BLOCK) } }),
+      ),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.inconclusive).toBe(false);
+      expect(result.checks.some((check) => check.code === "evidence_quote_not_found")).toBe(true);
+    }
+  });
+
+  test("header alone cannot stand in for the block range", async () => {
+    const result = await validateEvidence(
+      inputFor(
+        [{ file: "src/a.ts", startLine: 2, endLine: 4, quote: "-----BEGIN PRIVATE KEY-----" }],
+        readerFor({ head: { "src/a.ts": ok(BLOCK) } }),
+      ),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.inconclusive).toBe(false);
+      expect(result.checks.some((check) => check.code === "evidence_quote_not_found")).toBe(true);
+    }
+  });
+
+  test("partial quote outside the block still verifies", async () => {
+    const result = await validateEvidence(
+      inputFor(
+        [{ file: "src/a.ts", startLine: 1, endLine: 1, quote: "config" }],
+        readerFor({ head: { "src/a.ts": ok(BLOCK) } }),
+      ),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([{ side: "head", path: "src/a.ts", startLine: 1, endLine: 1 }]);
+    }
+  });
+
+  test("multiline span adjacent to the block reports actual lines", async () => {
+    const result = await validateEvidence(
+      inputFor(
+        [{ file: "src/a.ts", startLine: 3, endLine: 4, quote: "// end\ntrailer()" }],
+        readerFor({ head: { "src/a.ts": ok(BLOCK) } }),
+      ),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([{ side: "head", path: "src/a.ts", startLine: 5, endLine: 6 }]);
+    }
+  });
+
+  test("LF block quote verifies against a CRLF snapshot", async () => {
+    const result = await validateEvidence(
+      inputFor(
+        [{ file: "src/a.ts", startLine: 3, endLine: 3, quote: BLOCK_QUOTE }],
+        readerFor({ head: { "src/a.ts": ok(BLOCK.split("\n").join("\r\n")) } }),
+      ),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([{ side: "head", path: "src/a.ts", startLine: 2, endLine: 4 }]);
+    }
+  });
+
+  test("repeated redacted blocks are ambiguous", async () => {
+    const repeated = [
+      "-----BEGIN PRIVATE KEY-----",
+      "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC",
+      "-----END PRIVATE KEY-----",
+      "filler",
+      "-----BEGIN PRIVATE KEY-----",
+      "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC",
+      "-----END PRIVATE KEY-----",
+    ].join("\n");
+    const result = await validateEvidence(
+      inputFor(
+        [{ file: "src/a.ts", startLine: 4, endLine: 4, quote: BLOCK_QUOTE }],
+        readerFor({ head: { "src/a.ts": ok(repeated) } }),
+      ),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.inconclusive).toBe(true);
+      expect(result.checks.some((check) => check.code === "evidence_side_ambiguous")).toBe(true);
+    }
+  });
+});
+
 describe("matching cost (P2)", () => {
   test("many items on one snapshot share a single read and split", async () => {
     const total = 6000;

@@ -425,12 +425,12 @@ export class SnapshotReader {
 
   /** Head-side source for a tracked regular file; renames resolve via path at head. */
   async readHeadText(path: string, options?: SnapshotSignalOptions | undefined): Promise<string> {
-    return this.readTreePath(await this.listHeadFiles(options), path, "head");
+    return this.readTreePath(await this.listHeadFiles(options), path, "head", options);
   }
 
   /** Merge-base-side source for a tracked regular file; renames resolve via oldPath at base. */
   async readBaseText(path: string, options?: SnapshotSignalOptions | undefined): Promise<string> {
-    return this.readTreePath(await this.listBaseFiles(options), path, "base");
+    return this.readTreePath(await this.listBaseFiles(options), path, "base", options);
   }
 
   /** Blob content by object id, cached per reader; size-checked before reading. */
@@ -545,7 +545,12 @@ export class SnapshotReader {
     return parseGrepZ(stdout, `${this.head}:`);
   }
 
-  private async readTreePath(index: Map<string, TreeEntry>, path: string, label: string): Promise<string> {
+  private async readTreePath(
+    index: Map<string, TreeEntry>,
+    path: string,
+    label: string,
+    options?: SnapshotSignalOptions | undefined,
+  ): Promise<string> {
     if (typeof path !== "string" || path.length === 0) {
       throw internal(`SnapshotReader requires a non-empty repository path (${label})`);
     }
@@ -556,7 +561,8 @@ export class SnapshotReader {
         `path "${path}" in the ${label} tree is not a regular file (mode ${entry.mode}, type ${entry.type})`,
       );
     }
-    return this.readBlobText(entry.oid);
+    // The SAME caller options reach the blob subprocess; absent stays absent.
+    return this.readBlobText(entry.oid, options);
   }
 
   /**
