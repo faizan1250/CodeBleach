@@ -137,7 +137,8 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
       if (deps.phase6 === undefined) {
         throw new ReviewerError({
           code: "CONFIG_INVALID",
-          message: "convention advisory enabled without Phase 6 dependencies: explicit composition required, never silent downgrade",
+          message:
+            "convention advisory enabled without Phase 6 dependencies: explicit composition required, never silent downgrade",
         });
       }
       throw new ReviewerError({

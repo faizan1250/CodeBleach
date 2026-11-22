@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createLogger } from "../../src/core/logger.ts";
 import { runPipeline } from "../../src/core/pipeline.ts";
 import type { Phase6PipelineDeps } from "../../src/core/contracts.ts";
-import { ReviewerError } from "../../src/core/errors.ts";
+import type { ReviewerError } from "../../src/core/errors.ts";
 import { createFixtureEngines } from "../fixtures/stubs.ts";
 
 function testLogger() {

@@ -10,12 +10,7 @@ export const SAMPLING_POLICY_VERSION = 2;
 // Ranking hash domain: sha256(domain + NUL + canonicalPath), ascending.
 export const SAMPLING_HASH_DOMAIN = "codebleach-phase6-base-sampling-v2" as const;
 // First-cut population: already-supported JavaScript/TypeScript extensions.
-export const PHASE6_SAMPLED_EXTENSIONS: readonly [".js", ".jsx", ".ts", ".tsx"] = [
-  ".js",
-  ".jsx",
-  ".ts",
-  ".tsx",
-];
+export const PHASE6_SAMPLED_EXTENSIONS: readonly [".js", ".jsx", ".ts", ".tsx"] = [".js", ".jsx", ".ts", ".tsx"];
 
 // Support filtering and stable records (plan 7).
 export const MIN_SUPPORT_RATIO = 0.75;

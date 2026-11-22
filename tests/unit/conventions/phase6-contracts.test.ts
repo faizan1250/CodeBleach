@@ -146,9 +146,7 @@ describe("p6-00 advisory token counter", () => {
     const oversized = unit({ changedSymbolSource: `${"x".repeat(6000)}\n` });
     expect(fitsAdvisoryUnitBudget(oversized)).toBe(false);
     expect(fitsAdvisoryRequestBudget({ units: [oversized], conventions: [] })).toBe(true);
-    expect(
-      fitsAdvisoryRequestBudget({ units: [oversized, oversized, oversized], conventions: [] }),
-    ).toBe(false);
+    expect(fitsAdvisoryRequestBudget({ units: [oversized, oversized, oversized], conventions: [] })).toBe(false);
   });
 });
 

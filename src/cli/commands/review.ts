@@ -243,6 +243,19 @@ export async function printValidationSummary(outDir: string): Promise<void> {
   }
 }
 
+/**
+ * Phase 6 opt-in for the pipeline (P6-00, ADR 0043): live path only. Demo
+ * and --no-llm ignore the flag and run without a Phase 6 bundle, so
+ * forwarding it there would trip the pipeline preflight.
+ */
+export function pipelineConventionAdvisoryEnabled(options: {
+  conventionAdvisory?: boolean | undefined;
+  demo: boolean;
+  noLlm: boolean;
+}): boolean {
+  return options.conventionAdvisory === true && !options.demo && !options.noLlm;
+}
+
 async function runEngines(
   engines: {
     diff: GitDiffEngine | typeof demoDiffEngine;
@@ -268,6 +281,7 @@ async function runEngines(
         dryRun: options.dryRun,
         outDir: options.out,
         runId: options.runId,
+        options: { conventionAdvisoryEnabled: pipelineConventionAdvisoryEnabled(options) },
         secrets: options.secrets,
         env: options.env,
       },

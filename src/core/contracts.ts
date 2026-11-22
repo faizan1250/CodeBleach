@@ -4,7 +4,6 @@ import type {
   AcceptedValidatedFinding,
   AttributionBasis,
   ConventionAdvisoryBatchInput,
-  ConventionAdvisoryCandidate,
   ConventionAdvisoryProjectionResult,
   ConventionAdvisoryReviewResult,
   ConventionAdvisoryUnit,

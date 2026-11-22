@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runReview } from "../../src/cli/commands/review.ts";
+import { pipelineConventionAdvisoryEnabled, runReview } from "../../src/cli/commands/review.ts";
 import { createLogger } from "../../src/core/logger.ts";
 import { git, makeRepo } from "../helpers/git-repo.ts";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -125,5 +125,21 @@ describe("p6-00 --convention-advisory composition", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("p6-00 pipeline flag plumbing", () => {
+  test("live run forwards the flag", () => {
+    expect(pipelineConventionAdvisoryEnabled({ conventionAdvisory: true, demo: false, noLlm: false })).toBe(true);
+  });
+
+  test("flag off or absent stays disabled on the live path", () => {
+    expect(pipelineConventionAdvisoryEnabled({ conventionAdvisory: false, demo: false, noLlm: false })).toBe(false);
+    expect(pipelineConventionAdvisoryEnabled({ conventionAdvisory: undefined, demo: false, noLlm: false })).toBe(false);
+  });
+
+  test("demo and --no-llm never forward the flag", () => {
+    expect(pipelineConventionAdvisoryEnabled({ conventionAdvisory: true, demo: true, noLlm: false })).toBe(false);
+    expect(pipelineConventionAdvisoryEnabled({ conventionAdvisory: true, demo: false, noLlm: true })).toBe(false);
   });
 });
