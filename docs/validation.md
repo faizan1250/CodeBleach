@@ -82,12 +82,16 @@ Check families (`name`) and codes:
   redacts the window as one source string and searches the normalized quote
   as a literal substring (partial first/last lines and multiline spans
   included): cross-line secrets collapse exactly as on the exact path, so a
-  raw fragment of a consumed secret is absent and mismatches. A bounded
-   secret-delimiter guard (`isSecretFragment`, ±20-line probe over cached
-   lines, ADR 0037) additionally rejects any exact or fallback match whose
-   span is a fragment of a PEM block whose delimiters lie outside the span.
-   Full-block quotes still verify; suspect matches fail closed as
-   `evidence_quote_not_found`. No occurrence
+  raw fragment of a consumed secret is absent and mismatches. A
+  per-snapshot PEM interval index (`buildPemIntervals` + `isSecretSpan`
+  over cached lines, ADR 0038; supersedes the ADR 0037 probe design, which
+  was never implemented — no `isSecretFragment`, no scan radius) then
+  rejects any exact or fallback match whose span is a fragment of a PEM
+  block: every BEGIN/END occurrence is scanned in source order (multiple
+  per line included), sequential completes verify only on full coverage,
+  and trailing-BEGIN, orphan-END, and unterminated-to-EOF shapes stay
+  fail-closed. Full-block quotes still verify; suspect matches fail
+  closed as `evidence_quote_not_found`. No occurrence
   is a mismatch, one distinct range verifies at its actual lines, and
   several distinct ranges are ambiguous (`evidence_side_ambiguous`, never
   accepted). Each item records a verified location (side, canonical path,
