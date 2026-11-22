@@ -480,10 +480,13 @@ comparison: model prose is untrusted and non-deterministic):
   `finding.symbol ?? unit-symbol-name` on each side — a finding without its
   own symbol inherits its unit's symbol. Comparison after fallback is exact;
   no fuzzy matching.
-- **Overlapping target/evidence ranges:** resolved head-side target line plus
-  cited evidence spans; same canonical file sharing ≥ 1 line (shared-line
-  overlap, same safe direction as P5-07 `rangesOverlap`). Near-misses with no
-  shared line are NOT conflicts.
+- **Overlapping target/evidence ranges:** verified head-side coordinates
+  ONLY — the code-owned `derivedTarget` line plus VERIFIED actual evidence
+  ranges mapped to head coordinates per §5.4 (never model-cited ranges;
+  base-side locations map only via exact one-to-one diff correspondence,
+  unmappable evidence is excluded). Same canonical file sharing ≥ 1 head
+  line (shared-line overlap, same safe direction as P5-07 `rangesOverlap`).
+  Near-misses with no shared line are NOT conflicts.
 - **When conflicting:** same canonical path AND same fallback-resolved symbol
   AND overlapping ranges. Category and title are IGNORED (advisory is always
   `convention`, primary never is; titles are model prose).
@@ -492,8 +495,10 @@ comparison: model prose is untrusted and non-deterministic):
   safe direction; false merging would hide a defect).
 - **Renames:** head-side path is the identity; evidence citing the old path
   canonicalizes to it before comparison.
-- **Overlap calc:** interval intersection over `{target line} ∪ {evidence
-  spans}` per finding, same file only; ≥ 1 shared line ⇒ overlap.
+- **Overlap calc:** interval intersection over `{derivedTarget line} ∪
+  {head-mapped verified evidence spans}` per finding (§5.4 rule D), same
+  file only; ≥ 1 shared head line ⇒ overlap. Cited ranges that were not
+  verified contribute nothing — never treated as exact.
 - **Multi-primary:** an advisory finding conflicting with ANY retained primary
   finding is suppressed (one suppression record; the primary side is
   untouched).
@@ -692,6 +697,144 @@ only), NEVER a new `VALIDATION_CHECK_CODE` (closed set, §5 kind 5).
 - **M8** Conventions on/off ⇒ primary validated/deduped/capped set
   byte-identical (extends §5 cases 1–2 from prompt bytes to validated
   output).
+
+### 5.4 Canonical head-coordinate conflict contract (Blocker C)
+
+**Root cause (verified in tree).** The §5.1 identity needs head-canonical
+coordinates the current code does not hand it directly. Per-finding
+identity pieces exist — `canonicalPath` from P5-02 provenance, fallback
+symbol `finding.symbol ?? unit.symbol.name`, head-side `location.target`
+(`src/validate/engine.ts:169-175`) — and P5-07 precedent keys on
+canonical path + symbol + category + normalized title + overlap
+(`src/validate/dedupe.ts:163-180`, `rangesOverlap` `:108-116` over
+`candidateSpans` `:97-103`: target line ∪ evidence spans, same-file
+shared-line). But three gaps break a naive reuse: (1) base-side verified
+evidence spans use BASE line numbers (and possibly `oldPath`), while
+`derivedTarget` uses HEAD line numbers — direct line intersection across
+sides is meaningless without a head-mapping (`src/validate/evidence.ts`
+side routing `:305-392`; identical-both-sides stays
+`evidence_side_ambiguous` `:357-366`); (2) fallback verification records
+ACTUAL matched lines (`resolved` start/end, e.g. `:275-277,:367-380`),
+which can diverge from model-cited ranges — cited ranges are claims,
+actuals are coordinates; (3) `rangesOverlap` assumes same-side
+comparability (all-head targets). The conflict step therefore canonicalizes
+EVERYTHING to head coordinates under the rules below before any overlap is
+computed. No validator change: the inputs (verified locations with
+side + actual lines, §5.4 rule D) are carried on the orchestration-internal
+conflict candidate, never added to `ValidatedFinding` or `run.json`.
+
+**Canonical rules (normative, A–E):**
+
+- **A — Path: validated POSIX, rename → head, never raw model.** Conflict
+  path is `provenance.canonicalPath` (P5-02 validated). A rename's
+  `oldPath` spelling maps to the head-side path before comparison
+  (`oldPath` never forms a separate identity). The raw model
+  `finding.file` (unvalidated, possibly `./`-prefixed or otherwise
+  non-normal) is NEVER compared directly.
+- **B — Target: verified head `derivedTarget`, never cited.** Conflict
+  target is the code-owned P5-03 `location.target` (head side). Model-cited
+  `finding.line`/`endLine` are NEVER used — after the ±3-line fallback they
+  routinely differ from the verified anchor.
+- **C — Symbol: `finding.symbol ?? unit.symbol.name`, exact, no fuzzy,
+  missing explicit.** Comparison after fallback is exact string equality
+  (no case-folding beyond what provenance already normalizes, no
+  substring/fuzzy match). A finding carrying neither its own symbol nor a
+  resolvable unit symbol name is UNMAPPABLE for conflict purposes (excluded
+  from comparison, never force-matched) — in v1 units always carry symbols,
+  so this path is defensive-only and tested as such.
+- **D — Evidence: no base-vs-head direct compare; verified actuals only;
+  exact mapping or exclusion.** The overlap set per finding is
+  `{derivedTarget line} ∪ {head-mapped VERIFIED evidence spans}`:
+  - Head-side verified locations (`side == "head"`) contribute their ACTUAL
+    start/end lines as-is.
+  - Base-side verified locations map to head coordinates ONLY via exact
+    one-to-one diff correspondence: lines provably unchanged between
+    `mergeBase` and `head` (identical content carried by the same hunk
+    context, exact line-pair identity). No offset inference (no
+    line-number arithmetic across hunks), no deleted→head mapping
+    (deleted lines have NO head coordinate), no renamed-path arithmetic
+    beyond rule A.
+  - Replacement-overlap items that verified on ONE side only follow that
+    side's rule; items that matched identically on BOTH sides never reach
+    conflict (already `evidence_side_ambiguous` in validation, never
+    accepted).
+  - Unverified / cited-only ranges contribute NOTHING — never treated as
+    exact, never a fallback coordinate.
+  - Base-side evidence with NO exact head correspondent (deleted lines,
+    non-corresponding base lines) is UNMAPPABLE: excluded from the overlap
+    set. Exclusion means NO manufactured conflict — the advisory finding
+    survives the conflict step on that ground (still subject to every other
+    gate).
+- **E — Outcome: equal path + equal symbol + head-interval overlap ⇒
+  suppress advisory wholly.** All three required; category and title are
+  IGNORED (advisory is always `convention`, primary never is; titles are
+  model prose). Suppression is total (finding dropped, never partially
+  merged) with a bounded diagnostic (ids, canonical paths, symbol, head
+  line interval, counts). The primary is NEVER mutated: no annotation, no
+  re-rank, no merge of advisory text. Advisory-advisory identity uses the
+  SAME A–E contract between two advisories (first in deterministic winner
+  order retained, second drops as advisory-duplicate); primaries are never
+  involved.
+
+**Side-mapping table (conflict step only):**
+
+| Advisory evidence | Verified location | Head coordinate used | Usable? |
+|---|---|---|---|
+| head file (== canonical) | `side head`, actual lines | as-is | yes |
+| head context-only file | `side head`, actual lines | as-is (must equal primary canonical path to conflict) | yes, same file only |
+| rename oldPath, base side | `side base`, oldPath lines | oldPath → head canonical path; lines ONLY via exact one-to-one unchanged-context correspondence | only exact-mapped lines |
+| deleted lines, base side | `side base`, no head correspondent | none | NO — excluded, no manufactured conflict |
+| replacement overlap, one side | per that side's rule above | per that side's rule | per that side's rule |
+| both-sides-identical | n/a (inconclusive in validation) | n/a — never reaches conflict | n/a |
+| cited-only, unverified | none | none | NO — never treated as exact |
+
+**Metadata-internal rule.** The conflict step persists ONLY ids, canonical
+paths, symbol names, head line intervals, and counts in `run.json`
+diagnostics (existing v2 shape — counts/diagnostics fields, no new
+fields). NO evidence quotes/excerpts, NO secrets, NO snapshot text, NO
+source. Verified locations beyond side/path/actual-lines stay
+orchestration-transient (as in Phase 5, where they are fed to attribution
+then dropped). Unmappable findings are recorded as excluded-by-rule
+(count), never expanded into a manufactured conflict. **No prose
+similarity, ever:** title/description/category are not compared (model
+prose is untrusted and non-deterministic); same prose at disjoint locations
+is NOT a conflict.
+
+### Conflict acceptance matrix (12 — each a test in P6-04/P6-05/§6)
+
+- **C1** Same canonical path + same fallback symbol + shared
+  `derivedTarget` head line ⇒ advisory suppressed wholly, primary
+  byte-identical.
+- **C2** Targets disjoint but a head-side VERIFIED evidence span shares a
+  head line with the primary interval ⇒ suppressed (evidence overlap
+  counts when verified).
+- **C3** Near-miss: intervals adjacent but sharing NO head line ⇒ both kept
+  (false separation is the safe direction).
+- **C4** Same lines, different fallback-resolved symbols ⇒ both kept
+  (distinct defects, even adjacent).
+- **C5** Rename: advisory evidence cites `oldPath`, primary cites head path,
+  same symbol, mapped overlap ⇒ same identity, advisory suppressed.
+- **C6** Raw-path spelling (`./` prefix / non-normal vs canonical) with
+  overlap ⇒ canonicalized first, advisory suppressed (raw strings never
+  compared).
+- **C7** Cited-vs-actual divergence: cited ranges overlap but verified
+  ACTUALS are disjoint ⇒ both kept; conversely cited disjoint but actuals
+  overlap ⇒ suppressed. Actuals govern in both directions.
+- **C8** Base-side advisory evidence with an exact one-to-one
+  unchanged-context head correspondent overlapping the primary interval ⇒
+  suppressed (mapped overlap is real overlap).
+- **C9** Base-side evidence on deleted lines (no head correspondent) ⇒
+  unmappable, excluded, NO manufactured conflict — advisory survives the
+  conflict step.
+- **C10** Same line NUMBER on opposite sides with NO exact mapping proven
+  ⇒ no conflict (offset/identity-by-number inference forbidden; test pins
+  the naive comparator would have merged and the canonical one does not).
+- **C11** Advisory-advisory same A–E identity ⇒ collapse to first in
+  deterministic winner order + bounded diagnostic; primary set untouched.
+- **C12** Metadata + prose guards: conflict diagnostics carry
+  ids/paths/symbol/lines/counts ONLY (assert no quote/excerpt/secret/
+  snapshot text in `run.json` conflict records); identical titles/
+  descriptions at disjoint locations ⇒ both kept (prose never compared).
 
 ---
 
