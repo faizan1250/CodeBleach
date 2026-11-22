@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { ReviewerError } from "../../src/core/errors.ts";
-import { SnapshotReader } from "../../src/context/snapshot.ts";
+import { isGitAbort, isGitOutputLimit, isGitTimeout, SnapshotReader } from "../../src/context/snapshot.ts";
 import { git, makeRepo } from "../helpers/git-repo.ts";
 
 async function writeAndCommit(dir: string, files: Record<string, string>, message: string): Promise<string> {
@@ -352,6 +352,81 @@ describe("batched blob reads", () => {
       const text = await reader.readBlobText(oid as string);
       expect(text).toBe(new TextDecoder("utf-8", { fatal: false }).decode(bytes));
       expect(reader.cachedBytes).toBe(bytes.length);
+    } finally {
+      await cleanup();
+    }
+  });
+});
+
+describe("cancellation through tree reads", () => {
+  test("pre-aborted signal reaches the head blob leg as abort, not timeout or output-limit", async () => {
+    const { dir, cleanup } = await makeRepo();
+    try {
+      const base = await writeAndCommit(dir, { "src/a.ts": "const v = 1;\n" }, "base");
+      const head = await writeAndCommit(dir, { "src/a.ts": "const v = 2;\n" }, "head");
+      const reader = readerFor(dir, head, base);
+      await reader.listHeadFiles();
+      const controller = new AbortController();
+      controller.abort();
+      const error = await reader.readHeadText("src/a.ts", { signal: controller.signal }).then(
+        () => null,
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(ReviewerError);
+      expect((error as ReviewerError).code).toBe("GIT_FAILED");
+      expect(isGitAbort(error)).toBe(true);
+      expect(isGitTimeout(error)).toBe(false);
+      expect(isGitOutputLimit(error)).toBe(false);
+      expect(await reader.readHeadText("src/a.ts")).toBe("const v = 2;\n");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("pre-aborted signal reaches the base blob leg as abort, not timeout or output-limit", async () => {
+    const { dir, cleanup } = await makeRepo();
+    try {
+      const base = await writeAndCommit(dir, { "src/a.ts": "const v = 1;\n" }, "base");
+      const head = await writeAndCommit(dir, { "src/a.ts": "const v = 2;\n" }, "head");
+      const reader = readerFor(dir, head, base);
+      await reader.listBaseFiles();
+      const controller = new AbortController();
+      controller.abort();
+      const error = await reader.readBaseText("src/a.ts", { signal: controller.signal }).then(
+        () => null,
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(ReviewerError);
+      expect((error as ReviewerError).code).toBe("GIT_FAILED");
+      expect(isGitAbort(error)).toBe(true);
+      expect(isGitTimeout(error)).toBe(false);
+      expect(isGitOutputLimit(error)).toBe(false);
+      expect(await reader.readBaseText("src/a.ts")).toBe("const v = 1;\n");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("mid-read abort kills the blob child and the reader stays usable", async () => {
+    const { dir, cleanup } = await makeRepo();
+    try {
+      const base = await writeAndCommit(dir, { "src/a.ts": "const v = 1;\n" }, "base");
+      const head = await writeAndCommit(dir, { "src/a.ts": "const v = 2;\n" }, "head");
+      const reader = readerFor(dir, head, base);
+      await reader.listHeadFiles();
+      const controller = new AbortController();
+      const pending = reader.readHeadText("src/a.ts", { signal: controller.signal });
+      queueMicrotask(() => controller.abort());
+      const error = await pending.then(
+        () => null,
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(ReviewerError);
+      expect(isGitAbort(error)).toBe(true);
+      expect(isGitTimeout(error)).toBe(false);
+      expect(isGitOutputLimit(error)).toBe(false);
+      expect(await reader.readHeadText("src/a.ts")).toBe("const v = 2;\n");
+      expect(await reader.readBaseText("src/a.ts")).toBe("const v = 1;\n");
     } finally {
       await cleanup();
     }
