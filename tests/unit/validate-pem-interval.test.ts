@@ -561,10 +561,7 @@ describe("pem interval linear scan", () => {
   test("sequential completes plus trailing BEGIN reject", async () => {
     const text = [BEGIN, A1, END, BEGIN, B1, END, BEGIN, "TAIL-05-CCCC3333DDDD4444"].join("\n");
     const result = await validateEvidence(
-      inputFor(
-        [{ file: "src/a.ts", startLine: 8, endLine: 8, quote: "TAIL-05-CCCC3333DDDD4444" }],
-        readerFor(text),
-      ),
+      inputFor([{ file: "src/a.ts", startLine: 8, endLine: 8, quote: "TAIL-05-CCCC3333DDDD4444" }], readerFor(text)),
     );
     rejects(result);
   });
