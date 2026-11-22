@@ -1,6 +1,7 @@
 # CodeBleach — Phase 6: Inferred Repository Conventions (plan only, no implementation)
 
-**Baseline:** `main` at or after PR #68 (Phase 5 hardening PRs #52–#68;
+**Baseline:** `main` at `5b8aba8` (PR #69 merge,
+`fix/final-pre-phase6-readiness`; Phase 5 hardening PRs #52–#69;
 deterministic-only validation, artifact v2; ADR 0039 two-pass authority;
 ADR 0038 occurrence-ordered PEM index plus the e75df21 sort-free single-scan
 linearization).
@@ -36,9 +37,10 @@ These constraints are fixed for Phase 6 v1 (from `systemdesign.md` §6). Do not 
    on/off — and no inferred item ever enters the primary pass.
 2. **Inferred is advisory only**, produced by a SEPARATE convention-advisory
    pass — never mixed into the primary pass. Advisory findings are
-   `convention`-category ONLY, max severity `low`, no `ruleId` (any supplied
-   `ruleId` rejected); a non-convention category, above-`low` severity, or any
-   present `ruleId` from the advisory pass is impossible by
+   `convention`-category ONLY, max severity `low` (exactly `low`: `info`
+   is below-threshold and ineligible — §5.2), no `ruleId` (any supplied
+   `ruleId` rejected); a non-convention category, non-`low` severity, or
+   any present `ruleId` from the advisory pass is impossible by
    app-enforced invariant (orchestration merge gates, §5), not by prompt text.
    The advisory pass runs under its own separate template, version, hash,
    contract, validation, and boundary — never as a section appended to the
@@ -349,24 +351,20 @@ diff — no primary template edit, no `CODE_REVIEW_PROMPT_VERSION` bump.
    truncation; explicit rules are never truncated for inferred because the
    advisory pass never carries explicit rules).
 6. `convention` category stays out of the primary pass's requested in-scope
-   categories (`CATEGORY_ORDER` unchanged); advisory findings must carry NO
-   `ruleId` — missing is the only valid state. ANY supplied `ruleId` on an
-   advisory finding is rejected at the orchestration boundary before
-   validation: `inf-*` and fabricated ids (which `rule_id_unknown` would
-   reject) AND real rule ids (which validation would otherwise ACCEPT via the
-   `rule_ok` path — hence presence itself is rejected in orchestration).
-   P6-05 pins the four-case matrix.
+   categories (`CATEGORY_ORDER` unchanged); the advisory `ruleId` boundary
+   and four-case matrix live canonically in P6-05 item 1 (not restated
+   here) — P6-04 tests feed all four cases at the merge boundary.
 
 **Tests:** primary prompt/payload byte-identical with conventions on/off
 (template bytes, version, categories, hash, serialization, output contract);
 primary template hash + version pinned unchanged; separate advisory
 template/version/hash/contract present and distinct from primary; advisory
 authority text present verbatim in the advisory template only; budget
-truncation drops whole conventions; non-convention, above-`low`, or
-`ruleId`-carrying advisory output rejected at the merge boundary (four-case
-ruleId matrix: missing ok, `inf-*` / real / fabricated rejected);
+truncation drops whole conventions; advisory boundary gates per §5 kinds
+2–3 (category / severity / `ruleId` presence per the P6-05 four-case
+matrix: missing ok, `inf-*` / real / fabricated rejected);
 model-supplied provenance overwritten by code stamping;
-`--no-llm`/demo carry no advisory pass.
+`--no-llm`/demo exclusion per P6-00 (no advisory build or pass).
 
 **Accept:** primary prompt provably inference-free and byte-identical on/off
 (no primary diff exists); advisory lives only under its separate contract;
@@ -386,21 +384,26 @@ present verbatim).
    orchestration); (d) fabricated id ⇒ rejected (`rule_id_unknown`). No new
    Phase 5 codes. Check codes stay closed; `run.json` shape unchanged.
 2. Confirm `convention` gate behavior unchanged (always passes; no toggle).
-   Category=`convention` + severity≤`low` gates run at the orchestration
-   boundary BEFORE validation; validation never sees violating advisory
-   output.
+   Category=`convention` + severity==`low` gates run at the orchestration
+   boundary BEFORE validation (`info` is below the advisory threshold and
+   equally rejected — §5.2; above-`low` likewise); validation never sees
+   violating advisory output.
 3. Pin the caps at the orchestration boundary (app-enforced, tested): the
    merge step rejects advisory output that is not `convention`-category, is
-   above `low`, or carries any `ruleId`, before it can reach validation.
-   Prompt authority text is guidance (tested verbatim); the caps are
+   not exactly `low`, or carries any `ruleId`, before it can reach
+   validation; the advisory count cap (`MAX_ADVISORY_FINDINGS_PER_RUN`,
+   §5.3 steps 8–9) applies post-validation at orchestration. Prompt
+   authority text is guidance (tested verbatim); the caps are
    invariants (tested by feeding violating advisory output at the boundary).
 4. Provenance: `origin.pass` for advisory findings is stamped by trusted
    orchestration code; any model-supplied pass value is overwritten, never
    trusted (test: forged pass value does not survive the merge).
-5. Sync `systemdesign.md` §6/§13 rows, `docs/validation.md` (one line: inferred
-   is advisory, never validation evidence), and README docs index if a new doc
-   is added. No ADR rewrites.
-6. Assemble the Phase 6 matrix: explicit-beats-inferred precedence,
+5. Sync `systemdesign.md` §6/§13 rows, `docs/validation.md` (inferred-advisory
+   pointer: separate `validate()` call under the isolated §5.2 policy,
+   orchestration-owned count cap, no Phase 5 semantic change), and README
+   docs index if a new doc is added. No ADR rewrites.
+6. Assemble the Phase 6 matrix: explicit-beats-inferred precedence (§5
+   cases 1–10), merge domains (M1–M8), head-coordinate conflict (C1–C12),
    advisory-label presence, cache round-trip, cap behavior, offline determinism
    (zero provider/GitHub calls — reuse the Phase 5 fetch-guard pattern).
 
@@ -446,8 +449,9 @@ Five guarantee kinds — do not conflate them:
    the model. Holds only when the model obeys.
 2. **App-enforced invariants** (orchestration merge boundary, tested against a
    disobedient model): advisory output must be `convention`-category AND
-   severity ≤ `low` AND carry no `ruleId` — violations rejected before
-   validation. Hold even when the model disobeys.
+   severity == `low` (above-`low` AND `info` both rejected — §5.2) AND
+   carry no `ruleId` — violations rejected before validation. Hold even
+   when the model disobeys.
 3. **Provenance** (trusted code): `origin.pass` stamped `"primary"` vs
    `"convention-advisory"` by orchestration; any model-supplied pass value is
    overwritten, never trusted.
@@ -455,8 +459,9 @@ Five guarantee kinds — do not conflate them:
    only; primary findings never altered, dropped, or re-ranked; explicit wins
    on conflict per §5.1.
 5. **Phase 5 unchanged:** closed check-code set, validator, publisher, and
-   artifact shape untouched; caps enforced before validation, never by new
-   codes.
+   artifact shape untouched; boundary caps enforced at orchestration
+   (category / severity / `ruleId` pre-validation, advisory count cap
+   post-validation per §5.3), never by new codes.
 
 1. **Two passes.** Primary: explicit rules + existing context, ordinary
    categories, zero inferred input; template, version, categories, hash,
@@ -546,8 +551,10 @@ mutation, no re-rank, no annotation).
    primaries suppressed once; advisory-advisory dupes collapse to first;
    primary set byte-identical (I1 + I2 together).
 10. Phase 5 validation + publisher behavior unchanged (validator/publisher
-    diffs empty; no new codes, statuses, or artifact fields; advisory caps
-    enforced before validation, never by new codes).
+    diffs empty; no new codes, statuses, or artifact fields; advisory
+    boundary caps enforced at orchestration — category / severity / `ruleId`
+    pre-validation (§5 kind 2), advisory count cap post-validation (§5.3
+    step 8) — never by new codes).
 
 ### 5.2 Isolated advisory validation policy (Blocker A)
 
@@ -846,8 +853,8 @@ is NOT a conflict.
 | Detectors (P6-01) | positive/negative/mixed/empty per family, eligibility exclusion, determinism under permutation |
 | Support (P6-02) | per-detector eligible denominator, ratio + count boundaries, zero-eligible safety, cap order stability |
 | Cache (P6-03) | key stability/drift (content, detector, schema, sampling-policy), stale rebuild, failure matrix (never fails run), atomic write, path containment |
-| Prompt (P6-04) | primary inference-free + byte-identical pin (template/version/categories/hash/serialization/contract), separate advisory template+version+hash+contract, advisory authority text (advisory template only), boundary caps (category/severity/ruleId-presence), provenance overwrite, budget truncation, no-llm/demo exclusion |
-| Guards (P6-05) | advisory ruleId matrix (missing ok; inf-*/real/fabricated rejected pre-validation), convention gate unchanged, §5 authority cases 1–10 (§5.1 conflict identity, I1/I2), zero provider/GitHub calls, validator+publisher diff empty |
+| Prompt (P6-04) | primary inference-free + byte-identical pin (template/version/categories/hash/serialization/contract), separate advisory template+version+hash+contract, advisory authority text (advisory template only), boundary gates (§5 kinds 2–3; cases 4–7, M1–M8), provenance overwrite, budget truncation, no-llm/demo exclusion per P6-00 |
+| Guards (P6-05) | isolated advisory policy §5.2 (threshold `low`, confidence preserved, no `ruleId`, `info` ineligible) + two-call separation pin, convention gate unchanged, §5 cases 1–10 + §5.3 M1–M8 + §5.4 C1–C12 (I1/I2 throughout), zero provider/GitHub calls, validator+publisher diff empty |
 | Integration | fixture repo end-to-end (conventions appear advisory; explicit rule wins on conflict); clean repo (no conventions, no findings change) |
 
 **Global accept:** `bun run check` green; deterministic (two runs, byte-identical
