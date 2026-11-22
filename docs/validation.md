@@ -70,10 +70,12 @@ Check families (`name`) and codes:
   on both sides — CRLF/CR→LF plus horizontal-whitespace collapse,
   case-sensitive. No fuzzy matching. Exact cited-range match first, then a
   bounded ±3-line neighborhood fallback (`EVIDENCE_SEARCH_RADIUS`) that
-  locates the single actual range and rejects multiples as ambiguous
-  (`evidence_side_ambiguous`, never accepted). Each item records a verified
-  location (side, canonical path, actual matched lines) that attribution
-  intersects — never the model-cited range.
+  searches the normalized quote as a literal substring (partial first/last
+  lines and multiline spans included): no occurrence is a mismatch, one
+  distinct range verifies at its actual lines, and several distinct ranges
+  are ambiguous (`evidence_side_ambiguous`, never accepted). Each item
+  records a verified location (side, canonical path, actual matched lines)
+  that attribution intersects — never the model-cited range.
 - Bounds: at most 8 evidence items per finding
   (`EVIDENCE_MAX_ITEMS`), 2000 chars per quote
   (`EVIDENCE_MAX_QUOTE_CHARS`), 50 cited lines per item

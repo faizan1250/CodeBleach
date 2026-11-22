@@ -69,13 +69,6 @@ function lineSets(changedFile: ChangedFile): { head: Set<number>; deleted: Set<n
   return { head, deleted };
 }
 
-function sliceLines(text: string, startLine: number, endLine: number): string {
-  return text
-    .split("\n")
-    .slice(startLine - 1, endLine)
-    .join("\n");
-}
-
 /** Map a non-ok snapshot read to its stable unavailable code. */
 function unavailableCode(result: SnapshotReadResult): ValidationCheckCode {
   if (result.status === "unsupported") return "snapshot_unsupported_object";
@@ -89,8 +82,8 @@ function unavailableCode(result: SnapshotReadResult): ValidationCheckCode {
  * resolution from diff metadata, then exact-snapshot quote comparison via
  * redactSource. Each item resolves to a verified snapshot location (side,
  * canonical path, actual matched lines): exact cited-range first, then a
- * bounded ±radius fallback that locates the single actual range and rejects
- * multiples as ambiguous. Never re-mints fingerprints (P5-07 owns identity);
+ * bounded ±radius literal-substring fallback that locates the single actual
+ * range and rejects multiples as ambiguous. Never re-mints fingerprints (P5-07 owns identity);
  * never trusts the model boolean (P5-05 owns introduction).
  */
 export async function validateEvidence(input: EvidenceInput): Promise<EvidenceResult> {
@@ -370,31 +363,80 @@ async function readSide(
   return { text: result.text };
 }
 
-/** Every contiguous span in [windowStart, windowEnd] whose canonical form equals the quote. */
-function locateInWindow(
-  text: string,
-  path: string,
-  want: string,
-  windowStart: number,
-  windowEnd: number,
-): { startLine: number; endLine: number }[] {
-  const matches: { startLine: number; endLine: number }[] = [];
-  for (let start = windowStart; start <= windowEnd; start += 1) {
-    for (let end = start; end <= windowEnd; end += 1) {
-      if (canonicalForm(sliceLines(text, start, end), path) === want) {
-        matches.push({ startLine: start, endLine: end });
-      }
-    }
+/**
+ * Normalized window index for literal-substring evidence matching. Each
+ * non-blank window line contributes its redactSource + quote-normalized form;
+ * segments join with a single space, mirroring normalizeQuoteForFingerprint
+ * over the raw window text. The offset table maps every normalized character
+ * back to its source line so a match reports actual snapshot coordinates.
+ */
+interface WindowSegment {
+  line: number;
+  start: number;
+  end: number;
+}
+
+interface WindowIndex {
+  haystack: string;
+  segments: WindowSegment[];
+}
+
+function indexWindow(lines: string[], path: string, windowStart: number, windowEnd: number): WindowIndex {
+  let haystack = "";
+  const segments: WindowSegment[] = [];
+  for (let line = windowStart; line <= windowEnd; line += 1) {
+    const canonical = normalizeQuoteForFingerprint(redactSource(lines[line - 1] ?? "", path));
+    if (canonical.length === 0) continue;
+    if (haystack.length > 0) haystack += " ";
+    const start = haystack.length;
+    haystack += canonical;
+    segments.push({ line, start, end: start + canonical.length });
   }
-  return matches;
+  return { haystack, segments };
+}
+
+function lineAtOffset(segments: WindowSegment[], offset: number): number | null {
+  for (const segment of segments) {
+    if (offset >= segment.start && offset < segment.end) return segment.line;
+  }
+  return null;
 }
 
 /**
- * Exact cited-range match first, then a bounded neighborhood fallback. The
- * fallback verifies occurrence AND location: it searches only the documented
- * ±radius window, identifies the actual range, and rejects multiples as
- * ambiguous. No fuzzy/Levenshtein/semantic matching: comparison is the same
- * redactSource + quote-normalized, case-sensitive equality as the exact path.
+ * Literal-substring fallback within the bounded window. Collects every
+ * distinct matched source range: none is a mismatch, exactly one verifies at
+ * its actual lines, and several are ambiguous (never an arbitrary pick; the
+ * same exact range matching repeatedly collapses to one line-level
+ * location). An unmappable offset fails closed as ambiguous. Case-sensitive;
+ * no fuzzy/Levenshtein/semantic matching.
+ */
+function locateSubstring(index: WindowIndex, want: string): MatchOutcome {
+  const seen = new Map<string, { startLine: number; endLine: number }>();
+  let at = index.haystack.indexOf(want);
+  while (at >= 0) {
+    const startLine = lineAtOffset(index.segments, at);
+    const endLine = lineAtOffset(index.segments, at + want.length - 1);
+    if (startLine === null || endLine === null) return { kind: "ambiguous" };
+    const key = `${startLine}:${endLine}`;
+    if (!seen.has(key)) seen.set(key, { startLine, endLine });
+    if (seen.size > 1) return { kind: "ambiguous" };
+    at = index.haystack.indexOf(want, at + 1);
+  }
+  if (seen.size === 0) return { kind: "mismatch" };
+  const only = seen.values().next();
+  if (only.done) return { kind: "mismatch" };
+  return { kind: "match", startLine: only.value.startLine, endLine: only.value.endLine };
+}
+
+/**
+ * Exact cited-range match first, then a bounded literal-substring fallback.
+ * The fallback verifies occurrence AND location: it searches only the
+ * documented ±radius window for the normalized quote as a literal substring
+ * (partial first/last lines, multiline spans, whitespace variation
+ * included), identifies the actual range, and rejects multiple distinct
+ * ranges as ambiguous. No fuzzy/Levenshtein/semantic matching: comparison is
+ * the same redactSource + quote-normalized, case-sensitive form as the exact
+ * path.
  */
 async function matchSide(
   reader: ValidationSnapshotReader,
@@ -406,24 +448,15 @@ async function matchSide(
 ): Promise<MatchOutcome> {
   const snapshot = await readSide(reader, side, path);
   if ("result" in snapshot) return { kind: "unavailable", result: snapshot.result };
-  const lineCount = snapshot.text.length === 0 ? 0 : snapshot.text.split("\n").length;
+  const lines = snapshot.text.length === 0 ? [] : snapshot.text.split("\n");
+  const lineCount = lines.length;
   if (startLine > lineCount) return { kind: "mismatch" };
   const want = canonicalForm(quote, path);
   const clampedEnd = Math.min(endLine, lineCount);
-  if (want === canonicalForm(sliceLines(snapshot.text, startLine, clampedEnd), path)) {
+  if (want === canonicalForm(lines.slice(startLine - 1, clampedEnd).join("\n"), path)) {
     return { kind: "match", startLine, endLine: clampedEnd };
   }
   const windowStart = Math.max(1, startLine - EVIDENCE_SEARCH_RADIUS);
   const windowEnd = Math.min(lineCount, endLine + EVIDENCE_SEARCH_RADIUS);
-  const candidates = locateInWindow(snapshot.text, path, want, windowStart, windowEnd);
-  if (candidates.length === 0) return { kind: "mismatch" };
-  // Minimum-discrimination for neighborhood-only matches: the quote most
-  // plausibly denotes its shortest matching span (blank padding never counts
-  // as content). An exact cited-range hit above bypasses this rule entirely.
-  const shortest = Math.min(...candidates.map((candidate) => candidate.endLine - candidate.startLine));
-  const minimal = candidates.filter((candidate) => candidate.endLine - candidate.startLine === shortest);
-  if (minimal.length !== 1) return { kind: "ambiguous" };
-  const only = minimal[0];
-  if (only === undefined) return { kind: "ambiguous" };
-  return { kind: "match", startLine: only.startLine, endLine: only.endLine };
+  return locateSubstring(indexWindow(lines, path, windowStart, windowEnd), want);
 }

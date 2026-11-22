@@ -606,7 +606,6 @@ describe("verified locations (post-5 hardening)", () => {
       expect(result.locations).toEqual([{ side: "head", path: "src/a.ts", startLine: 1, endLine: 1 }]);
     }
   });
-
   test("multi-evidence records each side and range in order", async () => {
     const reader = readerFor({
       head: { "src/a.ts": ok("line-1\nline-2\nline-3") },
@@ -627,6 +626,217 @@ describe("verified locations (post-5 hardening)", () => {
         { side: "head", path: "src/a.ts", startLine: 2, endLine: 2 },
         { side: "base", path: "src/a.ts", startLine: 5, endLine: 6 },
       ]);
+    }
+  });
+});
+
+describe("substring evidence matching (P1)", () => {
+  const CODE_TEXT = ["line-1", "const total = computeSum(items);", "return total;", "line-4", "line-5"].join("\n");
+
+  function codeReader(text: string = CODE_TEXT) {
+    return readerFor({ head: { "src/a.ts": ok(text) } });
+  }
+
+  test("matches a mid-line single-line substring at its actual line", async () => {
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 2, endLine: 2, quote: "total = computeSum(items)" }], codeReader()),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([{ side: "head", path: "src/a.ts", startLine: 2, endLine: 2 }]);
+    }
+  });
+
+  test("matches a substring ending partway through the line", async () => {
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 2, endLine: 2, quote: "const total = computeSum" }], codeReader()),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([{ side: "head", path: "src/a.ts", startLine: 2, endLine: 2 }]);
+    }
+  });
+
+  test("matches a substring starting partway through the line", async () => {
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 2, endLine: 2, quote: "total = computeSum(items);" }], codeReader()),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([{ side: "head", path: "src/a.ts", startLine: 2, endLine: 2 }]);
+    }
+  });
+
+  test("matches an interior-to-interior multiline span", async () => {
+    const result = await validateEvidence(
+      inputFor(
+        [{ file: "src/a.ts", startLine: 2, endLine: 3, quote: "computeSum(items);\nreturn total" }],
+        codeReader(),
+      ),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([{ side: "head", path: "src/a.ts", startLine: 2, endLine: 3 }]);
+    }
+  });
+
+  test("matches a partial first line across whitespace variation", async () => {
+    const result = await validateEvidence(
+      inputFor(
+        [{ file: "src/a.ts", startLine: 2, endLine: 2, quote: "  total   =  computeSum(items);\n   return total; " }],
+        codeReader(),
+      ),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([{ side: "head", path: "src/a.ts", startLine: 2, endLine: 3 }]);
+    }
+  });
+
+  test("matches an LF partial quote against a CRLF snapshot", async () => {
+    const crlf = CODE_TEXT.split("\n").join("\r\n");
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 2, endLine: 2, quote: "total = computeSum(items);" }], codeReader(crlf)),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([{ side: "head", path: "src/a.ts", startLine: 2, endLine: 2 }]);
+    }
+  });
+
+  test("case mutation of a substring fails", async () => {
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 2, endLine: 2, quote: "Total = ComputeSum(items);" }], codeReader()),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.inconclusive).toBe(false);
+      expect(result.checks[1]).toMatchObject({
+        name: "evidence_quote",
+        outcome: "failed",
+        code: "evidence_quote_not_found",
+      });
+    }
+  });
+
+  test("punctuation mutation of a substring fails", async () => {
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 2, endLine: 2, quote: "total = computeSum(itemz);" }], codeReader()),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.inconclusive).toBe(false);
+  });
+
+  test("single-character insertion into a substring fails", async () => {
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 2, endLine: 2, quote: "total = computeSuum(items);" }], codeReader()),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.inconclusive).toBe(false);
+  });
+
+  test("partial-line quote at max distance verifies at its actual lines", async () => {
+    const lines = Array.from({ length: 10 }, (_, index) => `filler-${index + 1}`);
+    lines[6] = "const total = computeSum(items);";
+    const result = await validateEvidence(
+      inputFor(
+        [{ file: "src/a.ts", startLine: 4, endLine: 4, quote: "total = computeSum(items);" }],
+        codeReader(lines.join("\n")),
+      ),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([{ side: "head", path: "src/a.ts", startLine: 7, endLine: 7 }]);
+    }
+  });
+
+  test("partial-line quote past max distance fails", async () => {
+    const lines = Array.from({ length: 10 }, (_, index) => `filler-${index + 1}`);
+    lines[6] = "const total = computeSum(items);";
+    const result = await validateEvidence(
+      inputFor(
+        [{ file: "src/a.ts", startLine: 3, endLine: 3, quote: "total = computeSum(items);" }],
+        codeReader(lines.join("\n")),
+      ),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.inconclusive).toBe(false);
+  });
+
+  test("overlapping occurrences on one line verify as a single location", async () => {
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 1, endLine: 1, quote: "aba" }], codeReader("ababa")),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([{ side: "head", path: "src/a.ts", startLine: 1, endLine: 1 }]);
+    }
+  });
+
+  test("substring on two distinct lines is ambiguous", async () => {
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 2, endLine: 2, quote: "aaa" }], codeReader("aaa\nbbb\naaa")),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.inconclusive).toBe(true);
+      expect(result.checks.some((check) => check.code === "evidence_side_ambiguous")).toBe(true);
+    }
+  });
+
+  test("redacted secret verifies as a partial-line substring", async () => {
+    const result = await validateEvidence(
+      inputFor(
+        [{ file: "src/a.ts", startLine: 1, endLine: 1, quote: 'password = "hunter2"' }],
+        codeReader('const password = "hunter2";\nconst a = 1;'),
+      ),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([{ side: "head", path: "src/a.ts", startLine: 1, endLine: 1 }]);
+    }
+  });
+
+  test("multi-evidence records substring locations in order", async () => {
+    const reader = readerFor({
+      head: { "src/a.ts": ok("line-1\nline-2\nline-3") },
+      base: { "src/a.ts": ok("old-1\nold-2\nold-3\nold-4\nold-5\nold-6") },
+    });
+    const result = await validateEvidence(
+      inputFor(
+        [
+          { file: "src/a.ts", startLine: 2, endLine: 2, quote: "ine-2" },
+          { file: "src/a.ts", startLine: 5, endLine: 6, quote: "ld-5\nold-6" },
+        ],
+        reader,
+      ),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([
+        { side: "head", path: "src/a.ts", startLine: 2, endLine: 2 },
+        { side: "base", path: "src/a.ts", startLine: 5, endLine: 6 },
+      ]);
+    }
+  });
+
+  test("replacement substring resolves to the matching base side", async () => {
+    const both: ChangedFile = {
+      ...testFile(),
+      hunks: [hunk([diffLine("del", 1, null), diffLine("add", null, 1)], 1)],
+    };
+    const reader = readerFor({
+      head: { "src/a.ts": ok("const total = computeSum(items);") },
+      base: { "src/a.ts": ok("const total = computeOld(items);") },
+    });
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 1, endLine: 1, quote: "total = computeOld(items);" }], reader, {
+        changedFile: both,
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual([{ side: "base", path: "src/a.ts", startLine: 1, endLine: 1 }]);
     }
   });
 });
