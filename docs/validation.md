@@ -4,7 +4,7 @@ Model findings are verified against the PR diff and exact Git snapshots before
 they can be accepted. The engine (`src/validate/`) makes no `LlmProvider`
 calls; `ValidatedFinding.llmVerdict` stays absent. Decisions: ADR 0028
 (decision matrix), ADR 0029 (result contract, artifact v2), ADR 0030 (P5-10
-hardening), ADRs 0040–0041 (Phase 6 advisory/merge/handoff integration,
+hardening), ADRs 0040–0042 (Phase 6 advisory/merge/handoff/API integration,
 planning-only). Plan: `implementation-phase5.md` + `implementation-phase6.md`
 §§5–5.5 (normative; not duplicated here).
 
@@ -183,15 +183,16 @@ Demo uses its own canned engine and never touches git or the network.
 Inferred conventions are advisory review input only — never validation
 evidence. Validation checks, codes, and statuses are unchanged by Phase 6
 (see ADR 0039 and `implementation-phase6.md` §§5–5.4): advisory findings
-arrive via a SEPARATE `validate()` call under the isolated §5.2 policy
-(severity threshold pinned to `low`, no inherited path thresholds,
+arrive via a SEPARATE validation run under the isolated §5.2 policy
+(internal advisory entry sharing the per-finding core, batch deferred —
+§5.3.1, ADR 0042; severity threshold pinned to `low`, no inherited path thresholds,
 confidence bar preserved, convention gate kept, no `ruleId`), merge in
 their own domain with the named advisory cap at orchestration (§5.3 order
 1–9, never a combined cap), and lose explicit conflicts under the §5.4
 head-coordinate contract (verified head actuals only; base evidence maps
 solely via exact one-to-one diff correspondence; unmappable excluded; no
-manufactured conflict; conflict metadata carries ids/paths/symbol/lines/counts
-only). Verified locations ride the run-scoped §5.5 handoff envelope
+manufactured conflict; conflict metadata carries aggregate counts +
+stable codes only, no per-finding records). Verified locations ride the run-scoped §5.5 handoff envelope
 (`findingId`/canonical path/fallback symbol/verified actuals, discarded
 after run; `ValidatedFinding` and `run.json` v2 unchanged — ADR 0041).
 Conflict/advisory diagnostics are transient-only (orchestration return +
