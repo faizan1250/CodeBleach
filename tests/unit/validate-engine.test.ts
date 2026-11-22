@@ -691,6 +691,23 @@ describe("substring evidence acceptance (P1)", () => {
     );
   });
 
+  test("raw secret-fragment evidence is never accepted", async () => {
+    const lines = [
+      "// config",
+      "-----BEGIN PRIVATE KEY-----",
+      "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC",
+      "-----END PRIVATE KEY-----",
+      "// end",
+    ];
+    const engine = engineWithHeadText(lines.join("\n"));
+    const finding = testFinding();
+    finding.evidence = [{ file: "src/a.ts", startLine: 3, endLine: 3, quote: "MIIEvQIBADANBgkq" }];
+    const result = await engine.validate([finding], testAddedDiff(), [testUnit()], ConfigFileSchema.parse({}));
+    expect(result[0]?.status).not.toBe("accepted");
+    expect(result[0]?.checks.some((check) => check.code === "evidence_quote_not_found")).toBe(true);
+    expect(JSON.stringify(result[0]?.checks ?? []).includes("MIIEvQIBADANBgkq")).toBe(false);
+  });
+
   test("span over added and unchanged lines attributes only the added overlap", async () => {
     const { diff, unit } = addedLines56();
     const engine = engineWithHeadText(headText(10));

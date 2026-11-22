@@ -392,68 +392,59 @@ function createSideLoader(
 }
 
 /**
- * Normalized window index for literal-substring evidence matching. Each
- * non-blank window line contributes its redactSource + quote-normalized form;
- * segments join with a single space, mirroring normalizeQuoteForFingerprint
- * over the raw window text. The offset table maps every normalized character
- * back to its source line so a match reports actual snapshot coordinates.
+ * Full-window redaction for literal-substring evidence matching. The bounded
+ * window is redacted as one source string, so cross-line secret patterns
+ * (PEM blocks, multiline quoted values) collapse to [REDACTED] exactly as on
+ * the exact path; redacting each line separately would leave raw fragments
+ * visible and diverge from canonicalForm. Bounded to the cited ±radius
+ * slice, never the whole file.
  */
-interface WindowSegment {
-  line: number;
-  start: number;
-  end: number;
-}
-
-interface WindowIndex {
-  haystack: string;
-  segments: WindowSegment[];
-}
-
-function indexWindow(lines: string[], path: string, windowStart: number, windowEnd: number): WindowIndex {
-  let haystack = "";
-  const segments: WindowSegment[] = [];
-  for (let line = windowStart; line <= windowEnd; line += 1) {
-    const canonical = normalizeQuoteForFingerprint(redactSource(lines[line - 1] ?? "", path));
-    if (canonical.length === 0) continue;
-    if (haystack.length > 0) haystack += " ";
-    const start = haystack.length;
-    haystack += canonical;
-    segments.push({ line, start, end: start + canonical.length });
-  }
-  return { haystack, segments };
-}
-
-function lineAtOffset(segments: WindowSegment[], offset: number): number | null {
-  for (const segment of segments) {
-    if (offset >= segment.start && offset < segment.end) return segment.line;
-  }
-  return null;
+function redactWindow(lines: string[], path: string, windowStart: number, windowEnd: number): string {
+  return canonicalForm(lines.slice(windowStart - 1, windowEnd).join("\n"), path);
 }
 
 /**
- * Literal-substring fallback within the bounded window. Collects every
- * distinct matched source range: none is a mismatch, exactly one verifies at
- * its actual lines, and several are ambiguous (never an arbitrary pick; the
- * same exact range matching repeatedly collapses to one line-level
- * location). An unmappable offset fails closed as ambiguous. Case-sensitive;
- * no fuzzy/Levenshtein/semantic matching.
+ * Literal-substring fallback within the bounded window. The normalized quote
+ * must occur in the full-window redaction: a raw secret fragment consumed by
+ * a cross-line pattern is absent there, so it mismatches instead of
+ * verifying. Coordinates come from the minimal source span(s) whose own
+ * redaction still contains the quote: none is defensive-ambiguous (the whole
+ * window always explains a gated match, so this never fires on real input),
+ * exactly one verifies at its actual lines, several are ambiguous.
+ * Case-sensitive; no fuzzy/Levenshtein/semantic matching.
  */
-function locateSubstring(index: WindowIndex, want: string): MatchOutcome {
-  const seen = new Map<string, { startLine: number; endLine: number }>();
-  let at = index.haystack.indexOf(want);
-  while (at >= 0) {
-    const startLine = lineAtOffset(index.segments, at);
-    const endLine = lineAtOffset(index.segments, at + want.length - 1);
-    if (startLine === null || endLine === null) return { kind: "ambiguous" };
-    const key = `${startLine}:${endLine}`;
-    if (!seen.has(key)) seen.set(key, { startLine, endLine });
-    if (seen.size > 1) return { kind: "ambiguous" };
-    at = index.haystack.indexOf(want, at + 1);
+function locateSubstring(
+  lines: string[],
+  path: string,
+  windowStart: number,
+  windowEnd: number,
+  want: string,
+): MatchOutcome {
+  if (!redactWindow(lines, path, windowStart, windowEnd).includes(want)) return { kind: "mismatch" };
+  const minimal: Array<{ startLine: number; endLine: number }> = [];
+  const windowSize = windowEnd - windowStart + 1;
+  for (let length = 1; length <= windowSize; length += 1) {
+    for (let startLine = windowStart; startLine + length - 1 <= windowEnd; startLine += 1) {
+      const endLine = startLine + length - 1;
+      if (
+        minimal.some(
+          (known) =>
+            known.startLine >= startLine &&
+            known.endLine <= endLine &&
+            (known.startLine > startLine || known.endLine < endLine),
+        )
+      ) {
+        continue;
+      }
+      if (canonicalForm(lines.slice(startLine - 1, endLine).join("\n"), path).includes(want)) {
+        minimal.push({ startLine, endLine });
+        if (minimal.length > 1) return { kind: "ambiguous" };
+      }
+    }
   }
-  if (seen.size === 0) return { kind: "mismatch" };
-  const only = seen.values().next();
-  if (only.done) return { kind: "mismatch" };
-  return { kind: "match", startLine: only.value.startLine, endLine: only.value.endLine };
+  const only = minimal[0];
+  if (only === undefined) return { kind: "ambiguous" };
+  return { kind: "match", startLine: only.startLine, endLine: only.endLine };
 }
 
 /**
@@ -486,5 +477,5 @@ async function matchSide(
   }
   const windowStart = Math.max(1, startLine - EVIDENCE_SEARCH_RADIUS);
   const windowEnd = Math.min(lineCount, endLine + EVIDENCE_SEARCH_RADIUS);
-  return locateSubstring(indexWindow(lines, path, windowStart, windowEnd), want);
+  return locateSubstring(lines, path, windowStart, windowEnd, want);
 }
