@@ -4,7 +4,9 @@ Model findings are verified against the PR diff and exact Git snapshots before
 they can be accepted. The engine (`src/validate/`) makes no `LlmProvider`
 calls; `ValidatedFinding.llmVerdict` stays absent. Decisions: ADR 0028
 (decision matrix), ADR 0029 (result contract, artifact v2), ADR 0030 (P5-10
-hardening). Plan: `implementation-phase5.md`.
+hardening), ADRs 0040–0041 (Phase 6 advisory/merge/handoff integration,
+planning-only). Plan: `implementation-phase5.md` + `implementation-phase6.md`
+§§5–5.5 (normative; not duplicated here).
 
 Limitation on record: deterministic validation proves a finding is
 structurally valid, tied to the PR, accurately located, and evidence-grounded.
@@ -189,5 +191,10 @@ their own domain with the named advisory cap at orchestration (§5.3 order
 head-coordinate contract (verified head actuals only; base evidence maps
 solely via exact one-to-one diff correspondence; unmappable excluded; no
 manufactured conflict; conflict metadata carries ids/paths/symbol/lines/counts
-only). Advisory count-cap overflow is an orchestration merge diagnostic,
+only). Verified locations ride the run-scoped §5.5 handoff envelope
+(`findingId`/canonical path/fallback symbol/verified actuals, discarded
+after run; `ValidatedFinding` and `run.json` v2 unchanged — ADR 0041).
+Conflict/advisory diagnostics are transient-only (orchestration return +
+bounded logger aggregates; no `run.json` per-finding conflict records).
+Advisory count-cap overflow is an orchestration merge diagnostic,
 never a check code.

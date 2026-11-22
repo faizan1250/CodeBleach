@@ -1,10 +1,13 @@
 # CodeBleach — Phase 6: Inferred Repository Conventions (plan only, no implementation)
 
-**Baseline:** `main` at `5b8aba8` (PR #69 merge,
+**Baseline (split):** runtime `main` at `5b8aba8` (PR #69 merge,
 `fix/final-pre-phase6-readiness`; Phase 5 hardening PRs #52–#69;
-deterministic-only validation, artifact v2; ADR 0039 two-pass authority;
-ADR 0038 occurrence-ordered PEM index plus the e75df21 sort-free single-scan
-linearization).
+deterministic-only validation, artifact v2 — last `src/` change) +
+docs baseline `main` at `17ee3a3` (PR #70 merge,
+`fix/phase6-readiness-blockers`; ADR 0040 + §§5.2–5.4 plan sync,
+docs-only, no `src/`/test change). ADR 0039 two-pass authority and ADR
+0038 occurrence-ordered PEM index plus the e75df21 sort-free single-scan
+linearization hold under both.
 **Audience:** implementing agent (future Phase 6 workstream).
 **Scope:** deterministic inferred-convention discovery, file cache, and advisory prompt injection.
 **Out of scope:** Phase 7 GitHub publishing/integration, Phase 8 evaluation/optimization, any change to Phase 5 validation semantics.
@@ -18,7 +21,8 @@ linearization).
 > occurrence-ordered interval index (not the never-implemented ADR 0037 probe).
 > Phase 7 publishing and Phase 8 evaluation are out of scope and unchanged by
 > this plan. Historical ADRs 0028–0040 are preserved, never rewritten; plan
-> corrections land in a new ADR (see P6-00).
+> corrections land in a new ADR (see P6-00). Baseline split (runtime
+> `5b8aba8` vs docs `17ee3a3`) is defined in the header above.
 
 ---
 
