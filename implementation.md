@@ -49,7 +49,7 @@ It must exit successfully and write a complete `.reviewer-out/run.json` containi
 | Phase 2 | Git diff execution/parsing, changed-file extraction, diff positions, changed-symbol extraction |
 | Phase 3 | Tree-sitter, language adapters, repository indexing, callers/callees, test/context retrieval, context ranking and token budgets |
 | Phase 4 | OpenCode API calls, real provider implementation, review prompts, real finding generation |
-| Phase 5 | Deterministic finding checks, semantic validation, fingerprints and production deduplication |
+| Phase 5 | Deterministic finding validation v1 (no semantic LLM), same-run fingerprints/dedupe; cross-run GitHub dedupe is Phase 7, eval optimization is Phase 8 |
 | Phase 6 | Inferred repository conventions and inferred-knowledge caching |
 | Phase 7 | GitHub Actions review workflow, Octokit publishing, PR comments and GitHub permissions for publishing |
 | Phase 8 | Evaluation dataset, metrics, baselines, cost/latency evaluation and incremental review |
