@@ -12,12 +12,19 @@ export const EVIDENCE_MAX_QUOTE_CHARS = 2000;
 export const EVIDENCE_MAX_LINE_SPAN = 50;
 export const EVIDENCE_SEARCH_RADIUS = 3;
 
-// Per-snapshot PEM interval index: each BEGIN..END pair in cached lines
-// becomes one closed interval; an unterminated BEGIN extends to EOF and an
-// orphan END extends from after the previous interval. One O(lines) scan per
+// Per-snapshot PEM interval index: every BEGIN/END occurrence is scanned in
+// source order (multiple per line included), so a trailing BEGIN after
+// BEGIN..END on one line stays open to EOF. Closed intervals verify only on
+// full coverage; unterminated BEGIN extends to EOF and orphan END extends
+// from after the previous interval. One O(lines + occurrences) scan per
 // cached (side, path); every span check after is a cheap overlap test.
-const PEM_BEGIN_RE = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/;
-const PEM_END_RE = /-----END [A-Z0-9 ]*PRIVATE KEY-----/;
+//
+// Redaction parity (src/utils/redact.ts is BEGIN-to-first-END, labels not
+// enforced): sequential completes verify; multi-BEGIN-before-END,
+// END-then-BEGIN, BEGIN-END-BEGIN, and trailing/orphan END cases reject
+// (fail-closed where the regex view diverges — security over permissiveness).
+const PEM_BEGIN_RE = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/g;
+const PEM_END_RE = /-----END [A-Z0-9 ]*PRIVATE KEY-----/g;
 
 interface PemInterval {
   startLine: number;
@@ -31,26 +38,21 @@ function buildPemIntervals(lines: readonly string[]): PemInterval[] {
   let coverEnd = 0;
   for (let line = 1; line <= lines.length; line += 1) {
     const text = lines[line - 1] ?? "";
-    const hasBegin = PEM_BEGIN_RE.test(text);
-    const hasEnd = PEM_END_RE.test(text);
-    if (hasBegin && hasEnd) {
-      if (open.length > 0) {
+    const events: Array<{ index: number; begin: boolean }> = [];
+    for (const match of text.matchAll(PEM_BEGIN_RE)) events.push({ index: match.index ?? 0, begin: true });
+    for (const match of text.matchAll(PEM_END_RE)) events.push({ index: match.index ?? 0, begin: false });
+    events.sort((a, b) => a.index - b.index);
+    for (const event of events) {
+      if (event.begin) {
+        open.push(line);
+      } else if (open.length > 0) {
         const start = open.pop() as number;
         intervals.push({ startLine: start, endLine: line, closed: true });
         if (line > coverEnd) coverEnd = line;
       } else {
-        intervals.push({ startLine: line, endLine: line, closed: true });
-        coverEnd = line;
-      }
-    } else if (hasBegin) {
-      open.push(line);
-    } else if (hasEnd) {
-      if (open.length > 0) {
-        const start = open.pop() as number;
-        intervals.push({ startLine: start, endLine: line, closed: true });
-        if (line > coverEnd) coverEnd = line;
-      } else {
-        intervals.push({ startLine: coverEnd + 1, endLine: line, closed: false });
+        // Second orphan END on one line clamps to a valid 1-based range.
+        const start = Math.min(line, coverEnd + 1);
+        intervals.push({ startLine: start, endLine: line, closed: false });
         coverEnd = line;
       }
     }
