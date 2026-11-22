@@ -191,15 +191,25 @@ Keep tickets independently reviewable. Proposed modules live under a new
    demo carries zero inferred conventions).
 6. Record decisions in a new ADR (next free number; never rewrite ADRs
    0028–0040).
+7. Lock the validation metadata handoff envelope (§5.5): run-scoped
+   `{findingId, canonicalPath, symbol, verifiedLocations}` plus the
+   execution result `{findings, conflictMetadata}`; `ValidatedFinding`
+   unchanged, no `run.json` locations/quotes/secrets, `validate()`
+   consumer contract preserved, no cited ranges, no global/cross-run
+   state. Any narrow internal API/refactor needed to carry the envelope
+   is documented with why + how Phase 5 stays unchanged.
 
 **Tests:** type-shape tests for `InferredConvention` + `ConventionEvidence`
 (bounds: `endLine >= startLine`, 1-based; ordering: file then startLine;
 serialization round-trip); threshold-boundary tests against the locked
 constants; a test pinning the §1 contract list (rules-only `rules.ts`,
-prompt suppression text hash, convention gate-pass).
+prompt suppression text hash, convention gate-pass); envelope tests
+(association by `findingId`, canonical path + fallback symbol present,
+verified-actuals-only, `ValidatedFinding` shape unchanged, run-scoped
+disposal).
 
 **Accept:** thresholds are named constants with tests; carrier decision
-documented; no code beyond types/constants.
+documented; envelope locked per §5.5; no code beyond types/constants.
 
 ### P6-01 — Deterministic detectors (naming, exports, errors, tests, wrappers)
 
@@ -844,13 +854,80 @@ is NOT a conflict.
   snapshot text in `run.json` conflict records); identical titles/
   descriptions at disjoint locations ⇒ both kept (prose never compared).
 
+### 5.5 Validation metadata handoff envelope (Blocker A)
+
+**Root cause (verified in tree).** `validateEvidence` returns
+`{ok, checks, locations: resolved}` (`src/validate/evidence.ts:407`;
+`VerifiedEvidenceLocation{side, path, startLine, endLine}` `:81-89`,
+actual matched lines never cited ranges `:87,:547-549`) and
+`ValidationEngineImpl.validate` passes `evidence.locations` once into
+`validateAttribution` (`src/validate/engine.ts:146`), which derives
+`basis` (`src/validate/attribution.ts:62-142`) and returns only
+`{ok, checks, introducedByPr, basis}` (`:13-28`); the engine keeps
+`basis` (`:176`) and drops `locations` — no branch stores them.
+`ValidatedFinding` (`src/types/validation.ts:146-167`) has no locations
+field, and the pipeline (`src/core/pipeline.ts:186-204`) stores
+`ValidatedFinding[]` verbatim with no second access path. Any §5.4
+conflict step needing head-mapped verified actuals must therefore carry
+them on a run-scoped orchestration-internal candidate — they are
+unreachable post-`validate()`.
+
+**Envelope (normative, plan-only types, never `ValidatedFinding` fields):**
+
+```ts
+interface ValidationHandoffEntry {
+  findingId: string;          // Finding.id — stable association key, never array index
+  canonicalPath: string;      // P5-02 provenance.canonicalPath (head-side, validated)
+  symbol: string;             // finding.symbol ?? unit symbol name (fallback resolved pre-validate, §5.4 rule C)
+  verifiedLocations: Array<{  // VERIFIED actuals only (§5.4 rule D); no cited ranges, no quotes, no secrets
+    side: "head" | "base";
+    path: string;             // validated canonical path (head) / oldPath-mapped path (base)
+    startLine: number;        // ACTUAL matched lines, 1-based
+    endLine: number;
+  }>;
+}
+interface AdvisoryExecutionResult {
+  findings: ValidatedFinding[];  // primaries-then-advisories append order (§5.3 step 9)
+  conflictMetadata: {           // transient-only counts + stable codes (ADR 0041); never per-finding records
+    suppressed: number; advisoryDuplicates: number; unmappableExcluded: number;
+    codes: string[];            // closed stable code set, no prose
+  };
+}
+```
+
+**Lifecycle:** retained after evidence validation (envelope built when
+evidence returns locations, keyed by `findingId` before attribution
+drops them); associated by stable identity (`findingId`, never position);
+canonical path + fallback symbol resolved pre-validate so the conflict
+resolver (`§5.4` rules A–E) receives entry + `ValidatedFinding`
+(`derivedTarget`) jointly without re-derivation; discarded after run
+(function-local / run-scoped object, no module-global, no file, no
+cross-run cache).
+
+**Constraints:** `ValidatedFinding` unchanged (no locations field);
+`validate()` consumer contract preserved where feasible (primary call
+keeps the single-`findings[]`-in / `ValidatedFinding[]`-out shape;
+advisory is a second call with the same shape, §5.2); `run.json`
+carries no locations/quotes/secrets and no per-finding conflict records
+(transient-only, ADR 0041); envelope carries verified actuals ONLY —
+raw model-cited ranges never enter it; no global/cross-run state.
+
+**Narrow internal API/refactor (if needed).** If carrying the envelope
+requires one (e.g. returning the envelope alongside `ValidatedFinding[]`
+on an internal path, or splitting the per-finding core from batch
+dedupe/cap per §5.3.1), P6-00 documents WHY (Blocker A unreachability
+above) and HOW Phase 5 stays unchanged: same per-finding stage order,
+same check codes, same `resolveDuplicates`/`selectWithinCap` comparators
+for the primary domain, same artifact bytes with advisories absent
+(M8), pinned by the §6 matrix.
+
 ---
 
 ## 6. Test coverage and acceptance
 
 | Area | Tests |
 |---|---|
-| Types/thresholds (P6-00) | shape (`ConventionEvidence` bounds/order/serialization), boundary constants, §1 contract pins |
+| Types/thresholds (P6-00) | shape (`ConventionEvidence` bounds/order/serialization), boundary constants, §1 contract pins, handoff envelope §5.5 (association/disposal/`ValidatedFinding`-unchanged) |
 | Detectors (P6-01) | positive/negative/mixed/empty per family, eligibility exclusion, determinism under permutation |
 | Support (P6-02) | per-detector eligible denominator, ratio + count boundaries, zero-eligible safety, cap order stability |
 | Cache (P6-03) | key stability/drift (content, detector, schema, sampling-policy), stale rebuild, failure matrix (never fails run), atomic write, path containment |
