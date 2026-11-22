@@ -1,6 +1,9 @@
 # CodeBleach — Phase 6: Inferred Repository Conventions (plan only, no implementation)
 
-**Baseline:** `main` at or after Phase 5 hardening (PRs #52–#66; deterministic-only validation, artifact v2).
+**Baseline:** `main` at or after PR #68 (Phase 5 hardening PRs #52–#68;
+deterministic-only validation, artifact v2; ADR 0039 two-pass authority;
+ADR 0038 occurrence-ordered PEM index plus the e75df21 sort-free single-scan
+linearization).
 **Audience:** implementing agent (future Phase 6 workstream).
 **Scope:** deterministic inferred-convention discovery, file cache, and advisory prompt injection.
 **Out of scope:** Phase 7 GitHub publishing/integration, Phase 8 evaluation/optimization, any change to Phase 5 validation semantics.
@@ -28,12 +31,18 @@ These constraints are fixed for Phase 6 v1 (from `systemdesign.md` §6). Do not 
 
 1. **Explicit rules are authoritative.** `.reviewer.yml` `rules[]` keep their ids,
    severity, and path scoping. Injected first, numbered (`rule:arch-001`).
-   Only the primary review pass sees them (P6-04).
+   Only the primary review pass sees them (P6-04). The primary pass input is
+   existing context + explicit rules only — byte-identical with conventions
+   on/off — and no inferred item ever enters the primary pass.
 2. **Inferred is advisory only**, produced by a SEPARATE convention-advisory
    pass — never mixed into the primary pass. Advisory findings are
-   `convention`-category ONLY, max severity `low`; a non-convention category
-   or above-`low` severity from the advisory pass is impossible by
-   app-enforced invariant (orchestration merge cap, §5), not by prompt text.
+   `convention`-category ONLY, max severity `low`, no `ruleId` (any supplied
+   `ruleId` rejected); a non-convention category, above-`low` severity, or any
+   present `ruleId` from the advisory pass is impossible by
+   app-enforced invariant (orchestration merge gates, §5), not by prompt text.
+   The advisory pass runs under its own separate template, version, hash,
+   contract, validation, and boundary — never as a section appended to the
+   primary prompt.
    Provenance (`origin.pass: "convention-advisory"`) is stamped by trusted
    orchestration code, never by an LLM field.
 3. Inferred knowledge can **never raise severity**, **never be the sole basis for
@@ -59,11 +68,14 @@ duplicate modules):
 - **Explicit-only rules today.** `src/context/rules.ts:4-10` — "No inference:
   output is always a filtered view of the validated config, in configuration
   order." `selectRulesForFile` + `matchGlob` are reused, not forked.
-- **Prompt suppression to lift deliberately.** `src/review/prompt.ts:17`
+- **Primary prompt stays unchanged.** `src/review/prompt.ts:17`
   ("`convention` is Phase 6 and is never requested here"), `CATEGORY_ORDER`
   excludes `convention`, and `buildReviewPrompt` appends "Never report
-  convention findings" (`:177`). Phase 6 replaces this line with the advisory
-  authority text (§5), never by deleting the guard silently.
+  convention findings" (`:177`) — all preserved verbatim. Phase 6 never edits
+  the primary template, `CODE_REVIEW_PROMPT_VERSION`, categories, hash,
+  serialization, or output contract. The advisory pass gets its own separate
+  template, version, hash, tests, contract, validation, and boundary
+  (P6-04, §5).
 - **Policy plumbing already convention-safe.** `src/validate/policy.ts:9-10`
   (`convention` has no toggle, always passes the category gate),
   `CATEGORY_POLICY_GROUP` maps `convention → "convention"`, and unknown
@@ -98,8 +110,10 @@ duplicate modules):
 1. Deterministic detectors produce candidate conventions from the head snapshot.
 2. Support-ratio + evidence-count filtering keeps only high-support patterns.
 3. One content-keyed cache file with defined invalidation (§4).
-4. Advisory injection into the review prompt, explicitly labeled and ordered
-   after explicit rules, with authority guardrails in the template text (§5).
+4. A separate advisory contract: its own template, version, hash, and output
+   contract carrying inferred conventions labeled advisory, with authority
+   guardrails in its own template text (§5) — never a section appended after
+   explicit rules in the primary prompt.
 5. Explicit-over-inferred precedence proven by tests; inferred-only findings
    capped per the authority constraints.
 6. Fully offline, deterministic, bounded (file/sample/byte/token caps).
@@ -219,10 +233,6 @@ from that detector's denominator (never counted as misses).
 mixed, empty file, binary guard, ineligible-file exclusion); detector output
 is byte-identical across runs and input permutations.
 
-**Tests:** per-detector unit tests on synthetic sources (positive, negative,
-mixed, empty file, binary guard); detector output is byte-identical across
-runs and input permutations.
-
 **Accept:** all detectors pure + tested; no I/O, no model calls, no new
 dependencies.
 
@@ -298,67 +308,95 @@ atomic write; no cache read/write outside `repoDir`.
 with identical file list changes the key); sampling-policy drift proven to
 invalidate by test.
 
-### P6-04 — Advisory pass + prompt injection (lift the suppression deliberately)
+### P6-04 — Separate convention-advisory pass (primary prompt untouched)
 
-**Modules:** `src/review/prompt.ts` (+ template), advisory-pass orchestration,
-prompt version bump.
+**Modules:** new advisory template (own file, own version constant), new
+advisory-pass orchestration. `src/review/prompt.ts` and its template get NO
+diff — no primary template edit, no `CODE_REVIEW_PROMPT_VERSION` bump.
 
 **Work — two passes, strictly separated:**
 
-1. **Primary pass (unchanged authority):** existing context + explicit rules
-   only, ordinary finding categories, no inferred input. Its prompt, payload,
-   and output shape are byte-identical with conventions on/off (test pins
-   this). Suppression of `convention` findings in the primary pass stays.
-2. **Convention-advisory pass (new, separate):** runs after (or alongside) the
-   primary pass with bounded context + inferred conventions labeled advisory
-   (`"inferredConventions (advisory — see authority rules)"`). Its output is
-   constrained by app code, not by model obedience:
-   `convention`-category ONLY, max severity `low`; anything else is rejected
-   at the orchestration boundary before merge. `origin.pass` is stamped
-   `"convention-advisory"` by trusted code; the model never supplies
+1. **Primary pass (byte-identical on/off):** existing context + explicit rules
+   only, ordinary finding categories, zero inferred input. Template bytes,
+   `CODE_REVIEW_PROMPT_VERSION`, requested categories, template hash,
+   payload serialization, and output contract are byte-identical with
+   conventions on/off — pinned by a test that builds the primary prompt both
+   ways and asserts equality. The "Never report convention findings" guard
+   stays verbatim. No inference into primary, ever.
+2. **Convention-advisory pass (new, separate contract):** runs after (or
+   alongside) the primary pass with bounded inferred context ONLY (no
+   explicit rules) + inferred conventions labeled advisory
+   (`"inferredConventions (advisory — see authority rules)"`). It owns a
+   separate template file with its own version constant, hash test, output
+   contract, validation, and merge boundary — never a section appended to the
+   primary prompt. Its output is constrained by app code, not by model
+   obedience: `convention`-category ONLY, max severity `low`, and NO
+   `ruleId`; anything else is rejected at the orchestration boundary before
+   merge. `origin.pass` is stamped `"convention-advisory"` by trusted code
+   (any model-supplied value overwritten); the model never supplies
    provenance.
 3. **Deterministic merge (orchestration, tested):** advisory findings are
    appended; primary findings are never altered, dropped, or re-ranked
-   because of advisory output. Explicit rules stay authoritative on conflict
-   (explicit wins; the conflict case is covered in P6-05).
-4. Replace the "Never report convention findings" line with the authority text
-   (§5) in the template; bump `CODE_REVIEW_PROMPT_VERSION` (`code-review-v2`)
-   so the existing prompt-hash machinery records the change.
-5. Advisory section obeys the token budget share from P6-00 (whole-convention
-   truncation, explicit rules never truncated for inferred).
+   because of advisory output. Explicit wins on conflict per the deterministic
+   conflict identity (§5.1): a conflicting advisory finding is suppressed and
+   the primary finding stays byte-identical.
+4. Primary template, `CODE_REVIEW_PROMPT_VERSION` (`code-review-v1`),
+   `CATEGORY_ORDER`, and the suppression line are preserved verbatim (a test
+   pins the primary template hash and version). The advisory authority text
+   (§5) lives ONLY in the separate advisory template, which gets its own
+   version constant and hash test — no primary version bump exists.
+5. Advisory input obeys the token budget share from P6-00 (whole-convention
+   truncation; explicit rules are never truncated for inferred because the
+   advisory pass never carries explicit rules).
 6. `convention` category stays out of the primary pass's requested in-scope
-   categories (`CATEGORY_ORDER` unchanged); advisory findings never carry a
-   `ruleId` — inferred `inf-*` ids can never match a `.reviewer.yml` rule id
-   (P6-05 pins the rejection).
+   categories (`CATEGORY_ORDER` unchanged); advisory findings must carry NO
+   `ruleId` — missing is the only valid state. ANY supplied `ruleId` on an
+   advisory finding is rejected at the orchestration boundary before
+   validation: `inf-*` and fabricated ids (which `rule_id_unknown` would
+   reject) AND real rule ids (which validation would otherwise ACCEPT via the
+   `rule_ok` path — hence presence itself is rejected in orchestration).
+   P6-05 pins the four-case matrix.
 
-**Tests:** primary prompt/payload byte-identical with conventions on/off;
-advisory section present/labeled/ordered-after-explicit; authority text
-present verbatim; budget truncation drops whole conventions; prompt version +
-hash update; non-convention or above-`low` advisory output rejected at the
-merge boundary; provenance stamped by code (model-supplied pass ignored);
-`--no-llm`/demo carry no advisory section.
+**Tests:** primary prompt/payload byte-identical with conventions on/off
+(template bytes, version, categories, hash, serialization, output contract);
+primary template hash + version pinned unchanged; separate advisory
+template/version/hash/contract present and distinct from primary; advisory
+authority text present verbatim in the advisory template only; budget
+truncation drops whole conventions; non-convention, above-`low`, or
+`ruleId`-carrying advisory output rejected at the merge boundary (four-case
+ruleId matrix: missing ok, `inf-*` / real / fabricated rejected);
+model-supplied provenance overwritten by code stamping;
+`--no-llm`/demo carry no advisory pass.
 
-**Accept:** suppression lifted only via the labeled advisory pass; no silent
-guard deletion (test asserts the old bare line is gone AND the authority text
-is present); primary pass provably inference-free.
+**Accept:** primary prompt provably inference-free and byte-identical on/off
+(no primary diff exists); advisory lives only under its separate contract;
+no silent guard change (test asserts the primary suppression line is still
+present verbatim).
 
 ### P6-05 — Policy/validation guards and docs hardening
 
 **Work:**
 
-1. Confirm no validator change: inferred ids are namespaced (`inf-*`) and are
-   not valid `ruleId` (`rule_id_unknown` already rejects them — add a
-   regression test proving an inferred-style id is rejected, without touching
-   the closed code set). Check codes stay closed; `run.json` shape unchanged.
+1. Confirm no validator change: advisory findings must carry NO `ruleId`
+   (missing is the only valid state). ANY supplied `ruleId` on advisory
+   output is rejected at the orchestration boundary before validation —
+   four cases, all tested: (a) missing ⇒ ok; (b) `inf-*` ⇒ rejected (would
+   fail `rule_id_unknown`); (c) real rule id ⇒ rejected (validation would
+   otherwise ACCEPT it via `rule_ok`, so presence itself is rejected in
+   orchestration); (d) fabricated id ⇒ rejected (`rule_id_unknown`). No new
+   Phase 5 codes. Check codes stay closed; `run.json` shape unchanged.
 2. Confirm `convention` gate behavior unchanged (always passes; no toggle).
+   Category=`convention` + severity≤`low` gates run at the orchestration
+   boundary BEFORE validation; validation never sees violating advisory
+   output.
 3. Pin the caps at the orchestration boundary (app-enforced, tested): the
-   merge step rejects advisory output that is not `convention`-category or is
-   above `low` before it can reach validation. Prompt authority text is
-   guidance (tested verbatim); the caps are invariants (tested by feeding
-   violating advisory output at the boundary).
-4. Provenance: `origin.pass` for advisory findings is set by orchestration
-   code; model-supplied provenance is ignored (test: forged pass value does
-   not survive the merge).
+   merge step rejects advisory output that is not `convention`-category, is
+   above `low`, or carries any `ruleId`, before it can reach validation.
+   Prompt authority text is guidance (tested verbatim); the caps are
+   invariants (tested by feeding violating advisory output at the boundary).
+4. Provenance: `origin.pass` for advisory findings is stamped by trusted
+   orchestration code; any model-supplied pass value is overwritten, never
+   trusted (test: forged pass value does not survive the merge).
 5. Sync `systemdesign.md` §6/§13 rows, `docs/validation.md` (one line: inferred
    is advisory, never validation evidence), and README docs index if a new doc
    is added. No ADR rewrites.
@@ -401,42 +439,110 @@ key = sha1(
 
 ## 5. Authority enforcement (two passes + app-enforced invariants)
 
-Prompt text guides the model; app code enforces the invariants. The two must
-not be confused: verbatim prompt tests prove guidance is present, boundary
-tests prove violations are impossible even when the model disobeys.
+Five guarantee kinds — do not conflate them:
+
+1. **Prompt guidance** (advisory-template text, tested verbatim): states the
+   never-rules (raise severity / sole-basis-above-low / override explicit) to
+   the model. Holds only when the model obeys.
+2. **App-enforced invariants** (orchestration merge boundary, tested against a
+   disobedient model): advisory output must be `convention`-category AND
+   severity ≤ `low` AND carry no `ruleId` — violations rejected before
+   validation. Hold even when the model disobeys.
+3. **Provenance** (trusted code): `origin.pass` stamped `"primary"` vs
+   `"convention-advisory"` by orchestration; any model-supplied pass value is
+   overwritten, never trusted.
+4. **Merge order** (deterministic orchestration): advisory findings appended
+   only; primary findings never altered, dropped, or re-ranked; explicit wins
+   on conflict per §5.1.
+5. **Phase 5 unchanged:** closed check-code set, validator, publisher, and
+   artifact shape untouched; caps enforced before validation, never by new
+   codes.
 
 1. **Two passes.** Primary: explicit rules + existing context, ordinary
-   categories, zero inferred input. Convention-advisory: bounded context +
-   inferred conventions, labeled advisory. Separate prompts, separate calls,
-   separate provenance (`origin.pass: "primary"` vs `"convention-advisory"`
-   stamped by orchestration — never model-supplied).
-2. **Prompt text** (normative guidance, tested verbatim): explicit rules
-   numbered and authoritative; advisory section labeled with the three
-   never-rules (raise severity / sole-basis-above-low / override explicit).
-3. **App-enforced invariants** (tested at the boundary, hold against a
-   disobedient model): advisory output must be `convention`-category and
-   severity ≤ `low` — violations rejected at the orchestration merge;
-   inferred `inf-*` ids can never satisfy `ruleId` (existing `rule_id_unknown`
-   path); deterministic merge never alters, drops, or re-ranks primary
-   findings for advisory ones; explicit wins on conflict.
-4. **No validator change:** the closed check-code set stays closed (§6
-   accept); caps are enforced before validation, never by new codes.
+   categories, zero inferred input; template, version, categories, hash,
+   serialization, and output contract byte-identical with conventions on/off.
+   Convention-advisory: bounded inferred context ONLY (no explicit rules) +
+   inferred conventions, labeled advisory, under its own separate template,
+   version, hash, contract, validation, and boundary. Separate prompts,
+   separate calls, separate provenance (see kind 3 above).
+
+### 5.1 Deterministic conflict identity (explicit-vs-advisory)
+
+A conflict holds when an advisory finding and a primary finding identify the
+same location — defined WITHOUT prose similarity (no title/description
+comparison: model prose is untrusted and non-deterministic):
+
+- **Canonical path:** both findings' head-side canonical paths equal after
+  snapshot path validation. **Renames canonicalize** to the head-side path:
+  `oldPath` spellings map to the same identity, never a separate conflict
+  domain.
+- **Symbol (with missing-symbol fallback):** compare
+  `finding.symbol ?? unit-symbol-name` on each side — a finding without its
+  own symbol inherits its unit's symbol. Comparison after fallback is exact;
+  no fuzzy matching.
+- **Overlapping target/evidence ranges:** resolved head-side target line plus
+  cited evidence spans; same canonical file sharing ≥ 1 line (shared-line
+  overlap, same safe direction as P5-07 `rangesOverlap`). Near-misses with no
+  shared line are NOT conflicts.
+- **When conflicting:** same canonical path AND same fallback-resolved symbol
+  AND overlapping ranges. Category and title are IGNORED (advisory is always
+  `convention`, primary never is; titles are model prose).
+- **Missing symbol:** falls back per above; two findings on different symbols
+  are distinct defects even at nearby lines (false separation shows both —
+  safe direction; false merging would hide a defect).
+- **Renames:** head-side path is the identity; evidence citing the old path
+  canonicalizes to it before comparison.
+- **Overlap calc:** interval intersection over `{target line} ∪ {evidence
+  spans}` per finding, same file only; ≥ 1 shared line ⇒ overlap.
+- **Multi-primary:** an advisory finding conflicting with ANY retained primary
+  finding is suppressed (one suppression record; the primary side is
+  untouched).
+- **Advisory dupes:** two advisory findings with the same conflict identity
+  collapse to the first in deterministic order; the second drops as an
+  advisory-duplicate (diagnostic). Primary findings are never involved.
+
+**Outcome:** a conflicting advisory finding is suppressed (dropped +
+diagnostic, never merged); the primary finding stays byte-identical (no
+mutation, no re-rank, no annotation).
+
+**Two invariants, tested separately:**
+
+- **(I1) Primary preserved:** primary findings byte-identical before/after
+  advisory merge, with or without conflicts.
+- **(I2) Conflict suppresses advisory:** every advisory finding conflicting
+  per §5.1 is dropped; suppression is total (no partial merge of a
+  conflicting finding).
 
 ### Authority acceptance cases (10 — each a test in P6-04/P6-05/§6 matrix)
 
 1. Primary pass input carries zero inferred items (payload pin with
    conventions enabled).
-2. Advisory pass receives bounded context only (budget cap pinned).
-3. Advisory `convention`-category finding at `low` merges (happy path).
-4. Advisory non-`convention` category rejected at the merge boundary.
-5. Advisory above-`low` severity rejected at the merge boundary.
-6. Provenance stamped by orchestration: forged model `origin.pass` ignored.
-7. Inferred `inf-*` id as `ruleId` fails with `rule_id_unknown` (closed set
-   untouched).
-8. Explicit-vs-advisory conflict: explicit finding stands, advisory defers.
-9. Primary findings byte-identical before/after advisory merge.
+2. Primary prompt byte-identical with conventions on/off (template bytes,
+   version, categories, hash, serialization, output contract).
+3. Advisory pass receives bounded inferred context only (no explicit rules,
+   budget cap pinned) under its own template/version/contract.
+4. Advisory `convention`-category `low` finding with NO `ruleId` merges
+   (happy path).
+5. Advisory non-`convention` category rejected at the merge boundary (even at
+   `low` severity).
+6. Advisory above-`low` severity rejected at the merge boundary (even with
+   `convention` category).
+7. Advisory `ruleId` matrix at the orchestration boundary (before
+   validation): missing ⇒ ok (case 4); `inf-*` ⇒ rejected; real rule id ⇒
+   rejected (presence itself, since validation would accept it); fabricated
+   id ⇒ rejected. Model-forged `origin.pass` overwritten by trusted code.
+   No new Phase 5 codes.
+8. Explicit-vs-advisory conflict (§5.1): same path + same fallback-resolved
+   symbol + overlapping ranges ⇒ advisory suppressed, primary
+   byte-identical; near-miss with no shared line ⇒ both kept; different
+   symbols ⇒ both kept; rename oldPath spelling ⇒ same identity, advisory
+   suppressed.
+9. Multi-primary + advisory dupes: advisory conflicting with any of N
+   primaries suppressed once; advisory-advisory dupes collapse to first;
+   primary set byte-identical (I1 + I2 together).
 10. Phase 5 validation + publisher behavior unchanged (validator/publisher
-    diffs empty; no new codes, statuses, or artifact fields).
+    diffs empty; no new codes, statuses, or artifact fields; advisory caps
+    enforced before validation, never by new codes).
 
 ---
 
@@ -448,8 +554,8 @@ tests prove violations are impossible even when the model disobeys.
 | Detectors (P6-01) | positive/negative/mixed/empty per family, eligibility exclusion, determinism under permutation |
 | Support (P6-02) | per-detector eligible denominator, ratio + count boundaries, zero-eligible safety, cap order stability |
 | Cache (P6-03) | key stability/drift (content, detector, schema, sampling-policy), stale rebuild, failure matrix (never fails run), atomic write, path containment |
-| Prompt (P6-04) | primary inference-free pin, advisory label/order, authority text, explicit-unchanged, boundary caps (category/severity), provenance stamping, budget truncation, version/hash, no-llm/demo exclusion |
-| Guards (P6-05) | inferred-id rejected as `ruleId`, convention gate unchanged, §5 authority cases 1–10, zero provider/GitHub calls, validator+publisher diff empty |
+| Prompt (P6-04) | primary inference-free + byte-identical pin (template/version/categories/hash/serialization/contract), separate advisory template+version+hash+contract, advisory authority text (advisory template only), boundary caps (category/severity/ruleId-presence), provenance overwrite, budget truncation, no-llm/demo exclusion |
+| Guards (P6-05) | advisory ruleId matrix (missing ok; inf-*/real/fabricated rejected pre-validation), convention gate unchanged, §5 authority cases 1–10 (§5.1 conflict identity, I1/I2), zero provider/GitHub calls, validator+publisher diff empty |
 | Integration | fixture repo end-to-end (conventions appear advisory; explicit rule wins on conflict); clean repo (no conventions, no findings change) |
 
 **Global accept:** `bun run check` green; deterministic (two runs, byte-identical
