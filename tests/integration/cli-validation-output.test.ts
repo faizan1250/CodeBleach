@@ -5,7 +5,7 @@ import { join } from "node:path";
 import {
   printValidationSummary,
   runReview,
-  VALIDATION_SUMMARY_UNAVAILABLE_WARNING,
+  validationSummaryUnavailableWarning,
 } from "../../src/cli/commands/review.ts";
 import { createLogger } from "../../src/core/logger.ts";
 
@@ -70,21 +70,24 @@ describe("p5-10 cli validation output", () => {
     }
   });
 
-  test("missing run.json warns on stderr without claiming validation counts", async () => {
+  test("missing run.json warns on stderr with the artifact path, no counts", async () => {
     const base = await mkdtemp(join(tmpdir(), "codebleach-p510-cli-"));
     try {
       const out = captureLog();
       const err = captureError();
       await printValidationSummary(join(base, "absent-out"));
-      expect(err.join("\n")).toContain(VALIDATION_SUMMARY_UNAVAILABLE_WARNING);
-      expect(err.join("\n")).toContain("review completed but validation summary unavailable");
+      const stderr = err.join("\n");
+      expect(stderr).toContain(validationSummaryUnavailableWarning(join(base, "absent-out")));
+      expect(stderr).toContain(join(base, "absent-out", "run.json"));
+      expect(stderr).toContain("review completed but validation summary unavailable");
       expect(out.join("\n")).not.toContain("validation:");
+      expect(stderr).not.toContain("finding(s)");
     } finally {
       await rm(base, { recursive: true, force: true });
     }
   });
 
-  test("malformed run.json warns on stderr without claiming validation counts", async () => {
+  test("malformed run.json warns on stderr with the artifact path, never contents", async () => {
     const base = await mkdtemp(join(tmpdir(), "codebleach-p510-cli-"));
     try {
       const dir = join(base, "out");
@@ -94,10 +97,12 @@ describe("p5-10 cli validation output", () => {
       const err = captureError();
       await printValidationSummary(dir);
       const stderr = err.join("\n");
-      expect(stderr).toContain(VALIDATION_SUMMARY_UNAVAILABLE_WARNING);
+      expect(stderr).toContain(validationSummaryUnavailableWarning(dir));
+      expect(stderr).toContain(join(dir, "run.json"));
       expect(out.join("\n")).not.toContain("validation:");
       expect(stderr).not.toContain("sk-live-123");
       expect(stderr).not.toContain("malformed");
+      expect(stderr).not.toContain("finding(s)");
     } finally {
       await rm(base, { recursive: true, force: true });
     }

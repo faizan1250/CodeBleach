@@ -33,6 +33,8 @@ export interface LocationInput {
   /** P5-02 head-side identity; the only read/target path, never the raw model path. */
   canonicalPath: string;
   reader: ValidationSnapshotReader;
+  /** Caller cancellation, forwarded verbatim to the head snapshot read. */
+  signal?: AbortSignal | undefined;
 }
 
 function countHeadLines(text: string): number {
@@ -47,7 +49,7 @@ function countHeadLines(text: string): number {
  * anchor, then same-symbol relocation. Reads only `canonicalPath` at head.
  */
 export async function validateLocation(input: LocationInput): Promise<LocationResult> {
-  const { finding, unit, changedFile, canonicalPath, reader } = input;
+  const { finding, unit, changedFile, canonicalPath, reader, signal } = input;
   const checks: CheckResult[] = [];
 
   if (!Number.isSafeInteger(finding.line) || finding.line < 1) {
@@ -71,7 +73,7 @@ export async function validateLocation(input: LocationInput): Promise<LocationRe
     return { ok: false, checks, inconclusive: false };
   }
 
-  const snapshot = await reader.readHead(canonicalPath);
+  const snapshot = await reader.readHead(canonicalPath, { signal });
   if (snapshot.status !== "ok") {
     const code: ValidationCheckCode =
       snapshot.status === "unsupported"

@@ -185,10 +185,21 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
     // tolerance is removed.
     const validatedList: ValidatedFinding[] = await runStage(
       "validation",
-      () => deps.validation.validate(findings, diffResult, contextResult.units, resolved),
+      () => deps.validation.validate(findings, diffResult, contextResult.units, resolved, { signal: input.signal }),
       (result) => result.filter(isAcceptedFinding).length,
     );
     validated = validatedList;
+    // Fail closed on a broken engine contract: a status-accepted item that
+    // fails the complete publish invariant (valid target + introduced-by-PR
+    // basis) is never published or counted — the stage count above already
+    // excludes it via the same guard, and the run fails here instead.
+    const incompleteAccepted = validatedList.filter((item) => item.status === "accepted" && !isAcceptedFinding(item));
+    if (incompleteAccepted.length > 0) {
+      throw new ReviewerError({
+        code: "INTERNAL",
+        message: `validation contract violation: ${incompleteAccepted.length} finding(s) accepted without the complete publish invariant`,
+      });
+    }
     validationSummary = summarizeValidation(validatedList);
     await persist("running");
 

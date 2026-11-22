@@ -50,6 +50,21 @@ describe("demo engines", () => {
     expect(result.failures).toEqual([]);
   });
 
+  test("demo accepted findings carry the complete publish invariant", async () => {
+    const diff = await demoDiffEngine.run({
+      repoDir: ".",
+      baseSha: DEMO_BASE_SHA,
+      headSha: DEMO_HEAD_SHA,
+      config,
+    });
+    const built = await demoContextEngine.build(diff, config, ".");
+    const findings = (await demoReviewEngine.review(built.units, config)).findings;
+    const validated = await demoValidationEngine.validate(findings, diff, built.units, config);
+    const accepted = validated.filter((v) => v.status === "accepted");
+    expect(accepted).toHaveLength(1);
+    expect(accepted.filter(isAcceptedFinding)).toHaveLength(1);
+  });
+
   test("dataset is stable across runs", async () => {
     const first = await demoDiffEngine.run({
       repoDir: ".",

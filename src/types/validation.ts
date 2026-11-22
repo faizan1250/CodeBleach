@@ -166,8 +166,16 @@ export interface ValidatedFinding {
   duplicateOfId?: string | undefined;
 }
 
-/** Publish-eligible subset: the publisher contract accepts only these. */
-export type AcceptedValidatedFinding = Omit<ValidatedFinding, "status"> & { status: "accepted" };
+/** Publish-eligible subset: the publisher contract accepts only complete
+ * accepted findings — status `accepted` plus a valid head-side `derivedTarget`
+ * plus a code-derived `introducedByPr: true` attribution with a defined valid
+ * `AttributionBasis`. `isAcceptedFinding` (src/core/contracts.ts) enforces
+ * the full invariant at runtime; status alone never suffices. */
+export type AcceptedValidatedFinding = Omit<ValidatedFinding, "status" | "derivedTarget" | "derivedAttribution"> & {
+  status: "accepted";
+  derivedTarget: ValidationTarget;
+  derivedAttribution: { introducedByPr: true; basis: AttributionBasis };
+};
 
 /** Aggregate counts over one validation run (artifact v2). */
 export interface ValidationSummary {

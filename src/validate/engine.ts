@@ -1,5 +1,5 @@
 import { ReviewerError } from "../core/errors.ts";
-import type { ValidationEngine } from "../core/contracts.ts";
+import type { ValidationEngine, ValidationOptions } from "../core/contracts.ts";
 import type {
   AttributionBasis,
   CheckResult,
@@ -87,10 +87,15 @@ export class ValidationEngineImpl implements ValidationEngine {
     diff: DiffResult,
     units: ReviewUnit[],
     config: ResolvedConfig,
+    options?: ValidationOptions | undefined,
   ): Promise<ValidatedFinding[]> {
     if (diff === null || diff === undefined || typeof diff !== "object") {
       throw internal("ValidationEngine requires a diff result");
     }
+    // The SAME caller signal reaches every location and evidence read, then
+    // the underlying Git subprocess: abort yields inconclusive findings (never
+    // accepted) and the reader is still released in the finally below.
+    const signal = options?.signal;
     const reader = this.createReader({ repoDir: this.repoDir, headSha: diff.headSha, mergeBase: diff.mergeBase });
     try {
       const slotted: (ValidatedFinding | undefined)[] = new Array(findings.length);
@@ -107,6 +112,7 @@ export class ValidationEngineImpl implements ValidationEngine {
           changedFile: provenance.changedFile,
           canonicalPath: provenance.canonicalPath,
           reader,
+          signal,
         });
         const checks = [...provenance.checks, ...location.checks];
         if (!location.ok) {
@@ -119,6 +125,7 @@ export class ValidationEngineImpl implements ValidationEngine {
           changedFile: provenance.changedFile,
           canonicalPath: provenance.canonicalPath,
           reader,
+          signal,
         });
         const evidenceChecks = [...checks, ...evidence.checks];
         if (!evidence.ok) {

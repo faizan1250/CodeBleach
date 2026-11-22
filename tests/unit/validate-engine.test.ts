@@ -636,3 +636,88 @@ describe("validation engine provenance (P5-02)", () => {
     expect(result.every((item) => !("llmVerdict" in item) || item.llmVerdict === undefined)).toBe(true);
   });
 });
+
+describe("substring evidence acceptance (P1)", () => {
+  function addedLines56(): { file: ChangedFile; diff: DiffResult; unit: ReviewUnit } {
+    const file: ChangedFile = {
+      path: "src/a.ts",
+      oldPath: null,
+      status: "modified",
+      language: "typescript",
+      hunks: [
+        {
+          oldStart: 5,
+          oldLines: 0,
+          newStart: 5,
+          newLines: 2,
+          lines: [
+            { kind: "add", oldLine: null, newLine: 5, position: 5, text: "code" },
+            { kind: "add", oldLine: null, newLine: 6, position: 6, text: "code" },
+          ],
+        },
+      ],
+      commentableLines: [5, 6],
+      symbols: [{ name: "render", kind: "function", startLine: 1, endLine: 10, changedLines: [5, 6] }],
+    };
+    const diff: DiffResult = { baseSha: BASE, headSha: HEAD, mergeBase: BASE, files: [file] };
+    const unit: ReviewUnit = {
+      ...testUnit(),
+      file: {
+        path: file.path,
+        oldPath: file.oldPath,
+        status: file.status,
+        language: file.language,
+        commentableLines: [...file.commentableLines],
+      },
+      symbol: { name: "render", kind: "function", startLine: 1, endLine: 10, changedLines: [5, 6] },
+    };
+    return { file, diff, unit };
+  }
+
+  test("substring evidence on an added line is accepted with a recorded basis", async () => {
+    const lines = headText(9).split("\n");
+    lines[0] = "const total = computeSum(items);";
+    const engine = engineWithHeadText(lines.join("\n"));
+    const finding = testFinding();
+    finding.evidence = [{ file: "src/a.ts", startLine: 1, endLine: 1, quote: "total = computeSum(items)" }];
+    const result = await engine.validate([finding], testAddedDiff(), [testUnit()], ConfigFileSchema.parse({}));
+    expect(result[0]?.status).toBe("accepted");
+    expect(result[0]?.derivedAttribution).toEqual({
+      introducedByPr: true,
+      basis: { kind: "added-lines", evidenceIndex: 0, file: "src/a.ts", lines: [1] },
+    });
+    expect(result[0]?.checks.some((check) => check.name === "introduced_by_pr" && check.outcome === "passed")).toBe(
+      true,
+    );
+  });
+
+  test("span over added and unchanged lines attributes only the added overlap", async () => {
+    const { diff, unit } = addedLines56();
+    const engine = engineWithHeadText(headText(10));
+    const finding = testFinding();
+    finding.line = 5;
+    finding.evidence = [{ file: "src/a.ts", startLine: 5, endLine: 6, quote: "line-5\nline-6\nline-7" }];
+    const result = await engine.validate([finding], diff, [unit], ConfigFileSchema.parse({}));
+    expect(result[0]?.status).toBe("accepted");
+    expect(result[0]?.derivedAttribution).toEqual({
+      introducedByPr: true,
+      basis: { kind: "added-lines", evidenceIndex: 0, file: "src/a.ts", lines: [5, 6] },
+    });
+  });
+
+  test("substring verified on a nearby unchanged line never attributes", async () => {
+    const { diff, unit } = addedLines56();
+    const engine = engineWithHeadText(headText(10));
+    const finding = testFinding();
+    finding.line = 5;
+    finding.evidence = [{ file: "src/a.ts", startLine: 5, endLine: 6, quote: "ine-8" }];
+    const result = await engine.validate([finding], diff, [unit], ConfigFileSchema.parse({}));
+    expect(result[0]?.status).toBe("inconclusive");
+    expect(result[0]?.status).not.toBe("accepted");
+    expect(result[0]?.checks.some((check) => check.name === "evidence_quote" && check.outcome === "passed")).toBe(true);
+    expect(
+      result[0]?.checks.some((check) => check.name === "introduced_by_pr" && check.outcome === "inconclusive"),
+    ).toBe(true);
+    expect(result[0]?.derivedAttribution).toEqual({ introducedByPr: false });
+  });
+});

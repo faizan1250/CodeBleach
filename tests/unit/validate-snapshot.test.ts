@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { ReviewerError } from "../../src/core/errors.ts";
 import type { TreeEntry } from "../../src/context/snapshot.ts";
+import { isGitAbort, isGitTimeout } from "../../src/context/snapshot.ts";
 import { runProcess } from "../../src/utils/spawn.ts";
 import {
   DEFAULT_VALIDATION_SNAPSHOT_MAX_ENTRIES,
@@ -8,7 +9,7 @@ import {
   GitValidationSnapshotReader,
   validateSnapshotPath,
 } from "../../src/validate/snapshot.ts";
-import type { ValidationSnapshotSource } from "../../src/validate/snapshot.ts";
+import type { ValidationSnapshotSource, ValidationSourceReadOptions } from "../../src/validate/snapshot.ts";
 
 const HEAD = "c".repeat(40);
 const BASE = "d".repeat(40);
@@ -91,24 +92,35 @@ class ScriptSource implements ValidationSnapshotSource {
   blobReads: string[] = [];
   indexError: ReviewerError | null = null;
   gitCalls = 0;
+  /** Every signal the reader forwarded, in call order. */
+  receivedSignals: (AbortSignal | undefined)[] = [];
+  /** When true, the read waits for the forwarded signal to abort, then fails as aborted. */
+  hangIndex = false;
+  hangBlob = false;
 
-  async listHeadFiles(): Promise<Map<string, TreeEntry>> {
+  async listHeadFiles(options?: ValidationSourceReadOptions | undefined): Promise<Map<string, TreeEntry>> {
     this.gitCalls += 1;
     this.indexReads.push("head");
+    this.receivedSignals.push(options?.signal);
+    await this.gate("index", options?.signal);
     if (this.indexError !== null) throw this.indexError;
     return new Map(this.headFiles);
   }
 
-  async listBaseFiles(): Promise<Map<string, TreeEntry>> {
+  async listBaseFiles(options?: ValidationSourceReadOptions | undefined): Promise<Map<string, TreeEntry>> {
     this.gitCalls += 1;
     this.indexReads.push("base");
+    this.receivedSignals.push(options?.signal);
+    await this.gate("index", options?.signal);
     if (this.indexError !== null) throw this.indexError;
     return new Map(this.baseFiles);
   }
 
-  async readBlobText(oid: string): Promise<string> {
+  async readBlobText(oid: string, options?: ValidationSourceReadOptions | undefined): Promise<string> {
     this.gitCalls += 1;
     this.blobReads.push(oid.toLowerCase());
+    this.receivedSignals.push(options?.signal);
+    await this.gate("blob", options?.signal);
     const hit = this.blobs.get(oid.toLowerCase());
     if (hit === undefined) {
       throw new ReviewerError({
@@ -119,6 +131,16 @@ class ScriptSource implements ValidationSnapshotSource {
     }
     if (hit instanceof ReviewerError) throw hit;
     return hit;
+  }
+
+  private async gate(kind: "index" | "blob", signal: AbortSignal | undefined): Promise<void> {
+    const hanging = kind === "index" ? this.hangIndex : this.hangBlob;
+    if (!hanging) return;
+    if (signal === undefined) throw new Error(`ScriptSource ${kind} hang requires a forwarded signal`);
+    if (signal.aborted) throw abortError();
+    await new Promise<never>((_, reject) => {
+      signal.addEventListener("abort", () => reject(abortError()), { once: true });
+    });
   }
 
   stats(): { gitCalls: number } {
@@ -235,6 +257,66 @@ describe("path and SHA policy", () => {
     expect(source.gitCalls).toBe(0);
   });
 
+  test("forwards the same signal to index and blob source reads", async () => {
+    const source = sourceWithFile("src/a.ts", "ok\n");
+    const reader = readerFor(source);
+    const controller = new AbortController();
+    const result = await reader.readHead("src/a.ts", { signal: controller.signal });
+    expect(result.status).toBe("ok");
+    expect(source.receivedSignals).toHaveLength(2);
+    expect(source.receivedSignals[0]).toBe(controller.signal);
+    expect(source.receivedSignals[1]).toBe(controller.signal);
+  });
+
+  test("forwards the same signal to base-side reads", async () => {
+    const source = new ScriptSource();
+    source.baseFiles.set("src/a.ts", blobEntry(OID_A, "src/a.ts"));
+    source.blobs.set(OID_A, "ok\n");
+    const reader = readerFor(source);
+    const controller = new AbortController();
+    const result = await reader.readBase("src/a.ts", { signal: controller.signal });
+    expect(result.status).toBe("ok");
+    expect(source.receivedSignals).toHaveLength(2);
+    expect(source.receivedSignals[0]).toBe(controller.signal);
+    expect(source.receivedSignals[1]).toBe(controller.signal);
+  });
+
+  test("abort during the index read is an aborted outcome", async () => {
+    const source = sourceWithFile("src/a.ts", "ok\n");
+    source.hangIndex = true;
+    const reader = readerFor(source);
+    const controller = new AbortController();
+    const pending = reader.readHead("src/a.ts", { signal: controller.signal });
+    controller.abort();
+    const result = await pending;
+    expect(result.status).toBe("aborted");
+    expect(source.blobReads).toHaveLength(0);
+  });
+
+  test("abort during the blob read is an aborted outcome", async () => {
+    const source = sourceWithFile("src/a.ts", "ok\n");
+    source.hangBlob = true;
+    const reader = readerFor(source);
+    const controller = new AbortController();
+    const pending = reader.readHead("src/a.ts", { signal: controller.signal });
+    controller.abort();
+    const result = await pending;
+    expect(result.status).toBe("aborted");
+  });
+
+  test("aborted reads cache nothing, so retry after cancel succeeds", async () => {
+    const source = sourceWithFile("src/a.ts", "ok\n");
+    source.hangBlob = true;
+    const reader = readerFor(source);
+    const controller = new AbortController();
+    const pending = reader.readHead("src/a.ts", { signal: controller.signal });
+    controller.abort();
+    expect((await pending).status).toBe("aborted");
+    expect(reader.stats().entries).toBe(0);
+    source.hangBlob = false;
+    expect(await reader.readHead("src/a.ts")).toEqual({ status: "ok", text: "ok\n", bytes: 3 });
+  });
+
   test("missing path is not_found", async () => {
     const source = new ScriptSource();
     const reader = readerFor(source);
@@ -291,6 +373,9 @@ describe("reads and per-run cache", () => {
     const reader = readerFor(source);
     const result = await reader.readHead("src/a.ts", { maxBytes: 3 });
     expect(result.status).toBe("size_limit");
+    if (result.status !== "size_limit") throw new Error("expected size_limit");
+    expect(result.kind).toBe("per-file-limit");
+    expect(result.reason).toContain("per-file");
     expect(reader.stats().entries).toBe(0);
   });
 
@@ -302,7 +387,11 @@ describe("reads and per-run cache", () => {
     source.blobs.set(OID_B, "bbb");
     const reader = readerFor(source, { maxTotalBytes: 5 });
     expect((await reader.readHead("src/one.ts")).status).toBe("ok");
-    expect((await reader.readHead("src/two.ts")).status).toBe("size_limit");
+    const capped = await reader.readHead("src/two.ts");
+    expect(capped.status).toBe("size_limit");
+    if (capped.status !== "size_limit") throw new Error("expected size_limit");
+    expect(capped.kind).toBe("cumulative-limit");
+    expect(capped.reason).toContain("run cap");
     expect(reader.stats()).toMatchObject({ entries: 1, cachedBytes: 3 });
   });
 
@@ -380,6 +469,25 @@ describe("failure mapping", () => {
     expect((await reader.readHead("src/a.ts")).status).toBe("aborted");
   });
 
+  test("abort stays distinct from timeout and output-limit causes", async () => {
+    expect(isGitAbort(abortError())).toBe(true);
+    expect(isGitAbort(timeoutError())).toBe(false);
+    expect(isGitTimeout(abortError())).toBe(false);
+    const outputLimit = new ReviewerError({
+      code: "GIT_FAILED",
+      message: "output cap hit",
+      cause: { reason: "output-limit", stream: "stdout", limitBytes: 8, observedBytes: 16, bufferedBytes: 8 },
+    });
+    expect(isGitAbort(outputLimit)).toBe(false);
+    expect(isGitTimeout(outputLimit)).toBe(false);
+    const source = sourceWithFile("src/a.ts", "ok\n");
+    const reader = readerFor(source);
+    const controller = new AbortController();
+    controller.abort();
+    expect((await reader.readHead("src/a.ts", { signal: controller.signal })).status).toBe("aborted");
+    expect((await reader.readHead("src/a.ts")).status).toBe("ok");
+  });
+
   test("typed per-file limit is size_limit", async () => {
     const source = new ScriptSource();
     source.headFiles.set("src/a.ts", blobEntry(OID_A, "src/a.ts"));
@@ -388,12 +496,40 @@ describe("failure mapping", () => {
     expect((await reader.readHead("src/a.ts")).status).toBe("size_limit");
   });
 
+  test("per-file limit names the per-file cap with byte counts", async () => {
+    const source = new ScriptSource();
+    source.headFiles.set("src/a.ts", blobEntry(OID_A, "src/a.ts"));
+    source.blobs.set(OID_A, perFileLimitError());
+    const reader = readerFor(source);
+    const result = await reader.readHead("src/a.ts");
+    if (result.status !== "size_limit") throw new Error("expected size_limit");
+    expect(result.kind).toBe("per-file-limit");
+    expect(result.sizeBytes).toBe(999);
+    expect(result.limitBytes).toBe(10);
+    expect(result.reason).toContain("per-file");
+    expect(result.reason).toContain("999");
+  });
+
   test("typed cumulative limit is size_limit", async () => {
     const source = new ScriptSource();
     source.headFiles.set("src/a.ts", blobEntry(OID_A, "src/a.ts"));
     source.blobs.set(OID_A, cumulativeLimitError());
     const reader = readerFor(source);
     expect((await reader.readHead("src/a.ts")).status).toBe("size_limit");
+  });
+
+  test("cumulative limit names the run cap with byte counts, never the per-file cap", async () => {
+    const source = new ScriptSource();
+    source.headFiles.set("src/a.ts", blobEntry(OID_A, "src/a.ts"));
+    source.blobs.set(OID_A, cumulativeLimitError());
+    const reader = readerFor(source);
+    const result = await reader.readHead("src/a.ts");
+    if (result.status !== "size_limit") throw new Error("expected size_limit");
+    expect(result.kind).toBe("cumulative-limit");
+    expect(result.sizeBytes).toBe(12);
+    expect(result.limitBytes).toBe(10);
+    expect(result.reason).toContain("run cap");
+    expect(result.reason).not.toContain("per-file");
   });
 
   test("untyped cap wording propagates instead of becoming size_limit", async () => {
@@ -491,5 +627,18 @@ describe("fake validation snapshot reader", () => {
   test("unscripted paths still throw loudly", async () => {
     const reader = new FakeValidationSnapshotReader({ headSha: HEAD, mergeBase: BASE });
     expect(() => reader.readHead("src/missing.ts")).toThrow();
+  });
+
+  test("pre-aborted signal returns aborted without touching the script", async () => {
+    const reader = new FakeValidationSnapshotReader({
+      headSha: HEAD,
+      mergeBase: BASE,
+      script: { head: { "src/a.ts": { status: "ok", text: "ok\n", bytes: 3 } } },
+    });
+    const controller = new AbortController();
+    controller.abort();
+    const result = await reader.readHead("src/a.ts", { signal: controller.signal });
+    expect(result.status).toBe("aborted");
+    expect(reader.reads).toHaveLength(0);
   });
 });

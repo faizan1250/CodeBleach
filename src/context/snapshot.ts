@@ -39,6 +39,11 @@ export interface GrepOptions {
   maxCount?: number | undefined;
 }
 
+/** Optional caller cancellation for snapshot Git reads; absent means run to completion. */
+export interface SnapshotSignalOptions {
+  signal?: AbortSignal | undefined;
+}
+
 const FULL_SHA_PATTERN = /^[0-9a-fA-F]{40}$|^[0-9a-fA-F]{64}$/;
 const TAB = 0x09;
 const LF = 0x0a;
@@ -385,10 +390,16 @@ export class SnapshotReader {
   }
 
   /** Tracked-file index of the head commit; repo-relative POSIX paths. */
-  async listHeadFiles(): Promise<Map<string, TreeEntry>> {
+  async listHeadFiles(options?: SnapshotSignalOptions | undefined): Promise<Map<string, TreeEntry>> {
     if (this.headIndex === null) {
       this.headIndex = parseLsTreeZ(
-        await this.runGit(["ls-tree", "-r", "-z", "--full-tree", this.head], "git ls-tree (head)"),
+        await this.runGit(
+          ["ls-tree", "-r", "-z", "--full-tree", this.head],
+          "git ls-tree (head)",
+          undefined,
+          undefined,
+          options?.signal,
+        ),
       );
     }
     // Copy so callers cannot mutate the cached index.
@@ -396,10 +407,16 @@ export class SnapshotReader {
   }
 
   /** Tracked-file index of the merge-base commit; repo-relative POSIX paths. */
-  async listBaseFiles(): Promise<Map<string, TreeEntry>> {
+  async listBaseFiles(options?: SnapshotSignalOptions | undefined): Promise<Map<string, TreeEntry>> {
     if (this.baseIndex === null) {
       this.baseIndex = parseLsTreeZ(
-        await this.runGit(["ls-tree", "-r", "-z", "--full-tree", this.base], "git ls-tree (base)"),
+        await this.runGit(
+          ["ls-tree", "-r", "-z", "--full-tree", this.base],
+          "git ls-tree (base)",
+          undefined,
+          undefined,
+          options?.signal,
+        ),
       );
     }
     // Copy so callers cannot mutate the cached index.
@@ -407,17 +424,17 @@ export class SnapshotReader {
   }
 
   /** Head-side source for a tracked regular file; renames resolve via path at head. */
-  async readHeadText(path: string): Promise<string> {
-    return this.readTreePath(await this.listHeadFiles(), path, "head");
+  async readHeadText(path: string, options?: SnapshotSignalOptions | undefined): Promise<string> {
+    return this.readTreePath(await this.listHeadFiles(options), path, "head");
   }
 
   /** Merge-base-side source for a tracked regular file; renames resolve via oldPath at base. */
-  async readBaseText(path: string): Promise<string> {
-    return this.readTreePath(await this.listBaseFiles(), path, "base");
+  async readBaseText(path: string, options?: SnapshotSignalOptions | undefined): Promise<string> {
+    return this.readTreePath(await this.listBaseFiles(options), path, "base");
   }
 
   /** Blob content by object id, cached per reader; size-checked before reading. */
-  async readBlobText(oid: string): Promise<string> {
+  async readBlobText(oid: string, options?: SnapshotSignalOptions | undefined): Promise<string> {
     const normalized = typeof oid === "string" ? oid.toLowerCase() : "";
     if (!FULL_SHA_PATTERN.test(normalized)) {
       throw internal("SnapshotReader requires readBlobText oid to be a full hex object id");
@@ -432,10 +449,10 @@ export class SnapshotReader {
     // exceed the stdout bound and resolve to the same cap errors via a probe.
     let stdout: Uint8Array;
     try {
-      stdout = await this.runBatch([normalized], this.maxBlobBytes + BATCH_FRAME_SLACK);
+      stdout = await this.runBatch([normalized], this.maxBlobBytes + BATCH_FRAME_SLACK, options?.signal);
     } catch (error) {
       if (error instanceof ReviewerError && error.code === "GIT_FAILED" && isGitOutputLimit(error)) {
-        throw await this.overCapError(normalized);
+        throw await this.overCapError(normalized, options?.signal);
       }
       throw error;
     }
@@ -569,10 +586,12 @@ export class SnapshotReader {
   }
 
   /** Exact legacy cap/total error for a blob known to exceed the batch stdout bound. */
-  private async overCapError(normalized: string): Promise<ReviewerError> {
+  private async overCapError(normalized: string, signal?: AbortSignal | undefined): Promise<ReviewerError> {
     let stdout: string;
     try {
-      stdout = decodeText(await this.runGit(["cat-file", "--batch-check"], "blob size probe", 4096, `${normalized}\n`));
+      stdout = decodeText(
+        await this.runGit(["cat-file", "--batch-check"], "blob size probe", 4096, `${normalized}\n`, signal),
+      );
     } catch (error) {
       if (error instanceof ReviewerError) throw error;
       throw gitFailed(`cannot determine size of blob ${normalized}`, error);
@@ -614,9 +633,13 @@ export class SnapshotReader {
    * no persistent background process can leak. Timeout, output-limit, and
    * abort semantics come from runProcess unchanged.
    */
-  private async runBatch(oids: readonly string[], maxStdoutBytes: number): Promise<Uint8Array> {
+  private async runBatch(
+    oids: readonly string[],
+    maxStdoutBytes: number,
+    signal?: AbortSignal | undefined,
+  ): Promise<Uint8Array> {
     this.batchFetches += 1;
-    return this.runGit(["cat-file", "--batch"], "blob batch read", maxStdoutBytes, `${oids.join("\n")}\n`);
+    return this.runGit(["cat-file", "--batch"], "blob batch read", maxStdoutBytes, `${oids.join("\n")}\n`, signal);
   }
 
   private timeoutFor(): number {
@@ -633,6 +656,7 @@ export class SnapshotReader {
     what: string,
     maxStdoutBytes?: number | undefined,
     stdinData?: string | undefined,
+    signal?: AbortSignal | undefined,
   ): Promise<Uint8Array> {
     // Single attempt per call; no retry. Each timed-out invocation surfaces
     // exactly once so callers can count timed-out Git queries without dedupe.
@@ -644,6 +668,7 @@ export class SnapshotReader {
         timeoutMs: this.timeoutFor(),
         ...(maxStdoutBytes === undefined ? {} : { maxStdoutBytes }),
         ...(stdinData === undefined ? {} : { stdinData }),
+        ...(signal === undefined ? {} : { signal }),
       });
       return result.stdout;
     } catch (error) {

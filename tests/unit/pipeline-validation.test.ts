@@ -44,7 +44,20 @@ function finding(id: string): Finding {
 }
 
 function validatedAs(f: Finding, status: ValidatedFinding["status"]): ValidatedFinding {
-  return { finding: f, status, checks: [{ name: "schema", outcome: "passed", code: "evidence_bounds_ok" }] };
+  const base: ValidatedFinding = {
+    finding: f,
+    status,
+    checks: [{ name: "schema", outcome: "passed", code: "evidence_bounds_ok" }],
+  };
+  if (status !== "accepted") return base;
+  return {
+    ...base,
+    derivedTarget: { file: "src/a.ts", line: 1, side: "RIGHT", kind: "added" },
+    derivedAttribution: {
+      introducedByPr: true,
+      basis: { kind: "added-lines", evidenceIndex: 0, file: "src/a.ts", lines: [1] },
+    },
+  };
 }
 
 describe("p5-09 pipeline validation wiring", () => {
@@ -261,5 +274,71 @@ describe("p5-09 pipeline validation wiring", () => {
     expect(cleared).toBe(1);
     expect(out).toHaveLength(1);
     expect(out[0]?.status).toBe("rejected");
+  });
+});
+
+describe("accepted-only publisher contract", () => {
+  test("isAcceptedFinding requires the complete publish invariant", () => {
+    const complete = validatedAs(finding("ok"), "accepted");
+    expect(isAcceptedFinding(complete)).toBe(true);
+
+    const incomplete: ValidatedFinding[] = [
+      { ...complete, derivedTarget: undefined },
+      { ...complete, derivedAttribution: undefined },
+      { ...complete, derivedAttribution: { introducedByPr: false } },
+      { ...complete, derivedAttribution: { introducedByPr: true } },
+      {
+        ...complete,
+        derivedAttribution: {
+          introducedByPr: true,
+          basis: { kind: "added-lines", evidenceIndex: 0, file: "src/a.ts", lines: [] },
+        },
+      },
+      { ...complete, derivedTarget: { file: "src/a.ts", line: 0, side: "RIGHT", kind: "added" } },
+      { ...complete, status: "rejected" },
+      { ...complete, status: "inconclusive" },
+    ];
+    for (const item of incomplete) expect(isAcceptedFinding(item)).toBe(false);
+  });
+
+  test("incomplete accepted fails the pipeline closed without publishing", async () => {
+    const { dir, cleanup } = await makeOutDir();
+    try {
+      const fixture = createFixtureEngines();
+      const bad = finding("bad");
+      fixture.validation.validate = () =>
+        Promise.resolve([
+          {
+            finding: bad,
+            status: "accepted" as const,
+            checks: [{ name: "schema", outcome: "passed" as const, code: "evidence_bounds_ok" as const }],
+          },
+        ]);
+      let publishCalls = 0;
+      fixture.publisher.publish = () => {
+        publishCalls += 1;
+        return Promise.resolve({ published: 0, skipped: 0, failures: [] });
+      };
+      const error = await runPipeline(
+        { ...fixture, logger: logger() },
+        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: false, outDir: dir, runId: "p5-09-incomplete" },
+      ).then(
+        () => null,
+        (failure: unknown) => failure as ReviewerError,
+      );
+      expect(error).toBeInstanceOf(ReviewerError);
+      expect((error as ReviewerError).code).toBe("INTERNAL");
+      expect(publishCalls).toBe(0);
+      const artifact = JSON.parse(await readFile(join(dir, "run.json"), "utf8"));
+      expect(artifact.status).toBe("failed");
+      expect(artifact.validationSummary).toBeNull();
+      expect(artifact.publishResult).toBeNull();
+      expect(artifact.stages.find((stage: { name: string }) => stage.name === "validation")).toMatchObject({
+        status: "completed",
+        count: 0,
+      });
+    } finally {
+      await cleanup();
+    }
   });
 });
