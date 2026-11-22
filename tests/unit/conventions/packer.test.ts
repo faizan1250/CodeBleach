@@ -126,6 +126,22 @@ describe("p6-03 packer batching", () => {
     expect(result.batches[0]?.conventions).toEqual([]);
   });
 
+  test("skips unit that cannot fit alone", () => {
+    const oversized = unit({
+      unitId: "oversized",
+      changedSymbolSource: `${"const x = 1;\n".repeat(2000)}`,
+      diffHunks: [{ baseStartLine: 1, headStartLine: 1, lines: [`+${"y".repeat(20000)}`] }],
+    });
+    const result = packAdvisoryBatches({ units: [oversized, unit()], conventions: [convention()] });
+    const packedIds = result.batches.flatMap((batch) => batch.units.map((entry) => entry.unitId));
+    expect(packedIds).not.toContain("oversized");
+    expect(packedIds).toContain("unit-1");
+    expect(result.skippedUnits).toBe(1);
+    for (const batch of result.batches) {
+      expect(measureAdvisoryRequest(batch)).toBeLessThanOrEqual(MAX_ADVISORY_INPUT_TOKENS_PER_REQUEST);
+    }
+  });
+
   test("packing is deterministic across input permutations", () => {
     const units = Array.from({ length: 9 }, (_, index) => unit({ unitId: `unit-${index + 1}` }));
     const conventions = Array.from({ length: 4 }, (_, index) =>

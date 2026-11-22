@@ -75,14 +75,16 @@ function compareStrings(a: string, b: string): number {
   return 0;
 }
 
-function orderKey(unit: ConventionAdvisoryUnit | ReviewUnit): {
+interface AdvisoryOrderKey {
   digest: Buffer;
   path: string;
   startLine: number;
   name: string;
   kind: string;
   id: string;
-} {
+}
+
+function orderKey(unit: ConventionAdvisoryUnit | ReviewUnit): AdvisoryOrderKey {
   const path = "path" in unit ? unit.path : unit.file.path;
   const symbol = unit.symbol;
   const id = "unitId" in unit ? unit.unitId : unit.id;
@@ -96,40 +98,32 @@ function orderKey(unit: ConventionAdvisoryUnit | ReviewUnit): {
   };
 }
 
+// Shared comparator: identical order for advisory and review units.
+function compareOrderKeys(a: AdvisoryOrderKey, b: AdvisoryOrderKey): number {
+  const digestOrder = Buffer.compare(a.digest, b.digest);
+  if (digestOrder !== 0) return digestOrder;
+  const pathOrder = compareStrings(a.path, b.path);
+  if (pathOrder !== 0) return pathOrder;
+  if (a.startLine !== b.startLine) return a.startLine - b.startLine;
+  const nameOrder = compareStrings(a.name, b.name);
+  if (nameOrder !== 0) return nameOrder;
+  const kindOrder = compareStrings(a.kind, b.kind);
+  if (kindOrder !== 0) return kindOrder;
+  return compareStrings(a.id, b.id);
+}
+
 // Deterministic order: stable path-hash visit order, then start line,
 // symbol, then unit id. Idempotent: projecting or packing an already
 // ordered set changes nothing.
 export function orderAdvisoryUnits(units: readonly ConventionAdvisoryUnit[]): ConventionAdvisoryUnit[] {
   const scored = units.map((unit) => ({ unit, key: orderKey(unit) }));
-  scored.sort((a, b) => {
-    const digestOrder = Buffer.compare(a.key.digest, b.key.digest);
-    if (digestOrder !== 0) return digestOrder;
-    const pathOrder = compareStrings(a.key.path, b.key.path);
-    if (pathOrder !== 0) return pathOrder;
-    if (a.key.startLine !== b.key.startLine) return a.key.startLine - b.key.startLine;
-    const nameOrder = compareStrings(a.key.name, b.key.name);
-    if (nameOrder !== 0) return nameOrder;
-    const kindOrder = compareStrings(a.key.kind, b.key.kind);
-    if (kindOrder !== 0) return kindOrder;
-    return compareStrings(a.key.id, b.key.id);
-  });
+  scored.sort((a, b) => compareOrderKeys(a.key, b.key));
   return scored.map((entry) => entry.unit);
 }
 
 function orderReviewUnits(units: readonly ReviewUnit[]): ReviewUnit[] {
   const scored = units.map((unit) => ({ unit, key: orderKey(unit) }));
-  scored.sort((a, b) => {
-    const digestOrder = Buffer.compare(a.key.digest, b.key.digest);
-    if (digestOrder !== 0) return digestOrder;
-    const pathOrder = compareStrings(a.key.path, b.key.path);
-    if (pathOrder !== 0) return pathOrder;
-    if (a.key.startLine !== b.key.startLine) return a.key.startLine - b.key.startLine;
-    const nameOrder = compareStrings(a.key.name, b.key.name);
-    if (nameOrder !== 0) return nameOrder;
-    const kindOrder = compareStrings(a.key.kind, b.key.kind);
-    if (kindOrder !== 0) return kindOrder;
-    return compareStrings(a.key.id, b.key.id);
-  });
+  scored.sort((a, b) => compareOrderKeys(a.key, b.key));
   return scored.map((entry) => entry.unit);
 }
 

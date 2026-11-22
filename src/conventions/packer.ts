@@ -117,6 +117,14 @@ export function packAdvisoryBatches(input: {
 
   const flushCurrent = (): void => {
     if (current.length === 0) return;
+    // Structural 5-request cap: unreachable under frozen constants (every
+    // flush holds exactly 3 units, so 5 flushes pack 15 and the loop-top
+    // guard skips the rest), but fail-closed if constants ever change.
+    if (batches.length >= MAX_ADVISORY_REQUESTS_PER_RUN) {
+      skippedUnits += current.length;
+      current = [];
+      return;
+    }
     batches.push(fitBatch(current, summaries));
     packedCount += current.length;
     current = [];
