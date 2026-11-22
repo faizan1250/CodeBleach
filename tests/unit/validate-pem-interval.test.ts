@@ -214,6 +214,18 @@ describe("pem interval boundaries", () => {
     rejects(result);
   });
 
+  test("orphan END far below rejects", async () => {
+    const lines = ["code-top()", "FAR-PAYLOAD-AAAA1111BBBB2222"];
+    for (let i = 1; i <= 23; i += 1) lines.push(`filler-${i}`);
+    lines.push(END); // line 26, 24 lines below the cited evidence
+    const text = lines.join("\n");
+    const quote = ["code-top()", "FAR-PAYLOAD-AAAA1111BBBB2222"].join("\n");
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 1, endLine: 2, quote }], readerFor(text)),
+    );
+    rejects(result);
+  });
+
   test("adjacent END/BEGIN span rejects", async () => {
     const text = [BEGIN, A1, END, BEGIN, B1, END].join("\n");
     const quote = [END, BEGIN].join("\n");
