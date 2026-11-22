@@ -67,7 +67,15 @@ export interface Publisher {
  * `introducedByPr: true` attribution with a defined valid basis. Anything
  * less fails the guard, and the pipeline treats a status-accepted item that
  * fails it as an internal contract violation (fail closed, never published
- * or counted). */
+ * or counted).
+ *
+ * Scope is shape-only by design (ADR 0035: no semantic validation). The
+ * guard does not re-prove target/basis against the DiffResult (commentable
+ * lines, evidence-index resolution, basis lines vs hunks): the validator
+ * establishes that at construction from the same in-memory diff, so
+ * re-deriving it here would duplicate validate/ logic and drift. A
+ * producer fabricating well-shaped but false data defeats any shape gate;
+ * catching that means re-running validation, which is the validator's job. */
 export function isAcceptedFinding(finding: ValidatedFinding): finding is AcceptedValidatedFinding {
   if (finding.status !== "accepted") return false;
   if (!isValidValidationTarget(finding.derivedTarget)) return false;
