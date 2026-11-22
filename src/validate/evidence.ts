@@ -12,6 +12,14 @@ export const EVIDENCE_MAX_QUOTE_CHARS = 2000;
 export const EVIDENCE_MAX_LINE_SPAN = 50;
 export const EVIDENCE_SEARCH_RADIUS = 3;
 
+// Bounded secret-delimiter probe (ADR 0037): PEM delimiters outside the exact
+// range / ±3 window. In-memory over cached lines only, never a new snapshot
+// read. 20 lines covers the red-test huge block with margin while staying
+// O(scan) and cache-friendly.
+const SECRET_DELIMITER_SCAN_RADIUS = 20;
+const PEM_BEGIN_RE = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/;
+const PEM_END_RE = /-----END [A-Z0-9 ]*PRIVATE KEY-----/;
+
 export type EvidenceSide = "head" | "base";
 
 export interface VerifiedEvidenceLocation {
@@ -448,6 +456,39 @@ function locateSubstring(
 }
 
 /**
+ * Fail-closed secret-context guard: true when [startLine,endLine] is a
+ * fragment of a PEM block whose delimiters lie outside the range. A range
+ * containing both delimiters is a full block, not a fragment. Otherwise a
+ * lone delimiter in range, a BEGIN above with no intervening END, or an END
+ * below with no intervening BEGIN all mean secret context: never verify.
+ * Bounded in-memory scan over cached lines only, no new snapshot reads.
+ */
+function isSecretFragment(lines: string[], startLine: number, endLine: number): boolean {
+  let hasBegin = false;
+  let hasEnd = false;
+  for (let line = startLine; line <= endLine; line += 1) {
+    const text = lines[line - 1] ?? "";
+    if (!hasBegin && PEM_BEGIN_RE.test(text)) hasBegin = true;
+    if (!hasEnd && PEM_END_RE.test(text)) hasEnd = true;
+    if (hasBegin && hasEnd) return false;
+  }
+  if (hasBegin || hasEnd) return true;
+  const scanStart = Math.max(1, startLine - SECRET_DELIMITER_SCAN_RADIUS);
+  for (let line = startLine - 1; line >= scanStart; line -= 1) {
+    const text = lines[line - 1] ?? "";
+    if (PEM_END_RE.test(text)) break;
+    if (PEM_BEGIN_RE.test(text)) return true;
+  }
+  const scanEnd = Math.min(lines.length, endLine + SECRET_DELIMITER_SCAN_RADIUS);
+  for (let line = endLine + 1; line <= scanEnd; line += 1) {
+    const text = lines[line - 1] ?? "";
+    if (PEM_BEGIN_RE.test(text)) break;
+    if (PEM_END_RE.test(text)) return true;
+  }
+  return false;
+}
+
+/**
  * Exact cited-range match first, then a bounded literal-substring fallback.
  * The fallback verifies occurrence AND location: it searches only the
  * documented ±radius window for the normalized quote as a literal substring
@@ -473,9 +514,13 @@ async function matchSide(
   const want = canonicalForm(quote, path);
   const clampedEnd = Math.min(endLine, lineCount);
   if (want === canonicalForm(lines.slice(startLine - 1, clampedEnd).join("\n"), path)) {
+    if (isSecretFragment(lines, startLine, clampedEnd)) return { kind: "mismatch" };
     return { kind: "match", startLine, endLine: clampedEnd };
   }
   const windowStart = Math.max(1, startLine - EVIDENCE_SEARCH_RADIUS);
   const windowEnd = Math.min(lineCount, endLine + EVIDENCE_SEARCH_RADIUS);
-  return locateSubstring(lines, path, windowStart, windowEnd, want);
+  const fallback = locateSubstring(lines, path, windowStart, windowEnd, want);
+  if (fallback.kind !== "match") return fallback;
+  if (isSecretFragment(lines, fallback.startLine, fallback.endLine)) return { kind: "mismatch" };
+  return fallback;
 }
