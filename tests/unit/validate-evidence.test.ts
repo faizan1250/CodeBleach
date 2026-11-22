@@ -1001,10 +1001,7 @@ describe("secret delimiter-boundary redaction (red-first)", () => {
   describe("exact cited range", () => {
     test("rejects single-line payload cited exactly", async () => {
       const result = await validateEvidence(
-        inputFor(
-          [{ file: "src/a.ts", startLine: 3, endLine: 3, quote: "PAYLOAD-01-AAAA1111BBBB2222" }],
-          delimReader(),
-        ),
+        inputFor([{ file: "src/a.ts", startLine: 3, endLine: 3, quote: "PAYLOAD-01-AAAA1111BBBB2222" }], delimReader()),
       );
       rejectsAsSecret(result);
     });
