@@ -708,6 +708,69 @@ describe("substring evidence acceptance (P1)", () => {
     expect(JSON.stringify(result[0]?.checks ?? []).includes("MIIEvQIBADANBgkq")).toBe(false);
   });
 
+  function addedPayloadLine7(): { file: ChangedFile; diff: DiffResult; unit: ReviewUnit } {
+    const file: ChangedFile = {
+      path: "src/a.ts",
+      oldPath: null,
+      status: "modified",
+      language: "typescript",
+      hunks: [
+        {
+          oldStart: 7,
+          oldLines: 0,
+          newStart: 7,
+          newLines: 1,
+          lines: [{ kind: "add", oldLine: null, newLine: 7, position: 7, text: "code" }],
+        },
+      ],
+      commentableLines: [7],
+      symbols: [{ name: "render", kind: "function", startLine: 1, endLine: 12, changedLines: [7] }],
+    };
+    const diff: DiffResult = { baseSha: BASE, headSha: HEAD, mergeBase: BASE, files: [file] };
+    const unit: ReviewUnit = {
+      ...testUnit(),
+      file: {
+        path: file.path,
+        oldPath: file.oldPath,
+        status: file.status,
+        language: file.language,
+        commentableLines: [...file.commentableLines],
+      },
+      symbol: { name: "render", kind: "function", startLine: 1, endLine: 12, changedLines: [7] },
+    };
+    return { file, diff, unit };
+  }
+
+  test("secret fragment in a large block is never accepted", async () => {
+    const lines = [
+      "// config",
+      "-----BEGIN PRIVATE KEY-----",
+      "PAYLOAD-01-AAAA1111BBBB2222",
+      "PAYLOAD-02-CCCC3333DDDD4444",
+      "PAYLOAD-03-EEEE5555FFFF6666",
+      "PAYLOAD-04-GGGG7777HHHH8888",
+      "PAYLOAD-05-IIII9999JJJJ0000",
+      "PAYLOAD-06-KKKK1111LLLL2222",
+      "PAYLOAD-07-MMMM3333NNNN4444",
+      "PAYLOAD-08-OOOO5555PPPP6666",
+      "-----END PRIVATE KEY-----",
+      "// end",
+    ];
+    const { diff, unit } = addedPayloadLine7();
+    const engine = engineWithHeadText(lines.join("\n"));
+    const finding = testFinding();
+    finding.line = 7;
+    finding.evidence = [{ file: "src/a.ts", startLine: 7, endLine: 7, quote: "PAYLOAD-05-IIII" }];
+    const result = await engine.validate([finding], diff, [unit], ConfigFileSchema.parse({}));
+    expect(result[0]?.status).not.toBe("accepted");
+    expect(
+      result[0]?.checks.some(
+        (check) => check.code === "evidence_quote_not_found" || check.code === "evidence_side_ambiguous",
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(result[0]?.checks ?? []).includes("PAYLOAD-05-IIII")).toBe(false);
+  });
+
   test("span over added and unchanged lines attributes only the added overlap", async () => {
     const { diff, unit } = addedLines56();
     const engine = engineWithHeadText(headText(10));
