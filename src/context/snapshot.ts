@@ -589,7 +589,9 @@ export class SnapshotReader {
   private async overCapError(normalized: string, signal?: AbortSignal | undefined): Promise<ReviewerError> {
     let stdout: string;
     try {
-      stdout = decodeText(await this.runGit(["cat-file", "--batch-check"], "blob size probe", 4096, `${normalized}\n`, signal));
+      stdout = decodeText(
+        await this.runGit(["cat-file", "--batch-check"], "blob size probe", 4096, `${normalized}\n`, signal),
+      );
     } catch (error) {
       if (error instanceof ReviewerError) throw error;
       throw gitFailed(`cannot determine size of blob ${normalized}`, error);
