@@ -427,8 +427,10 @@ present verbatim); order 1–9 + locked entry recorded (no alternative).
    orchestration code; any model-supplied pass value is overwritten, never
    trusted (test: forged pass value does not survive the merge).
 5. Sync `systemdesign.md` §6/§13 rows, `docs/validation.md` (inferred-advisory
-   pointer: separate `validate()` call under the isolated §5.2 policy,
-   orchestration-owned count cap, no Phase 5 semantic change), and README
+   pointer: SEPARATE validation run (internal advisory entry sharing the
+   per-finding core, batch deferred — §5.3.1, ADR 0042) under the isolated
+   §5.2 policy, orchestration-owned count cap, no Phase 5 semantic change),
+   and README
    docs index if a new doc is added. No ADR rewrites.
 6. Assemble the Phase 6 matrix: explicit-beats-inferred precedence (§5
    cases 1–10), merge domains (M1–M8), head-coordinate conflict (C1–C12),
@@ -674,12 +676,14 @@ hold. Two domains are therefore mandatory, not stylistic.
   `resolveDuplicates` (primary validated only) →
   `selectWithinCap(config.review.max_findings)` (Phase 5 order, unchanged).
   Advisory input NEVER enters this domain at any stage.
-- **Advisory domain:** boundary-surviving advisories → separate `validate()`
-  (isolated policy §5.2) → conflict suppression vs RETAINED primaries
-  (§5.1 as canonicalized by §5.4) → advisory-internal
-  `resolveDuplicates` (advisory validated only) → advisory-internal
-  `selectWithinCap` with the named advisory cap below (same comparator,
-  advisory-only ranking).
+- **Advisory domain:** boundary-surviving advisories → Advisory run via the
+  internal advisory entry (`validateAdvisoryCandidates`, isolated policy
+  §5.2) → conflict suppression vs RETAINED primaries (§5.1 as
+  canonicalized by §5.4) → separate advisory dedupe implementation over
+  advisory validated only (head-coordinate identity §§5.1/5.4 rules A–E
+  ONLY — never `resolveDuplicates`) → domain-only `selectWithinCap`
+  with the named advisory cap below (same comparator, advisory-only
+  ranking).
 
 **Named advisory cap (P6-00 locks name + value with tests).**
 `MAX_ADVISORY_FINDINGS_PER_RUN` (suggestion e.g. 5 — P6-00 justifies and
@@ -702,7 +706,8 @@ only), NEVER a new `VALIDATION_CHECK_CODE` (closed set, §5 kind 5).
 3. Cap primary (`selectWithinCap`, `config.review.max_findings`).
 4. Boundary-gate advisory output (category / severity / `ruleId` presence /
    provenance stamping — §5 kinds 2–3; violators dropped pre-validation).
-5. Validate surviving advisories (SEPARATE `validate()` call, §5.2 policy).
+5. Validate surviving advisories (Advisory run via the internal advisory
+   entry, §5.2 policy).
 6. Conflict-suppress advisories vs retained primaries (head-coordinate
    contract §5.4; suppressed advisory dropped wholly + bounded diagnostic).
 7. Dedupe surviving advisories advisory-internally (advisory verified
