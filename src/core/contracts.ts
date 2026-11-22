@@ -3,9 +3,16 @@ import type { Logger } from "./logger.ts";
 import type {
   AcceptedValidatedFinding,
   AttributionBasis,
+  ConventionAdvisoryBatchInput,
+  ConventionAdvisoryProjectionResult,
+  ConventionAdvisoryReviewResult,
+  ConventionAdvisoryUnit,
+  ConventionBuildResult,
   DiffResult,
   Finding,
+  PendingAdvisoryCandidate,
   PrMeta,
+  PrimaryValidationResult,
   PublishResult,
   ReviewUnit,
   ValidatedFinding,
@@ -59,6 +66,79 @@ export interface ValidationOptions {
 
 export interface Publisher {
   publish(findings: AcceptedValidatedFinding[], diff: DiffResult, meta: PrMeta): Promise<PublishResult>;
+}
+
+/**
+ * Phase 6 internal validation seam (ADR 0043, plan 4.2). The public
+ * ValidationEngine interface is not widened: the same concrete validator may
+ * implement both, but callers use this only through the optional Phase 6
+ * pipeline bundle. pending/final is a compile-time boundary, never a runtime
+ * status convention.
+ */
+export interface Phase6ValidationEngine {
+  validatePrimaryWithHandoff(
+    findings: Finding[],
+    diff: DiffResult,
+    units: ReviewUnit[],
+    config: ResolvedConfig,
+    options?: ValidationOptions | undefined,
+  ): Promise<PrimaryValidationResult>;
+
+  validateAdvisoryCandidates(
+    findings: Finding[],
+    diff: DiffResult,
+    units: ConventionAdvisoryUnit[],
+    config: ResolvedConfig,
+    options?: ValidationOptions | undefined,
+  ): Promise<PendingAdvisoryCandidate[]>;
+
+  finalizeAdvisoryCandidates(candidates: PendingAdvisoryCandidate[]): ValidatedFinding[];
+}
+
+/** Deterministic convention discovery over the merge-base snapshot (plan 4.3). */
+export interface ConventionEngine {
+  build(input: {
+    repoDir: string;
+    diff: DiffResult;
+    config: ResolvedConfig;
+    signal?: AbortSignal | undefined;
+  }): Promise<ConventionBuildResult>;
+}
+
+/** Lean changed-unit projection for the advisory pass (plan 4.3, 9.2). */
+export interface ConventionAdvisoryUnitProjector {
+  project(input: {
+    units: ReviewUnit[];
+    diff: DiffResult;
+    signal?: AbortSignal | undefined;
+  }): Promise<ConventionAdvisoryProjectionResult>;
+}
+
+/**
+ * Advisory-only model pass (plan 4.3, 9.3-9.4). Exactly one provider
+ * invocation per call on an advisory-specific instance with maxRetries 0,
+ * sharing the global concurrency limiter and honoring the
+ * CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING gate per call.
+ */
+export interface ConventionAdvisoryReviewEngine {
+  reviewBatch(
+    input: ConventionAdvisoryBatchInput,
+    config: ResolvedConfig,
+    options?: { signal?: AbortSignal | undefined; headSha?: string | undefined } | undefined,
+  ): Promise<ConventionAdvisoryReviewResult>;
+}
+
+/** Optional Phase 6 dependency bundle: present only when explicitly enabled. */
+export interface Phase6PipelineDeps {
+  conventions: ConventionEngine;
+  advisoryProjector: ConventionAdvisoryUnitProjector;
+  advisoryReview: ConventionAdvisoryReviewEngine;
+  validation: Phase6ValidationEngine;
+}
+
+/** Explicit runtime option; driven only by the CLI flag, default false. */
+export interface PipelineOptions {
+  conventionAdvisoryEnabled?: boolean | undefined;
 }
 
 /** Narrowing guard for the accepted-only publisher contract. Status alone
@@ -161,6 +241,8 @@ export interface PipelineInput {
   outDir: string;
   /** Single execution id, minted once by the CLI and shared by logger + artifact. */
   runId: string;
+  /** Explicit Phase 6 opt-in; driven only by the CLI flag, default false. */
+  options?: PipelineOptions | undefined;
   secrets?: string[] | undefined;
   /**
    * Optional per-run caller cancellation. The pipeline forwards it to
@@ -186,6 +268,8 @@ export interface PipelineDeps {
   publisher: Publisher;
   logger: Logger;
   loadConfig?: LoadConfigFn | undefined;
+  /** Optional Phase 6 bundle; required only when the flag enables it. */
+  phase6?: Phase6PipelineDeps | undefined;
 }
 
 export type { ConfigLoadResult, ResolvedConfig, Result, ReviewerError };

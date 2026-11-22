@@ -35,6 +35,8 @@ export interface ReviewOptions {
   demo: boolean;
   /** Explicit offline preview: diff + context only, review/validation skipped. */
   noLlm: boolean;
+  /** Phase 6 opt-in (default false); demo and --no-llm ignore it. P6-00: live use fails closed. */
+  conventionAdvisory?: boolean | undefined;
   logLevel: string;
   runId: string;
   /** Exact key bytes for logger/artifact redaction; never logged itself. */
@@ -163,6 +165,13 @@ export async function runReview(options: ReviewOptions, logger: Logger): Promise
     );
   }
 
+  // Phase 6 (P6-00, ADR 0043): demo and --no-llm bypass the bundle regardless
+  // of the flag. Live use with the flag fails closed here: P6-00 locks
+  // contracts only, and orchestration lands in P6-05.
+  if (options.conventionAdvisory === true) {
+    throw usageError("--convention-advisory runtime lands in P6-05 (P6-00 locks contracts only)");
+  }
+
   // Live review: load config once for provider bounds, then reuse the same
   // loaded value inside the pipeline so CLI and stages cannot disagree.
   const loaded = await loadConfig(options.repo);
@@ -234,6 +243,19 @@ export async function printValidationSummary(outDir: string): Promise<void> {
   }
 }
 
+/**
+ * Phase 6 opt-in for the pipeline (P6-00, ADR 0043): live path only. Demo
+ * and --no-llm ignore the flag and run without a Phase 6 bundle, so
+ * forwarding it there would trip the pipeline preflight.
+ */
+export function pipelineConventionAdvisoryEnabled(options: {
+  conventionAdvisory?: boolean | undefined;
+  demo: boolean;
+  noLlm: boolean;
+}): boolean {
+  return options.conventionAdvisory === true && !options.demo && !options.noLlm;
+}
+
 async function runEngines(
   engines: {
     diff: GitDiffEngine | typeof demoDiffEngine;
@@ -259,6 +281,7 @@ async function runEngines(
         dryRun: options.dryRun,
         outDir: options.out,
         runId: options.runId,
+        options: { conventionAdvisoryEnabled: pipelineConventionAdvisoryEnabled(options) },
         secrets: options.secrets,
         env: options.env,
       },

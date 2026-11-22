@@ -130,6 +130,23 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
       requireLlmPreflight({ config: resolved, env: input.env });
     }
 
+    // Phase 6 opt-in preflight (P6-00, ADR 0043): the flag requires the
+    // optional bundle, and the bundle has no orchestration until P6-05.
+    // Flag off (or absent) falls through to the exact Phase 5 pipeline.
+    if (input.options?.conventionAdvisoryEnabled === true) {
+      if (deps.phase6 === undefined) {
+        throw new ReviewerError({
+          code: "CONFIG_INVALID",
+          message:
+            "convention advisory enabled without Phase 6 dependencies: explicit composition required, never silent downgrade",
+        });
+      }
+      throw new ReviewerError({
+        code: "NOT_IMPLEMENTED",
+        message: "convention advisory orchestration lands in P6-05; P6-00 locks contracts only",
+      });
+    }
+
     const diffResult = await runStage(
       "diff",
       () => deps.diff.run({ repoDir: input.repoDir, baseSha: input.baseSha, headSha: input.headSha, config: resolved }),

@@ -12,7 +12,7 @@ import { collectLlmSecrets } from "../llm/training-gate.ts";
 const USAGE = `codebleach - personal AI PR reviewer
 
 usage:
-  codebleach review --base <sha> --head <sha> [--repo .] [--out .reviewer-out] [--dry-run] [--no-llm] [--log-level info]
+  codebleach review --base <sha> --head <sha> [--repo .] [--out .reviewer-out] [--dry-run] [--no-llm] [--convention-advisory] [--log-level info]
   codebleach review --demo --dry-run
   codebleach diff --base <sha> --head <sha> [--repo .] [--log-level info]
   codebleach config validate [--repo .]
@@ -22,6 +22,8 @@ usage:
 live review sends repo code to Muse Spark 1.3 Contributor (not zero-data-retention)
 and needs OPENCODE_API_KEY + CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING=true.
 --dry-run alone still calls the model; add --no-llm for a network-free preview.
+--convention-advisory (default off) enables extra advisory model requests over
+repository code; demo and --no-llm runs ignore it.
 
 env fallbacks: REVIEWER_BASE_SHA, REVIEWER_HEAD_SHA, REVIEWER_LOG_LEVEL`;
 
@@ -46,6 +48,7 @@ async function runReviewCommand(args: string[]): Promise<number> {
       "dry-run": { type: "boolean", default: false },
       demo: { type: "boolean", default: false },
       "no-llm": { type: "boolean", default: false },
+      "convention-advisory": { type: "boolean", default: false },
       "log-level": { type: "string" },
       help: { type: "boolean", default: false },
     },
@@ -73,6 +76,7 @@ async function runReviewCommand(args: string[]): Promise<number> {
       dryRun: parsed.values["dry-run"] ?? false,
       demo: parsed.values["demo"] ?? false,
       noLlm: parsed.values["no-llm"] ?? false,
+      conventionAdvisory: parsed.values["convention-advisory"] ?? false,
       logLevel: level,
       runId,
       secrets,
