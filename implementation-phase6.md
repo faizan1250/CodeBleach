@@ -17,7 +17,7 @@ linearization).
 > exists today (verified by absence); Phase 5 validation is the ADR 0038
 > occurrence-ordered interval index (not the never-implemented ADR 0037 probe).
 > Phase 7 publishing and Phase 8 evaluation are out of scope and unchanged by
-> this plan. Historical ADRs 0028–0038 are preserved, never rewritten; plan
+> this plan. Historical ADRs 0028–0040 are preserved, never rewritten; plan
 > corrections land in a new ADR (see P6-00).
 
 ---
@@ -178,7 +178,8 @@ Keep tickets independently reviewable. Proposed modules live under a new
    freezes): `MIN_SUPPORT_RATIO` (e.g. 0.6), `MIN_EVIDENCE_FILES` (e.g. 3),
    `MAX_CONVENTIONS_PER_RUN` (e.g. 20), `MAX_EVIDENCE_PER_CONVENTION`
    (e.g. 8, applies to retained `evidence`), `MAX_SAMPLED_FILES` (e.g. 200,
-   deterministic order), advisory token budget share (e.g. ≤ 800 tokens,
+   deterministic order), `ADVISORY_SEVERITY_THRESHOLD` (e.g. `"low"`, §5.2),
+   `MAX_ADVISORY_FINDINGS_PER_RUN` (e.g. 5, §5.3), advisory token budget share (e.g. ≤ 800 tokens,
    truncated by whole conventions, never mid-pattern).
 4. Lock the sampling policy and version it: `SAMPLING_POLICY_VERSION`
    covering file selection order, per-detector eligibility rules, language
@@ -189,7 +190,7 @@ Keep tickets independently reviewable. Proposed modules live under a new
    preview stays fast and no prompt consumes it) and demo behavior (proposed:
    demo carries zero inferred conventions).
 6. Record decisions in a new ADR (next free number; never rewrite ADRs
-   0028–0038).
+   0028–0040).
 
 **Tests:** type-shape tests for `InferredConvention` + `ConventionEvidence`
 (bounds: `endLine >= startLine`, 1-based; ordering: file then startLine;
@@ -332,7 +333,7 @@ diff — no primary template edit, no `CODE_REVIEW_PROMPT_VERSION` bump.
    separate template file with its own version constant, hash test, output
    contract, validation, and merge boundary — never a section appended to the
    primary prompt. Its output is constrained by app code, not by model
-   obedience: `convention`-category ONLY, max severity `low`, and NO
+   obedience: `convention`-category ONLY, max severity `low` (exactly `low` — §5.2), and NO
    `ruleId`; anything else is rejected at the orchestration boundary before
    merge. `origin.pass` is stamped `"convention-advisory"` by trusted code
    (any model-supplied value overwritten); the model never supplies

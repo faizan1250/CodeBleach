@@ -188,6 +188,6 @@ their own domain with the named advisory cap at orchestration (§5.3 order
 1–9, never a combined cap), and lose explicit conflicts under the §5.4
 head-coordinate contract (verified head actuals only; base evidence maps
 solely via exact one-to-one diff correspondence; unmappable excluded; no
-manufactured conflict; conflict metadata carries ids/paths/lines/counts
+manufactured conflict; conflict metadata carries ids/paths/symbol/lines/counts
 only). Advisory count-cap overflow is an orchestration merge diagnostic,
 never a check code.
