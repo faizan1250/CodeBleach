@@ -178,6 +178,7 @@ export async function validateEvidence(input: EvidenceInput): Promise<EvidenceRe
   }
 
   const { head, deleted } = lineSets(changedFile);
+  const loadSide = createSideLoader(reader);
   let sawInconclusive: ValidationCheckCode | undefined;
   const resolved: VerifiedEvidenceLocation[] = [];
 
@@ -204,7 +205,7 @@ export async function validateEvidence(input: EvidenceInput): Promise<EvidenceRe
 
     // Terminal evidence result for one item, or null to keep scanning.
     const verify = async (side: EvidenceSide, readPath: string, label: string): Promise<EvidenceResult | null> => {
-      const outcome = await matchSide(reader, side, readPath, item.startLine, item.endLine, item.quote);
+      const outcome = await matchSide(loadSide, side, readPath, item.startLine, item.endLine, item.quote);
       if (outcome.kind === "match") {
         resolved.push({ side, path: readPath, startLine: outcome.startLine, endLine: outcome.endLine });
         return null;
@@ -254,9 +255,9 @@ export async function validateEvidence(input: EvidenceInput): Promise<EvidenceRe
       // Replacement overlap: content disambiguates, guessing does not. Each
       // side resolves to its own verified location; identical text on both
       // sides, or multiple locations on one side, stays inconclusive.
-      const headOutcome = await matchSide(reader, "head", canonicalPath, item.startLine, item.endLine, item.quote);
+      const headOutcome = await matchSide(loadSide, "head", canonicalPath, item.startLine, item.endLine, item.quote);
       const baseOutcome = await matchSide(
-        reader,
+        loadSide,
         "base",
         oldPath ?? canonicalPath,
         item.startLine,
@@ -363,6 +364,26 @@ async function readSide(
   return { text: result.text };
 }
 
+/** Split snapshot lines for one matching run. Snapshot text is immutable for
+ * the run, so each distinct (side, path) is read and split at most once no
+ * matter how many evidence items share it; every item then searches only its
+ * bounded window over the cached lines. */
+type LoadedSide = { lines: string[] } | { result: SnapshotReadResult };
+
+function createSideLoader(reader: ValidationSnapshotReader): (side: EvidenceSide, path: string) => Promise<LoadedSide> {
+  const cache = new Map<string, LoadedSide>();
+  return async (side, path) => {
+    const key = `${side}\u0000${path}`;
+    const hit = cache.get(key);
+    if (hit !== undefined) return hit;
+    const snapshot = await readSide(reader, side, path);
+    const loaded: LoadedSide =
+      "result" in snapshot ? snapshot : { lines: snapshot.text.length === 0 ? [] : snapshot.text.split("\n") };
+    cache.set(key, loaded);
+    return loaded;
+  };
+}
+
 /**
  * Normalized window index for literal-substring evidence matching. Each
  * non-blank window line contributes its redactSource + quote-normalized form;
@@ -439,16 +460,16 @@ function locateSubstring(index: WindowIndex, want: string): MatchOutcome {
  * path.
  */
 async function matchSide(
-  reader: ValidationSnapshotReader,
+  loadSide: (side: EvidenceSide, path: string) => Promise<LoadedSide>,
   side: EvidenceSide,
   path: string,
   startLine: number,
   endLine: number,
   quote: string,
 ): Promise<MatchOutcome> {
-  const snapshot = await readSide(reader, side, path);
+  const snapshot = await loadSide(side, path);
   if ("result" in snapshot) return { kind: "unavailable", result: snapshot.result };
-  const lines = snapshot.text.length === 0 ? [] : snapshot.text.split("\n");
+  const lines = snapshot.lines;
   const lineCount = lines.length;
   if (startLine > lineCount) return { kind: "mismatch" };
   const want = canonicalForm(quote, path);

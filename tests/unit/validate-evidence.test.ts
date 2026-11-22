@@ -840,3 +840,37 @@ describe("substring evidence matching (P1)", () => {
     }
   });
 });
+
+describe("matching cost (P2)", () => {
+  test("many items on one snapshot share a single read and split", async () => {
+    const total = 6000;
+    const text = Array.from({ length: total }, (_, index) => `line-${String(index + 1).padStart(4, "0")}`).join("\n");
+    const cited = [100, 900, 1700, 2500, 3300, 4100, 4900, 5700];
+    const changedFile: ChangedFile = {
+      ...testFile(),
+      hunks: [
+        hunk(
+          cited.map((line) => diffLine("add", null, line)),
+          cited[0] ?? 1,
+        ),
+      ],
+    };
+    const reader = readerFor({ head: { "src/a.ts": ok(text) } });
+    const evidence = cited.map((line, index) => ({
+      file: "src/a.ts",
+      // Alternate exact cites with off-by-one cites to cover both the exact
+      // path and the bounded-window fallback over the same cached lines.
+      startLine: index % 2 === 0 ? line : line - 1,
+      endLine: index % 2 === 0 ? line : line - 1,
+      quote: `line-${String(line).padStart(4, "0")}`,
+    }));
+    const result = await validateEvidence(inputFor(evidence, reader, { changedFile }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.locations).toEqual(
+        cited.map((line) => ({ side: "head", path: "src/a.ts", startLine: line, endLine: line })),
+      );
+    }
+    expect(reader.reads).toEqual([{ side: "head", path: "src/a.ts" }]);
+  });
+});
