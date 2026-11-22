@@ -12,13 +12,66 @@ export const EVIDENCE_MAX_QUOTE_CHARS = 2000;
 export const EVIDENCE_MAX_LINE_SPAN = 50;
 export const EVIDENCE_SEARCH_RADIUS = 3;
 
-// Bounded secret-delimiter probe (ADR 0037): PEM delimiters outside the exact
-// range / ±3 window. In-memory over cached lines only, never a new snapshot
-// read. 20 lines covers the red-test huge block with margin while staying
-// O(scan) and cache-friendly.
-const SECRET_DELIMITER_SCAN_RADIUS = 20;
+// Per-snapshot PEM interval index: each BEGIN..END pair in cached lines
+// becomes one closed interval; an unterminated BEGIN extends to EOF and an
+// orphan END extends from after the previous interval. One O(lines) scan per
+// cached (side, path); every span check after is a cheap overlap test.
 const PEM_BEGIN_RE = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/;
 const PEM_END_RE = /-----END [A-Z0-9 ]*PRIVATE KEY-----/;
+
+interface PemInterval {
+  startLine: number;
+  endLine: number;
+  closed: boolean;
+}
+
+function buildPemIntervals(lines: readonly string[]): PemInterval[] {
+  const intervals: PemInterval[] = [];
+  const open: number[] = [];
+  let coverEnd = 0;
+  for (let line = 1; line <= lines.length; line += 1) {
+    const text = lines[line - 1] ?? "";
+    const hasBegin = PEM_BEGIN_RE.test(text);
+    const hasEnd = PEM_END_RE.test(text);
+    if (hasBegin && hasEnd) {
+      if (open.length > 0) {
+        const start = open.pop() as number;
+        intervals.push({ startLine: start, endLine: line, closed: true });
+        if (line > coverEnd) coverEnd = line;
+      } else {
+        intervals.push({ startLine: line, endLine: line, closed: true });
+        coverEnd = line;
+      }
+    } else if (hasBegin) {
+      open.push(line);
+    } else if (hasEnd) {
+      if (open.length > 0) {
+        const start = open.pop() as number;
+        intervals.push({ startLine: start, endLine: line, closed: true });
+        if (line > coverEnd) coverEnd = line;
+      } else {
+        intervals.push({ startLine: coverEnd + 1, endLine: line, closed: false });
+        coverEnd = line;
+      }
+    }
+  }
+  for (const start of open) {
+    intervals.push({ startLine: start, endLine: lines.length, closed: false });
+  }
+  return intervals;
+}
+
+// Fail-closed span check over the index: outside every interval is normal
+// text; overlapping an open (unterminated/orphan) interval is secret; an
+// overlapping closed interval must be fully covered, partial is secret.
+function isSecretSpan(intervals: readonly PemInterval[], startLine: number, endLine: number): boolean {
+  for (const interval of intervals) {
+    if (interval.endLine < startLine || interval.startLine > endLine) continue;
+    if (!interval.closed) return true;
+    if (!(startLine <= interval.startLine && interval.endLine <= endLine)) return true;
+  }
+  return false;
+}
 
 export type EvidenceSide = "head" | "base";
 
@@ -377,10 +430,10 @@ async function readSide(
 }
 
 /** Split snapshot lines for one matching run. Snapshot text is immutable for
- * the run, so each distinct (side, path) is read and split at most once no
- * matter how many evidence items share it; every item then searches only its
- * bounded window over the cached lines. */
-type LoadedSide = { lines: string[] } | { result: SnapshotReadResult };
+ * the run, so each distinct (side, path) is read, split, and indexed at most
+ * once no matter how many evidence items share it; every item then searches
+ * only its bounded window over the cached lines plus a cheap index check. */
+type LoadedSide = { lines: string[]; pemIntervals: PemInterval[] } | { result: SnapshotReadResult };
 
 function createSideLoader(
   reader: ValidationSnapshotReader,
@@ -393,7 +446,12 @@ function createSideLoader(
     if (hit !== undefined) return hit;
     const snapshot = await readSide(reader, side, path, signal);
     const loaded: LoadedSide =
-      "result" in snapshot ? snapshot : { lines: snapshot.text.length === 0 ? [] : snapshot.text.split("\n") };
+      "result" in snapshot
+        ? snapshot
+        : (() => {
+            const lines = snapshot.text.length === 0 ? [] : snapshot.text.split("\n");
+            return { lines, pemIntervals: buildPemIntervals(lines) };
+          })();
     cache.set(key, loaded);
     return loaded;
   };
@@ -456,47 +514,16 @@ function locateSubstring(
 }
 
 /**
- * Fail-closed secret-context guard: true when [startLine,endLine] is a
- * fragment of a PEM block whose delimiters lie outside the range. A range
- * containing both delimiters is a full block, not a fragment. Otherwise a
- * lone delimiter in range, a BEGIN above with no intervening END, or an END
- * below with no intervening BEGIN all mean secret context: never verify.
- * Bounded in-memory scan over cached lines only, no new snapshot reads.
- */
-function isSecretFragment(lines: string[], startLine: number, endLine: number): boolean {
-  let hasBegin = false;
-  let hasEnd = false;
-  for (let line = startLine; line <= endLine; line += 1) {
-    const text = lines[line - 1] ?? "";
-    if (!hasBegin && PEM_BEGIN_RE.test(text)) hasBegin = true;
-    if (!hasEnd && PEM_END_RE.test(text)) hasEnd = true;
-    if (hasBegin && hasEnd) return false;
-  }
-  if (hasBegin || hasEnd) return true;
-  const scanStart = Math.max(1, startLine - SECRET_DELIMITER_SCAN_RADIUS);
-  for (let line = startLine - 1; line >= scanStart; line -= 1) {
-    const text = lines[line - 1] ?? "";
-    if (PEM_END_RE.test(text)) break;
-    if (PEM_BEGIN_RE.test(text)) return true;
-  }
-  const scanEnd = Math.min(lines.length, endLine + SECRET_DELIMITER_SCAN_RADIUS);
-  for (let line = endLine + 1; line <= scanEnd; line += 1) {
-    const text = lines[line - 1] ?? "";
-    if (PEM_BEGIN_RE.test(text)) break;
-    if (PEM_END_RE.test(text)) return true;
-  }
-  return false;
-}
-
-/**
  * Exact cited-range match first, then a bounded literal-substring fallback.
  * The fallback verifies occurrence AND location: it searches only the
  * documented ±radius window for the normalized quote as a literal substring
  * (partial first/last lines, multiline spans, whitespace variation
  * included), identifies the actual range, and rejects multiple distinct
- * ranges as ambiguous. No fuzzy/Levenshtein/semantic matching: comparison is
- * the same redactSource + quote-normalized, case-sensitive form as the exact
- * path.
+ * ranges as ambiguous. Either matched span must also clear the PEM interval
+ * index: outside every interval is normal text, a span covering each
+ * overlapped closed interval verifies, anything else mismatches. No
+ * fuzzy/Levenshtein/semantic matching: comparison is the same redactSource
+ * + quote-normalized, case-sensitive form as the exact path.
  */
 async function matchSide(
   loadSide: (side: EvidenceSide, path: string) => Promise<LoadedSide>,
@@ -509,18 +536,19 @@ async function matchSide(
   const snapshot = await loadSide(side, path);
   if ("result" in snapshot) return { kind: "unavailable", result: snapshot.result };
   const lines = snapshot.lines;
+  const pemIntervals = snapshot.pemIntervals;
   const lineCount = lines.length;
   if (startLine > lineCount) return { kind: "mismatch" };
   const want = canonicalForm(quote, path);
   const clampedEnd = Math.min(endLine, lineCount);
   if (want === canonicalForm(lines.slice(startLine - 1, clampedEnd).join("\n"), path)) {
-    if (isSecretFragment(lines, startLine, clampedEnd)) return { kind: "mismatch" };
+    if (isSecretSpan(pemIntervals, startLine, clampedEnd)) return { kind: "mismatch" };
     return { kind: "match", startLine, endLine: clampedEnd };
   }
   const windowStart = Math.max(1, startLine - EVIDENCE_SEARCH_RADIUS);
   const windowEnd = Math.min(lineCount, endLine + EVIDENCE_SEARCH_RADIUS);
   const fallback = locateSubstring(lines, path, windowStart, windowEnd, want);
   if (fallback.kind !== "match") return fallback;
-  if (isSecretFragment(lines, fallback.startLine, fallback.endLine)) return { kind: "mismatch" };
+  if (isSecretSpan(pemIntervals, fallback.startLine, fallback.endLine)) return { kind: "mismatch" };
   return fallback;
 }
