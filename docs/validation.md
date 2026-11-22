@@ -21,7 +21,10 @@ inconclusive findings persist in `run.json`; only `accepted` findings reach
 invariant: a valid head-side `derivedTarget` plus `derivedAttribution` with
 `introducedByPr: true` and a defined valid `AttributionBasis` (ADR 0035) —
 status alone never publishes, and the pipeline fails closed (`INTERNAL`,
-nothing published or counted) on a status-`accepted` item missing any part.
+nothing published or counted) on a status-`accepted` item missing any part. The guard is
+shape-only (ADR 0035, no semantic validation): it does not re-prove the
+target/basis against the diff — cross-consistency is established by the
+validator when the accepted item is built from the same in-memory diff.
 The CLI prints counts plus a `run.json` pointer — never evidence quotes or
 source text. When `run.json` itself is unreadable, the CLI warns on stderr
 naming the configured artifact path (never contents or counts).
@@ -142,6 +145,13 @@ accepted candidates only; surplus stays visible as
 `max_findings_exceeded`. `run.json` (schema v2) carries `validated` plus the
 `validationSummary` counts (`total/accepted/rejected/inconclusive/
 duplicates/policyFiltered/checksSkipped`), null until validation runs.
+
+## Cancellation
+
+An optional caller `AbortSignal` threads `PipelineInput.signal` through
+validation reads to the underlying Git subprocess (ADR 0034); aborted reads
+resolve to `inconclusive` (never accepted). No CLI flag wires a signal, so
+cancellation is programmatic-only in v1.
 
 ## Modes
 
