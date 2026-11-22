@@ -365,6 +365,10 @@ diff — no primary template edit, no `CODE_REVIEW_PROMPT_VERSION` bump.
    categories (`CATEGORY_ORDER` unchanged); the advisory `ruleId` boundary
    and four-case matrix live canonically in P6-05 item 1 (not restated
    here) — P6-04 tests feed all four cases at the merge boundary.
+7. Advisory execution entry point (§5.3.1): implement the preferred
+   shared-per-finding-core + separate-batch-policies shape (or record the
+   dedicated-entry alternative); pin the §5.3 order 1–9, the M1–M8 matrix,
+   and advisory dedupe via §§5.1/5.4 A–E (never the primary secondary).
 
 **Tests:** primary prompt/payload byte-identical with conventions on/off
 (template bytes, version, categories, hash, serialization, output contract);
@@ -375,7 +379,14 @@ truncation drops whole conventions; advisory boundary gates per §5 kinds
 2–3 (category / severity / `ruleId` presence per the P6-05 four-case
 matrix: missing ok, `inf-*` / real / fabricated rejected);
 model-supplied provenance overwritten by code stamping;
-`--no-llm`/demo exclusion per P6-00 (no advisory build or pass).
+`--no-llm`/demo exclusion per P6-00 (no advisory build or pass);
+entry-point + order tests (two-call separation, M1–M8, advisory A–E vs
+primary secondary divergence per C7/C10).
+
+**Accept:** primary prompt provably inference-free and byte-identical on/off
+(no primary diff exists); advisory lives only under its separate contract;
+no silent guard change (test asserts the primary suppression line is still
+present verbatim); order 1–9 + entry-point choice recorded.
 
 **Accept:** primary prompt provably inference-free and byte-identical on/off
 (no primary diff exists); advisory lives only under its separate contract;
@@ -417,6 +428,15 @@ present verbatim).
    cases 1–10), merge domains (M1–M8), head-coordinate conflict (C1–C12),
    advisory-label presence, cache round-trip, cap behavior, offline determinism
    (zero provider/GitHub calls — reuse the Phase 5 fetch-guard pattern).
+7. Pin the §5.3 order 1–9 + §5.3.1 entry point + §5.5 envelope wiring:
+   primary `validate()` behavior/order exact, advisory independent/bounded/
+   deterministic, no Phase 5 comparator change, advisory dedupe via A–E
+   (never category/title/cited ranges), envelope verified-actuals-only.
+
+**Accept:** validator + publisher diffs are empty by construction (assert via
+review of the Phase 6 diff); docs agree; matrix green; Phase 5
+validation/publisher behavior unchanged (no new codes, no new statuses, no
+artifact change); order 1–9 locked with no combined cap.
 
 **Accept:** validator + publisher diffs are empty by construction (assert via
 review of the Phase 6 diff); docs agree; matrix green; Phase 5
@@ -681,14 +701,40 @@ only), NEVER a new `VALIDATION_CHECK_CODE` (closed set, §5 kind 5).
 5. Validate surviving advisories (SEPARATE `validate()` call, §5.2 policy).
 6. Conflict-suppress advisories vs retained primaries (head-coordinate
    contract §5.4; suppressed advisory dropped wholly + bounded diagnostic).
-7. Dedupe surviving advisories advisory-internally (`resolveDuplicates`
-   over advisory validated only; advisory-advisory identity per §5.1).
+7. Dedupe surviving advisories advisory-internally (advisory verified
+   head-coordinate identity §§5.1/5.4 rules A–E ONLY — never the primary
+   `resolveDuplicates` fingerprint/secondary with category/title/cited
+   ranges, which advisory ignores by contract).
 8. Cap advisories (`selectWithinCap` with
    `MAX_ADVISORY_FINDINGS_PER_RUN`, advisory-only winner order).
 9. Append + aggregate: surviving advisories appended AFTER primaries in
    deterministic order; `run.json` aggregates per-domain counts; a combined
    `selectWithinCap` over concatenated primaries+advisories is FORBIDDEN
    (pinned by M2/M3 below).
+
+#### 5.3.1 Advisory execution entry point (Blocker B)
+
+Two conforming shapes (P6-04 implements one; P6-00 records the choice):
+
+- **Preferred: shared per-finding core + separate batch policies.** The
+  per-finding stages (provenance → location → evidence → attribution →
+  policy, `src/validate/engine.ts:103-177`) stay one shared code path;
+  batch policies (`resolveDuplicates` `:182`,
+  `selectWithinCap` `:201-204`) run separately per domain over
+  domain-scoped inputs only.
+- **Alternative: dedicated advisory entry** reusing the EXACT per-finding
+  checks above, deferring batch dedupe/cap to the advisory domain.
+
+Both reuse provenance/location/evidence/attribution/policy unchanged;
+primary `validate()` behavior + stage order stay exact; the advisory run
+is independent, bounded, and deterministic; NO Phase 5 comparator change
+(`resolveDuplicates` fingerprint verbatim `:131-161` plus secondary
+canonical-path/symbol/category/title/overlap `:163-180` over
+`candidateSpans` target ∪ cited ranges `:97-116` untouched — advisory
+dedupe never invokes that secondary). Advisory dedupe is the §5.1/§5.4
+A–E verified head-coordinate identity (verified actuals +
+`derivedTarget`, base via exact mapping only, §5.5 envelope); titles,
+categories, and unverified/cited ranges contribute nothing.
 
 ### Merge-domain acceptance matrix (8 — each a test in P6-04/P6-05/§6)
 
@@ -932,7 +978,7 @@ for the primary domain, same artifact bytes with advisories absent
 | Support (P6-02) | per-detector eligible denominator, ratio + count boundaries, zero-eligible safety, cap order stability |
 | Cache (P6-03) | key stability/drift (content, detector, schema, sampling-policy), stale rebuild, failure matrix (never fails run), atomic write, path containment |
 | Prompt (P6-04) | primary inference-free + byte-identical pin (template/version/categories/hash/serialization/contract), separate advisory template+version+hash+contract, advisory authority text (advisory template only), boundary gates (§5 kinds 2–3; cases 4–7, M1–M8), provenance overwrite, budget truncation, no-llm/demo exclusion per P6-00 |
-| Guards (P6-05) | isolated advisory policy §5.2 (threshold `low`, confidence preserved, no `ruleId`, `info` ineligible) + two-call separation pin, convention gate unchanged, §5 cases 1–10 + §5.3 M1–M8 + §5.4 C1–C12 (I1/I2 throughout), zero provider/GitHub calls, validator+publisher diff empty |
+| Guards (P6-05) | isolated advisory policy §5.2 (threshold `low`, confidence preserved, no `ruleId`, `info` ineligible) + two-call separation pin, convention gate unchanged, §5 cases 1–10 + §5.3 M1–M8 + §5.3.1 entry point + §5.4 C1–C12 + §5.5 envelope (I1/I2 throughout), zero provider/GitHub calls, validator+publisher diff empty |
 | Integration | fixture repo end-to-end (conventions appear advisory; explicit rule wins on conflict); clean repo (no conventions, no findings change) |
 
 **Global accept:** `bun run check` green; deterministic (two runs, byte-identical
