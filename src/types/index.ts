@@ -1,5 +1,6 @@
 export * from "./diff.ts";
 export * from "./context.ts";
+export * from "./conventions.ts";
 export * from "./finding.ts";
 export * from "./review.ts";
 export * from "./validation.ts";

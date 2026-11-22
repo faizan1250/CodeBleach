@@ -35,6 +35,8 @@ export interface ReviewOptions {
   demo: boolean;
   /** Explicit offline preview: diff + context only, review/validation skipped. */
   noLlm: boolean;
+  /** Phase 6 opt-in (default false); demo and --no-llm ignore it. P6-00: live use fails closed. */
+  conventionAdvisory?: boolean | undefined;
   logLevel: string;
   runId: string;
   /** Exact key bytes for logger/artifact redaction; never logged itself. */
@@ -161,6 +163,13 @@ export async function runReview(options: ReviewOptions, logger: Logger): Promise
       { ...options, base, head },
       logger,
     );
+  }
+
+  // Phase 6 (P6-00, ADR 0043): demo and --no-llm bypass the bundle regardless
+  // of the flag. Live use with the flag fails closed here: P6-00 locks
+  // contracts only, and orchestration lands in P6-05.
+  if (options.conventionAdvisory === true) {
+    throw usageError("--convention-advisory runtime lands in P6-05 (P6-00 locks contracts only)");
   }
 
   // Live review: load config once for provider bounds, then reuse the same
