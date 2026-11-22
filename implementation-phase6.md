@@ -55,11 +55,12 @@ duplicate modules):
   `CATEGORY_POLICY_GROUP` maps `convention → "convention"`, and unknown
   `ruleId` already fails (`rule_id_unknown`). Inferred patterns must never be
   citable as `ruleId` — no validator change expected (P6-05 confirms).
-- **ReviewUnit carries explicit rules.** `src/types/context.ts` (`rules: Rule[]`,
-  "explicit first, inferred second (flagged)"). P6-00 decides the carrier for
+- **ReviewUnit carries explicit rules.** `src/types/context.ts:22` declares
+  `rules: Rule[]` — explicit only today. P6-00 decides the carrier for
   inferred items: preferred is an additive flagged field (e.g.
   `inferredConventions?: InferredConvention[]` on the unit or a flagged rule
-  wrapper) — never silently mixed into `rules[]` unflagged.
+  wrapper), ordered after explicit rules and flagged — never silently mixed
+  into `rules[]` unflagged.
 - **No inferred module exists.** Grep-confirmed: only `convention` category
   plumbing, the prompt suppression above, and unrelated `z.infer`. New code
   lives in a new `src/conventions/` directory (§3), not scattered across
