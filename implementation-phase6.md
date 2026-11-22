@@ -704,7 +704,10 @@ only), NEVER a new `VALIDATION_CHECK_CODE` (closed set, §5 kind 5).
 8. Cap advisories (`selectWithinCap` with
    `MAX_ADVISORY_FINDINGS_PER_RUN`, advisory-only winner order).
 9. Append + aggregate: surviving advisories appended AFTER primaries in
-   deterministic order; `run.json` aggregates per-domain counts; a combined
+   deterministic order; the existing aggregate `validationSummary` is
+   unchanged (single-domain counts, no new per-domain `run.json` fields —
+   artifact v2 unchanged); per-domain visibility comes from the transient
+   `AdvisoryExecutionResult` + bounded logger aggregates only. A combined
    `selectWithinCap` over concatenated primaries+advisories is FORBIDDEN
    (pinned by M2/M3 below).
 
