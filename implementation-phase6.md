@@ -3,11 +3,12 @@
 **Baseline (split):** runtime `main` at `5b8aba8` (PR #69 merge,
 `fix/final-pre-phase6-readiness`; Phase 5 hardening PRs #52–#69;
 deterministic-only validation, artifact v2 — last `src/` change) +
-docs baseline `main` at `17ee3a3` (PR #70 merge,
-`fix/phase6-readiness-blockers`; ADR 0040 + §§5.2–5.4 plan sync,
+docs baseline `main` at `1c72bb4` (PR #71 merge,
+`fix/phase6-integration-contracts`; ADR 0041 + §§5.2–5.5 plan sync,
 docs-only, no `src/`/test change). ADR 0039 two-pass authority and ADR
 0038 occurrence-ordered PEM index plus the e75df21 sort-free single-scan
-linearization hold under both.
+linearization hold under both; ADR 0041 locks the handoff envelope,
+execution order, and transient-only diagnostics.
 **Audience:** implementing agent (future Phase 6 workstream).
 **Scope:** deterministic inferred-convention discovery, file cache, and advisory prompt injection.
 **Out of scope:** Phase 7 GitHub publishing/integration, Phase 8 evaluation/optimization, any change to Phase 5 validation semantics.
@@ -20,9 +21,9 @@ linearization hold under both.
 > exists today (verified by absence); Phase 5 validation is the ADR 0038
 > occurrence-ordered interval index (not the never-implemented ADR 0037 probe).
 > Phase 7 publishing and Phase 8 evaluation are out of scope and unchanged by
-> this plan. Historical ADRs 0028–0040 are preserved, never rewritten; plan
-> corrections land in a new ADR (see P6-00). Baseline split (runtime
-> `5b8aba8` vs docs `17ee3a3`) is defined in the header above.
+> this plan. Historical ADRs 0028–0041 are preserved, never rewritten; plan
+> corrections land in ADR 0042 (see P6-00). Baseline split (runtime
+> `5b8aba8` vs docs `1c72bb4`) is defined in the header above.
 
 ---
 
@@ -193,8 +194,9 @@ Keep tickets independently reviewable. Proposed modules live under a new
 5. Decide `--no-llm` behavior (proposed: skip convention building entirely —
    preview stays fast and no prompt consumes it) and demo behavior (proposed:
    demo carries zero inferred conventions).
-6. Record decisions in a new ADR (next free number; never rewrite ADRs
-   0028–0040).
+6. Record decisions in ADR 0042 (scoped amendment clarifying the ADR 0041
+   API choice; never rewrite ADRs 0028–0041; P6-00 must not create
+   ADR 0041 — it already exists).
 7. Lock the validation metadata handoff envelope (§5.5): run-scoped
    `{findingId, canonicalPath, symbol, verifiedLocations}` plus the
    execution result `{findings, conflictMetadata}`; `ValidatedFinding`
