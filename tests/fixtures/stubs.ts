@@ -125,6 +125,11 @@ export function createFixtureEngines(options: FixtureOptions = {}): FixtureEngin
     finding,
     status: "accepted",
     checks: [{ name: "schema", outcome: "passed", code: "evidence_bounds_ok" }],
+    derivedTarget: { file: "src/a.ts", line: 1, side: "RIGHT", kind: "added" },
+    derivedAttribution: {
+      introducedByPr: true,
+      basis: { kind: "added-lines", evidenceIndex: 0, file: "src/a.ts", lines: [1] },
+    },
   };
 
   const loadConfig = ((_repoDir: string) =>

@@ -212,24 +212,40 @@ export const demoReviewEngine: ReviewEngine = {
 
 export const demoValidationEngine: ValidationEngine = {
   validate: (findings) => {
-    const validated: ValidatedFinding[] = findings.map((finding, index) => ({
-      finding,
-      status: index === 0 ? ("accepted" as const) : ("rejected" as const),
-      checks: [
-        { name: "schema", outcome: "passed", code: "evidence_bounds_ok" },
-        { name: "file-in-diff", outcome: "passed", code: "finding_path_resolved" },
-        ...(index === 0
-          ? [{ name: "evidence", outcome: "passed", code: "evidence_quote_verified" } as const]
-          : [
-              {
-                name: "evidence",
-                outcome: "failed",
-                code: "evidence_quote_not_found",
-                detail: "quote not found in context",
-              } as const,
-            ]),
-      ],
-    }));
+    const validated: ValidatedFinding[] = findings.map((finding, index) => {
+      if (index !== 0) {
+        return {
+          finding,
+          status: "rejected" as const,
+          checks: [
+            { name: "schema", outcome: "passed", code: "evidence_bounds_ok" },
+            { name: "file-in-diff", outcome: "passed", code: "finding_path_resolved" },
+            {
+              name: "evidence",
+              outcome: "failed",
+              code: "evidence_quote_not_found",
+              detail: "quote not found in context",
+            } as const,
+          ],
+        };
+      }
+      return {
+        finding,
+        status: "accepted" as const,
+        checks: [
+          { name: "schema", outcome: "passed", code: "evidence_bounds_ok" },
+          { name: "file-in-diff", outcome: "passed", code: "finding_path_resolved" },
+          { name: "evidence", outcome: "passed", code: "evidence_quote_verified" } as const,
+        ],
+        // Canned invariant matches the real engine: head-side target plus a
+        // code-derived introduced-by-PR basis on the added line.
+        derivedTarget: { file: DEMO_FILE, line: 10, side: "RIGHT" as const, kind: "added" as const },
+        derivedAttribution: {
+          introducedByPr: true as const,
+          basis: { kind: "added-lines" as const, evidenceIndex: 0, file: DEMO_FILE, lines: [10] },
+        },
+      };
+    });
     return Promise.resolve(validated);
   },
 };
