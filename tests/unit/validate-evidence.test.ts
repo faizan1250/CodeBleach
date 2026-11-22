@@ -963,6 +963,189 @@ describe("cross-line secret redaction fallback (P1)", () => {
   });
 });
 
+describe("secret delimiter-boundary redaction (red-first)", () => {
+  // Synthetic PEM only: no real key material. Every payload line carries a
+  // unique token so a fragment quote identifies exactly one minimal span.
+  const DELIM_BLOCK = [
+    "// config",
+    "-----BEGIN PRIVATE KEY-----",
+    "PAYLOAD-01-AAAA1111BBBB2222",
+    "PAYLOAD-02-CCCC3333DDDD4444",
+    "PAYLOAD-03-EEEE5555FFFF6666",
+    "PAYLOAD-04-GGGG7777HHHH8888",
+    "PAYLOAD-05-IIII9999JJJJ0000",
+    "PAYLOAD-06-KKKK1111LLLL2222",
+    "PAYLOAD-07-MMMM3333NNNN4444",
+    "PAYLOAD-08-OOOO5555PPPP6666",
+    "-----END PRIVATE KEY-----",
+    "// end",
+    "trailer()",
+  ].join("\n");
+
+  function delimReader(text: string = DELIM_BLOCK) {
+    return readerFor({ head: { "src/a.ts": ok(text) } });
+  }
+
+  // Fail-closed shape is still open (mismatch vs ambiguous); both reject.
+  function rejectsAsSecret(result: Awaited<ReturnType<typeof validateEvidence>>) {
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(
+        result.checks.some(
+          (check) => check.code === "evidence_quote_not_found" || check.code === "evidence_side_ambiguous",
+        ),
+      ).toBe(true);
+    }
+  }
+
+  describe("exact cited range", () => {
+    test("rejects single-line payload cited exactly", async () => {
+      const result = await validateEvidence(
+        inputFor([{ file: "src/a.ts", startLine: 3, endLine: 3, quote: "PAYLOAD-01-AAAA1111BBBB2222" }], delimReader()),
+      );
+      rejectsAsSecret(result);
+    });
+
+    test("rejects multi-line payload cited exactly", async () => {
+      const result = await validateEvidence(
+        inputFor(
+          [
+            {
+              file: "src/a.ts",
+              startLine: 3,
+              endLine: 4,
+              quote: "PAYLOAD-01-AAAA1111BBBB2222\nPAYLOAD-02-CCCC3333DDDD4444",
+            },
+          ],
+          delimReader(),
+        ),
+      );
+      rejectsAsSecret(result);
+    });
+
+    test("rejects header cited exactly", async () => {
+      const result = await validateEvidence(
+        inputFor([{ file: "src/a.ts", startLine: 2, endLine: 2, quote: "-----BEGIN PRIVATE KEY-----" }], delimReader()),
+      );
+      rejectsAsSecret(result);
+    });
+
+    test("rejects footer cited exactly", async () => {
+      const result = await validateEvidence(
+        inputFor([{ file: "src/a.ts", startLine: 11, endLine: 11, quote: "-----END PRIVATE KEY-----" }], delimReader()),
+      );
+      rejectsAsSecret(result);
+    });
+
+    test("accepts non-secret line cited exactly", async () => {
+      const result = await validateEvidence(
+        inputFor([{ file: "src/a.ts", startLine: 12, endLine: 12, quote: "// end" }], delimReader()),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.locations).toEqual([{ side: "head", path: "src/a.ts", startLine: 12, endLine: 12 }]);
+      }
+    });
+  });
+
+  describe("fallback window boundary", () => {
+    test("rejects fragment with BEGIN above the window", async () => {
+      const result = await validateEvidence(
+        inputFor([{ file: "src/a.ts", startLine: 9, endLine: 9, quote: "PAYLOAD-07-MMMM" }], delimReader()),
+      );
+      rejectsAsSecret(result);
+    });
+
+    test("rejects fragment with END below the window", async () => {
+      const result = await validateEvidence(
+        inputFor([{ file: "src/a.ts", startLine: 4, endLine: 4, quote: "PAYLOAD-02-CCCC" }], delimReader()),
+      );
+      rejectsAsSecret(result);
+    });
+
+    test("rejects fragment enclosed by distant delimiters", async () => {
+      const result = await validateEvidence(
+        inputFor([{ file: "src/a.ts", startLine: 7, endLine: 7, quote: "PAYLOAD-05-IIII" }], delimReader()),
+      );
+      rejectsAsSecret(result);
+    });
+
+    test("rejects fragment in the middle of a huge block", async () => {
+      const tokens = ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF", "GGGG", "HHHH", "IIII", "JJJJ", "KKKK", "LLLL"];
+      const huge = [
+        "// config",
+        "-----BEGIN PRIVATE KEY-----",
+        ...tokens.map((token, index) => `HUGE-${String(index + 1).padStart(2, "0")}-${token}1111${token}2222`),
+        "-----END PRIVATE KEY-----",
+        "// end",
+      ].join("\n");
+      const result = await validateEvidence(
+        inputFor([{ file: "src/a.ts", startLine: 9, endLine: 9, quote: "HUGE-07-GGGG" }], delimReader(huge)),
+      );
+      rejectsAsSecret(result);
+    });
+
+    test("rejects fragment of the second of two blocks", async () => {
+      const two = [
+        "-----BEGIN PRIVATE KEY-----",
+        "FIRSTBLOCK-QQQQ1111RRRR2222",
+        "-----END PRIVATE KEY-----",
+        "filler-a",
+        "filler-b",
+        "filler-c",
+        "-----BEGIN PRIVATE KEY-----",
+        "SECOND-01-AAAA1111BBBB2222",
+        "SECOND-02-CCCC3333DDDD4444",
+        "SECOND-03-EEEE5555FFFF6666",
+        "SECOND-04-GGGG7777HHHH8888",
+        "SECOND-05-IIII9999JJJJ0000",
+        "SECOND-06-KKKK1111LLLL2222",
+        "SECOND-07-MMMM3333NNNN4444",
+        "SECOND-08-OOOO5555PPPP6666",
+        "-----END PRIVATE KEY-----",
+        "trailer()",
+      ].join("\n");
+      const result = await validateEvidence(
+        inputFor([{ file: "src/a.ts", startLine: 12, endLine: 12, quote: "SECOND-05-IIII" }], delimReader(two)),
+      );
+      rejectsAsSecret(result);
+    });
+
+    test("accepts non-secret line outside the block", async () => {
+      const result = await validateEvidence(
+        inputFor([{ file: "src/a.ts", startLine: 13, endLine: 13, quote: "trailer()" }], delimReader()),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.locations).toEqual([{ side: "head", path: "src/a.ts", startLine: 13, endLine: 13 }]);
+      }
+    });
+
+    test("rejects fragment of a truncated block at EOF", async () => {
+      const truncated = [
+        "// config",
+        "-----BEGIN PRIVATE KEY-----",
+        "PAYLOAD-T1-QQQQ1111RRRR2222",
+        "PAYLOAD-T2-SSSS3333TTTT4444",
+      ].join("\n");
+      const result = await validateEvidence(
+        inputFor([{ file: "src/a.ts", startLine: 3, endLine: 3, quote: "PAYLOAD-T1-QQQQ" }], delimReader(truncated)),
+      );
+      rejectsAsSecret(result);
+    });
+
+    test("rejects enclosed fragment against a CRLF snapshot", async () => {
+      const result = await validateEvidence(
+        inputFor(
+          [{ file: "src/a.ts", startLine: 7, endLine: 7, quote: "PAYLOAD-05-IIII" }],
+          delimReader(DELIM_BLOCK.split("\n").join("\r\n")),
+        ),
+      );
+      rejectsAsSecret(result);
+    });
+  });
+});
+
 describe("matching cost (P2)", () => {
   test("many items on one snapshot share a single read and split", async () => {
     const total = 6000;
