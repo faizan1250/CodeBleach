@@ -373,6 +373,9 @@ describe("reads and per-run cache", () => {
     const reader = readerFor(source);
     const result = await reader.readHead("src/a.ts", { maxBytes: 3 });
     expect(result.status).toBe("size_limit");
+    if (result.status !== "size_limit") throw new Error("expected size_limit");
+    expect(result.kind).toBe("per-file-limit");
+    expect(result.reason).toContain("per-file");
     expect(reader.stats().entries).toBe(0);
   });
 
@@ -384,7 +387,11 @@ describe("reads and per-run cache", () => {
     source.blobs.set(OID_B, "bbb");
     const reader = readerFor(source, { maxTotalBytes: 5 });
     expect((await reader.readHead("src/one.ts")).status).toBe("ok");
-    expect((await reader.readHead("src/two.ts")).status).toBe("size_limit");
+    const capped = await reader.readHead("src/two.ts");
+    expect(capped.status).toBe("size_limit");
+    if (capped.status !== "size_limit") throw new Error("expected size_limit");
+    expect(capped.kind).toBe("cumulative-limit");
+    expect(capped.reason).toContain("run cap");
     expect(reader.stats()).toMatchObject({ entries: 1, cachedBytes: 3 });
   });
 
@@ -489,12 +496,40 @@ describe("failure mapping", () => {
     expect((await reader.readHead("src/a.ts")).status).toBe("size_limit");
   });
 
+  test("per-file limit names the per-file cap with byte counts", async () => {
+    const source = new ScriptSource();
+    source.headFiles.set("src/a.ts", blobEntry(OID_A, "src/a.ts"));
+    source.blobs.set(OID_A, perFileLimitError());
+    const reader = readerFor(source);
+    const result = await reader.readHead("src/a.ts");
+    if (result.status !== "size_limit") throw new Error("expected size_limit");
+    expect(result.kind).toBe("per-file-limit");
+    expect(result.sizeBytes).toBe(999);
+    expect(result.limitBytes).toBe(10);
+    expect(result.reason).toContain("per-file");
+    expect(result.reason).toContain("999");
+  });
+
   test("typed cumulative limit is size_limit", async () => {
     const source = new ScriptSource();
     source.headFiles.set("src/a.ts", blobEntry(OID_A, "src/a.ts"));
     source.blobs.set(OID_A, cumulativeLimitError());
     const reader = readerFor(source);
     expect((await reader.readHead("src/a.ts")).status).toBe("size_limit");
+  });
+
+  test("cumulative limit names the run cap with byte counts, never the per-file cap", async () => {
+    const source = new ScriptSource();
+    source.headFiles.set("src/a.ts", blobEntry(OID_A, "src/a.ts"));
+    source.blobs.set(OID_A, cumulativeLimitError());
+    const reader = readerFor(source);
+    const result = await reader.readHead("src/a.ts");
+    if (result.status !== "size_limit") throw new Error("expected size_limit");
+    expect(result.kind).toBe("cumulative-limit");
+    expect(result.sizeBytes).toBe(12);
+    expect(result.limitBytes).toBe(10);
+    expect(result.reason).toContain("run cap");
+    expect(result.reason).not.toContain("per-file");
   });
 
   test("untyped cap wording propagates instead of becoming size_limit", async () => {

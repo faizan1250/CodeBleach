@@ -113,7 +113,11 @@ describe("validation snapshot against real commits", () => {
     try {
       const base = await writeAndCommit(dir, { "src/a.ts": `${"x".repeat(100)}\n` }, "base");
       const reader = readerFor(dir, base, base, { maxFileBytes: 10 });
-      expect((await reader.readHead("src/a.ts")).status).toBe("size_limit");
+      const result = await reader.readHead("src/a.ts");
+      expect(result.status).toBe("size_limit");
+      if (result.status !== "size_limit") throw new Error("expected size_limit");
+      expect(result.kind).toBe("per-file-limit");
+      expect(result.reason).toContain("per-file");
     } finally {
       await cleanup();
     }
@@ -125,7 +129,11 @@ describe("validation snapshot against real commits", () => {
       const base = await writeAndCommit(dir, { "src/a.ts": "aaa", "src/b.ts": "bbb" }, "base");
       const reader = readerFor(dir, base, base, { maxTotalBytes: 5 });
       expect((await reader.readHead("src/a.ts")).status).toBe("ok");
-      expect((await reader.readHead("src/b.ts")).status).toBe("size_limit");
+      const result = await reader.readHead("src/b.ts");
+      expect(result.status).toBe("size_limit");
+      if (result.status !== "size_limit") throw new Error("expected size_limit");
+      expect(result.kind).toBe("cumulative-limit");
+      expect(result.reason).toContain("run cap");
     } finally {
       await cleanup();
     }

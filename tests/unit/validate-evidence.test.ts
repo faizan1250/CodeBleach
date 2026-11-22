@@ -422,7 +422,10 @@ describe("unavailable snapshots (P5-04)", () => {
     { status: { status: "not_found", reason: "path is not in the head snapshot" }, name: "missing blob" },
     { status: { status: "binary", reason: "snapshot blob is binary content" }, name: "binary blob" },
     { status: { status: "unsupported", reason: "not a regular file" }, name: "unsupported object" },
-    { status: { status: "size_limit", reason: "snapshot blob exceeds the cap" }, name: "oversized blob" },
+    {
+      status: { status: "size_limit", kind: "per-file-limit", reason: "snapshot blob exceeds the cap" },
+      name: "oversized blob",
+    },
     { status: { status: "timeout", reason: "snapshot blob read timed out" }, name: "read timeout" },
     { status: { status: "aborted", reason: "snapshot read aborted" }, name: "cancelled read" },
   ];

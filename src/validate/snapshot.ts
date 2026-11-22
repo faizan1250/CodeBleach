@@ -9,7 +9,7 @@ import {
   isRegularBlob,
   isSnapshotBlobFailure,
 } from "../context/snapshot.ts";
-import type { TreeEntry } from "../context/snapshot.ts";
+import type { SnapshotBlobFailureKind, TreeEntry } from "../context/snapshot.ts";
 import { normalizeRepoPath } from "../review/normalize.ts";
 
 // Per-run (commit SHA, path) entry bound. Plain text only, never Tree/WASM
@@ -62,9 +62,20 @@ export type SnapshotReadStatus =
   | "aborted"
   | "timeout";
 
+/** Which run cap a `size_limit` hit: one oversized blob vs the cumulative run total. */
+export type SnapshotBlobCapKind = Exclude<SnapshotBlobFailureKind, "missing">;
+
 export type SnapshotReadResult =
   | { status: "ok"; text: string; bytes: number }
-  | { status: Exclude<SnapshotReadStatus, "ok">; reason: string };
+  | {
+      status: "size_limit";
+      reason: string;
+      /** Which run cap fired: one oversized blob vs the cumulative run total. */
+      kind: SnapshotBlobCapKind;
+      sizeBytes?: number | undefined;
+      limitBytes?: number | undefined;
+    }
+  | { status: Exclude<SnapshotReadStatus, "ok" | "size_limit">; reason: string };
 
 export interface ValidationSnapshotReadOptions {
   maxBytes?: number | undefined;
@@ -116,6 +127,26 @@ export function validateSnapshotPath(path: unknown): { ok: true; path: string } 
     return { ok: false, reason: "snapshot path contains control characters" };
   }
   return { ok: true, path: normalized };
+}
+
+/**
+ * Typed byte counts/limits from a blob-cap failure cause. Reads only the
+ * structured cause fields (`SnapshotBlobFailureDetails`); the human-readable
+ * message is never parsed.
+ */
+function blobCapNumbers(error: unknown): { sizeBytes?: number | undefined; limitBytes?: number | undefined } {
+  if (!(error instanceof ReviewerError)) return {};
+  const cause = error.cause;
+  if (typeof cause !== "object" || cause === null) return {};
+  const details = cause as { sizeBytes?: unknown; limitBytes?: unknown };
+  const numbers: { sizeBytes?: number | undefined; limitBytes?: number | undefined } = {};
+  if (typeof details.sizeBytes === "number" && Number.isSafeInteger(details.sizeBytes) && details.sizeBytes >= 0) {
+    numbers.sizeBytes = details.sizeBytes;
+  }
+  if (typeof details.limitBytes === "number" && Number.isSafeInteger(details.limitBytes) && details.limitBytes >= 1) {
+    numbers.limitBytes = details.limitBytes;
+  }
+  return numbers;
 }
 
 export interface ValidationSnapshotReader {
@@ -258,9 +289,33 @@ export class GitValidationSnapshotReader implements ValidationSnapshotReader {
         return { status: "not_found", reason: "snapshot blob is missing at this commit" };
       }
       // Transport output-limit is not a content cap: raw overflow propagates
-      // as a stage failure, never a success-shaped status.
-      if (isSnapshotBlobFailure(error, "per-file-limit") || isSnapshotBlobFailure(error, "cumulative-limit")) {
-        return { status: "size_limit", reason: "snapshot blob exceeds the per-file snapshot cap" };
+      // as a stage failure, never a success-shaped status. Typed blob-cap
+      // failures keep their kind: the per-file cap names the per-file byte
+      // cap, the cumulative cap names the total run cap, and both preserve
+      // the typed byte counts/limits from the cause (never message parsing).
+      if (isSnapshotBlobFailure(error, "per-file-limit")) {
+        const numbers = blobCapNumbers(error);
+        return numbers.sizeBytes !== undefined && numbers.limitBytes !== undefined
+          ? {
+              status: "size_limit",
+              kind: "per-file-limit",
+              sizeBytes: numbers.sizeBytes,
+              limitBytes: numbers.limitBytes,
+              reason: `snapshot blob is ${numbers.sizeBytes} bytes, above the ${numbers.limitBytes}-byte per-file snapshot cap`,
+            }
+          : { status: "size_limit", kind: "per-file-limit", reason: "snapshot blob exceeds the per-file snapshot cap" };
+      }
+      if (isSnapshotBlobFailure(error, "cumulative-limit")) {
+        const numbers = blobCapNumbers(error);
+        return numbers.sizeBytes !== undefined && numbers.limitBytes !== undefined
+          ? {
+              status: "size_limit",
+              kind: "cumulative-limit",
+              sizeBytes: numbers.sizeBytes,
+              limitBytes: numbers.limitBytes,
+              reason: `snapshot total ${numbers.sizeBytes} bytes would exceed the ${numbers.limitBytes}-byte run cap`,
+            }
+          : { status: "size_limit", kind: "cumulative-limit", reason: "snapshot total exceeds the run cap" };
       }
       throw error;
     }
@@ -269,10 +324,22 @@ export class GitValidationSnapshotReader implements ValidationSnapshotReader {
     const bytes = new TextEncoder().encode(text).length;
     const fileCap = positiveInt(options?.maxBytes, this.maxFileBytes, "maxBytes");
     if (bytes > fileCap) {
-      return { status: "size_limit", reason: `snapshot blob is ${bytes} bytes, above the ${fileCap}-byte file cap` };
+      return {
+        status: "size_limit",
+        kind: "per-file-limit",
+        sizeBytes: bytes,
+        limitBytes: fileCap,
+        reason: `snapshot blob is ${bytes} bytes, above the ${fileCap}-byte per-file snapshot cap`,
+      };
     }
     if (this.cachedBytes + bytes > this.maxTotalBytes) {
-      return { status: "size_limit", reason: `snapshot total would exceed the ${this.maxTotalBytes}-byte run cap` };
+      return {
+        status: "size_limit",
+        kind: "cumulative-limit",
+        sizeBytes: this.cachedBytes + bytes,
+        limitBytes: this.maxTotalBytes,
+        reason: `snapshot total ${this.cachedBytes + bytes} bytes would exceed the ${this.maxTotalBytes}-byte run cap`,
+      };
     }
     if (this.cache.size < this.maxEntries) {
       this.cache.set(key, { text, bytes });
