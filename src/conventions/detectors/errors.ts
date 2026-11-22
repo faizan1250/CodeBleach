@@ -125,9 +125,9 @@ export function detectErrorHandling(files: readonly ParsedSampledFile[]): Detect
   }
   const winner =
     resultMatches.length > throwMatches.length
-      ? { pattern: RESULT_PATTERN, matches: resultMatches }
+      ? { pattern: RESULT_PATTERN, matches: resultMatches, runnerUp: throwMatches.length }
       : throwMatches.length > resultMatches.length
-        ? { pattern: THROW_PATTERN, matches: throwMatches }
+        ? { pattern: THROW_PATTERN, matches: throwMatches, runnerUp: resultMatches.length }
         : null;
   if (winner === null) return [];
   const candidate = toCandidate({
@@ -137,6 +137,7 @@ export function detectErrorHandling(files: readonly ParsedSampledFile[]): Detect
     matches: winner.matches,
     eligibleFiles,
     sampledFiles: files.length,
+    runnerUpMatchingFiles: winner.runnerUp,
   });
   return candidate === null ? [] : [candidate];
 }

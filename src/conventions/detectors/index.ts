@@ -21,6 +21,9 @@ export interface ParsedSampledFile {
 // Raw per-detector candidate: full evidence and counts, no thresholding and
 // no stable id (both P6-02). supportRatio is matching/eligible; a candidate
 // is only emitted when eligibleFiles > 0, so the ratio never divides by zero.
+// runnerUpMatchingFiles is set only by mutually exclusive classifications
+// (error-handling) for the P6-02 dominance margin; single-pattern detectors
+// omit it.
 export interface DetectorCandidate {
   detector: string;
   detectorVersion: number;
@@ -30,6 +33,7 @@ export interface DetectorCandidate {
   eligibleFiles: number;
   sampledFiles: number;
   supportRatio: number;
+  runnerUpMatchingFiles?: number;
 }
 
 export interface FileMatch {
@@ -59,6 +63,7 @@ export function toCandidate(input: {
   matches: readonly FileMatch[];
   eligibleFiles: number;
   sampledFiles: number;
+  runnerUpMatchingFiles?: number;
 }): DetectorCandidate | null {
   if (input.eligibleFiles <= 0) return null;
   const earliest = new Map<string, FileMatch>();
@@ -90,6 +95,7 @@ export function toCandidate(input: {
     eligibleFiles: input.eligibleFiles,
     sampledFiles: input.sampledFiles,
     supportRatio: matchingFiles / input.eligibleFiles,
+    ...(input.runnerUpMatchingFiles === undefined ? {} : { runnerUpMatchingFiles: input.runnerUpMatchingFiles }),
   };
 }
 
