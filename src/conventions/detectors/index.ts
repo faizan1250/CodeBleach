@@ -95,3 +95,4 @@ export function toCandidate(input: {
 
 export { detectNamingExports } from "./naming.ts";
 export { detectErrorHandling } from "./errors.ts";
+export { detectCommonWrappers } from "./wrappers.ts";
