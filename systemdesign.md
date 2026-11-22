@@ -138,6 +138,8 @@ Ordered; cheap/deterministic first. Any hard failure → reject. Deterministic-o
 
 **Outcome:** `accepted | rejected | inconclusive`. `inconclusive` ⇒ discard (logged). Every check records `{name, outcome, code, detail}` (`outcome: passed | failed | inconclusive | skipped`, stable machine-readable `code` per `docs/adr/0029-phase5-result-contract.md`, bounded detail with no source text or secrets) for eval/debug. Accepted findings carry a code-owned head-side `derivedTarget`; rejected duplicates link the retained finding via `duplicateOfId`. `llmVerdict` stays absent in v1 (deterministic-only, ADR 0028 D1).
 
+**Cancellation (ADR 0034):** an optional caller `AbortSignal` threads `PipelineInput.signal` → `ValidationEngine.validate` → location/evidence reads → the underlying Git subprocess (`runProcess` kills and reaps on abort). Aborted reads are the typed `"aborted"` status and always resolve to `inconclusive` (never accepted); timeout/output-limit/protocol failures keep their own outcomes. The reader is still released (`clear()`) on cancel. The CLI wires no caller signal, so cancellation is programmatic-only in v1.
+
 ### 4.5 GitHub Publisher (`src/github`)
 - One `pulls.createReview` call (`event: "COMMENT"`) with `comments[]` + summary body; `commit_id` = head SHA.
 - If a comment 422s (bad position), drop it and list it in the summary instead of failing the review.
