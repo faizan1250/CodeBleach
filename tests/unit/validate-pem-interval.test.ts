@@ -30,6 +30,16 @@ const TWO_COMPLETE = [BEGIN, A1, END, BEGIN, B1, END].join("\n");
 // pairs it with the later END, which the guard must not accept as a close.
 const LONE_THEN_COMPLETE = [BEGIN, "X-01-QQQQ1111RRRR2222", BEGIN, "Y-01-SSSS3333TTTT4444", END].join("\n");
 
+// Same-line delimiters: the builder must scan occurrences in source order.
+// A trailing BEGIN after BEGIN..END on one line stays open to EOF; the
+// per-line boolean builder drops it and verifies the tail.
+const SAME_LINE_TRAILING = [`${BEGIN} ${A1} ${END} ${BEGIN}`, "TAIL-01-ZZZZ1111WWWW2222"].join("\n");
+const SAME_LINE_TRAILING_GAP = [`${BEGIN} ${A1} ${END} ${BEGIN}`, "// ordinary comment", "TAIL-06-QQQQ1111RRRR2222"].join("\n");
+const SAME_LINE_END_BEGIN = ["code-top()", `${END} ${BEGIN}`, "TAIL-02-AAAA1111BBBB2222"].join("\n");
+const SAME_LINE_PAYLOAD_AFTER_BEGIN = `${BEGIN} ${A1} ${END} ${BEGIN} TAIL-03-CCCC3333DDDD4444`;
+const SAME_LINE_TWO_COMPLETE = `${BEGIN} ${A1} ${END} ${BEGIN} ${B1} ${END}`;
+const SAME_LINE_MULTI_BEGIN = `${BEGIN} ${BEGIN} ${A1} ${END}`;
+
 // Oversized block: BEGIN 22 lines above and END 22 below the fragment, both
 // outside the bounded outward probe.
 function oversizedBothOutside(): string {
@@ -354,5 +364,136 @@ describe("pem interval engine", () => {
     const result = await engine.validate([finding], diff, [unit], ConfigFileSchema.parse({}));
     const details = (result[0]?.checks ?? []).map((check) => check.detail ?? "").join("\n");
     for (const token of [A1, A2, B1, B2]) expect(details.includes(token)).toBe(false);
+  });
+});
+
+describe("pem interval same-line", () => {
+  test("complete plus trailing BEGIN rejects later payload", async () => {
+    const result = await validateEvidence(
+      inputFor(
+        [{ file: "src/a.ts", startLine: 2, endLine: 2, quote: "TAIL-01-ZZZZ1111WWWW2222" }],
+        readerFor(SAME_LINE_TRAILING),
+      ),
+    );
+    rejects(result);
+  });
+
+  test("trailing BEGIN across ordinary line rejects payload", async () => {
+    const result = await validateEvidence(
+      inputFor(
+        [{ file: "src/a.ts", startLine: 3, endLine: 3, quote: "TAIL-06-QQQQ1111RRRR2222" }],
+        readerFor(SAME_LINE_TRAILING_GAP),
+      ),
+    );
+    rejects(result);
+  });
+
+  test("END then BEGIN same line rejects later payload", async () => {
+    const result = await validateEvidence(
+      inputFor(
+        [{ file: "src/a.ts", startLine: 3, endLine: 3, quote: "TAIL-02-AAAA1111BBBB2222" }],
+        readerFor(SAME_LINE_END_BEGIN),
+      ),
+    );
+    rejects(result);
+  });
+
+  test("BEGIN END BEGIN same line rejects trailing payload", async () => {
+    const result = await validateEvidence(
+      inputFor(
+        [{ file: "src/a.ts", startLine: 1, endLine: 1, quote: "TAIL-03-CCCC3333DDDD4444" }],
+        readerFor(SAME_LINE_PAYLOAD_AFTER_BEGIN),
+      ),
+    );
+    rejects(result);
+  });
+
+  test("two complete blocks one line verify", async () => {
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 1, endLine: 1, quote: SAME_LINE_TWO_COMPLETE }], readerFor(SAME_LINE_TWO_COMPLETE)),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  test("multiple BEGINs one END same line reject", async () => {
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 1, endLine: 1, quote: SAME_LINE_MULTI_BEGIN }], readerFor(SAME_LINE_MULTI_BEGIN)),
+    );
+    rejects(result);
+  });
+
+  test("CRLF trailing BEGIN same line rejects payload", async () => {
+    const crlf = SAME_LINE_TRAILING.split("\n").join("\r\n");
+    const result = await validateEvidence(
+      inputFor([{ file: "src/a.ts", startLine: 2, endLine: 2, quote: "TAIL-01-ZZZZ1111WWWW2222" }], readerFor(crlf)),
+    );
+    rejects(result);
+  });
+});
+
+describe("pem interval same-line engine", () => {
+  const TAIL = "TAIL-01-ZZZZ1111WWWW2222";
+
+  function engineReader(text: string) {
+    return (input: { headSha: string; mergeBase: string }) =>
+      new FakeValidationSnapshotReader({
+        headSha: input.headSha,
+        mergeBase: input.mergeBase,
+        script: { head: { "src/a.ts": ok(text) } },
+      });
+  }
+
+  function trailingSetup() {
+    const lines = SAME_LINE_TRAILING.split("\n");
+    const added = lines.map((_, index) => diffLine("add", null, index + 1));
+    const changedFile: ChangedFile = {
+      path: "src/a.ts",
+      oldPath: null,
+      status: "modified",
+      language: "typescript",
+      hunks: [{ oldStart: 1, oldLines: 0, newStart: 1, newLines: added.length, lines: added }],
+      commentableLines: added.map((line) => line.newLine as number),
+      symbols: [
+        testSymbol({ startLine: 1, endLine: added.length, changedLines: added.map((l) => l.newLine as number) }),
+      ],
+    };
+    const unit: ReviewUnit = {
+      ...testUnit(),
+      file: {
+        path: "src/a.ts",
+        oldPath: null,
+        status: "modified",
+        language: "typescript",
+        commentableLines: [...changedFile.commentableLines],
+      },
+      symbol: { name: "render", kind: "function", startLine: 1, endLine: added.length, changedLines: [2] },
+    };
+    const diff = { baseSha: BASE, headSha: HEAD, mergeBase: BASE, files: [changedFile] };
+    const finding: Finding = {
+      ...testFinding([{ file: "src/a.ts", startLine: 2, endLine: 2, quote: TAIL }]),
+      line: 2,
+    };
+    return { changedFile, unit, diff, finding };
+  }
+
+  test("trailing-BEGIN payload never accepted or publishable", async () => {
+    const { unit, diff, finding } = trailingSetup();
+    const engine = createValidationEngine({ repoDir: "/repo", createReader: engineReader(SAME_LINE_TRAILING) });
+    const result = await engine.validate([finding], diff, [unit], ConfigFileSchema.parse({}));
+    expect(result).toHaveLength(1);
+    const item = result[0];
+    expect(item?.status).toBe("rejected");
+    expect(item?.status).not.toBe("accepted");
+    expect(item && isAcceptedFinding(item)).toBe(false);
+    expect(item?.derivedAttribution?.introducedByPr).not.toBe(true);
+    expect(item?.checks.some((check) => check.code === "evidence_quote_not_found")).toBe(true);
+  });
+
+  test("trailing-BEGIN checks carry no payload", async () => {
+    const { unit, diff, finding } = trailingSetup();
+    const engine = createValidationEngine({ repoDir: "/repo", createReader: engineReader(SAME_LINE_TRAILING) });
+    const result = await engine.validate([finding], diff, [unit], ConfigFileSchema.parse({}));
+    const details = (result[0]?.checks ?? []).map((check) => check.detail ?? "").join("\n");
+    for (const token of [A1, TAIL]) expect(details.includes(token)).toBe(false);
   });
 });
