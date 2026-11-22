@@ -1,6 +1,7 @@
 # CodeBleach — Phase 6: Inferred Repository Conventions (plan only, no implementation)
 
-**Baseline:** `main` at or after PR #68 (Phase 5 hardening PRs #52–#68;
+**Baseline:** `main` at `5b8aba8` (PR #69 merge,
+`fix/final-pre-phase6-readiness`; Phase 5 hardening PRs #52–#69;
 deterministic-only validation, artifact v2; ADR 0039 two-pass authority;
 ADR 0038 occurrence-ordered PEM index plus the e75df21 sort-free single-scan
 linearization).
@@ -16,7 +17,7 @@ linearization).
 > exists today (verified by absence); Phase 5 validation is the ADR 0038
 > occurrence-ordered interval index (not the never-implemented ADR 0037 probe).
 > Phase 7 publishing and Phase 8 evaluation are out of scope and unchanged by
-> this plan. Historical ADRs 0028–0038 are preserved, never rewritten; plan
+> this plan. Historical ADRs 0028–0040 are preserved, never rewritten; plan
 > corrections land in a new ADR (see P6-00).
 
 ---
@@ -36,9 +37,10 @@ These constraints are fixed for Phase 6 v1 (from `systemdesign.md` §6). Do not 
    on/off — and no inferred item ever enters the primary pass.
 2. **Inferred is advisory only**, produced by a SEPARATE convention-advisory
    pass — never mixed into the primary pass. Advisory findings are
-   `convention`-category ONLY, max severity `low`, no `ruleId` (any supplied
-   `ruleId` rejected); a non-convention category, above-`low` severity, or any
-   present `ruleId` from the advisory pass is impossible by
+   `convention`-category ONLY, max severity `low` (exactly `low`: `info`
+   is below-threshold and ineligible — §5.2), no `ruleId` (any supplied
+   `ruleId` rejected); a non-convention category, non-`low` severity, or
+   any present `ruleId` from the advisory pass is impossible by
    app-enforced invariant (orchestration merge gates, §5), not by prompt text.
    The advisory pass runs under its own separate template, version, hash,
    contract, validation, and boundary — never as a section appended to the
@@ -176,7 +178,8 @@ Keep tickets independently reviewable. Proposed modules live under a new
    freezes): `MIN_SUPPORT_RATIO` (e.g. 0.6), `MIN_EVIDENCE_FILES` (e.g. 3),
    `MAX_CONVENTIONS_PER_RUN` (e.g. 20), `MAX_EVIDENCE_PER_CONVENTION`
    (e.g. 8, applies to retained `evidence`), `MAX_SAMPLED_FILES` (e.g. 200,
-   deterministic order), advisory token budget share (e.g. ≤ 800 tokens,
+   deterministic order), `ADVISORY_SEVERITY_THRESHOLD` (e.g. `"low"`, §5.2),
+   `MAX_ADVISORY_FINDINGS_PER_RUN` (e.g. 5, §5.3), advisory token budget share (e.g. ≤ 800 tokens,
    truncated by whole conventions, never mid-pattern).
 4. Lock the sampling policy and version it: `SAMPLING_POLICY_VERSION`
    covering file selection order, per-detector eligibility rules, language
@@ -187,7 +190,7 @@ Keep tickets independently reviewable. Proposed modules live under a new
    preview stays fast and no prompt consumes it) and demo behavior (proposed:
    demo carries zero inferred conventions).
 6. Record decisions in a new ADR (next free number; never rewrite ADRs
-   0028–0038).
+   0028–0040).
 
 **Tests:** type-shape tests for `InferredConvention` + `ConventionEvidence`
 (bounds: `endLine >= startLine`, 1-based; ordering: file then startLine;
@@ -330,7 +333,7 @@ diff — no primary template edit, no `CODE_REVIEW_PROMPT_VERSION` bump.
    separate template file with its own version constant, hash test, output
    contract, validation, and merge boundary — never a section appended to the
    primary prompt. Its output is constrained by app code, not by model
-   obedience: `convention`-category ONLY, max severity `low`, and NO
+   obedience: `convention`-category ONLY, max severity `low` (exactly `low` — §5.2), and NO
    `ruleId`; anything else is rejected at the orchestration boundary before
    merge. `origin.pass` is stamped `"convention-advisory"` by trusted code
    (any model-supplied value overwritten); the model never supplies
@@ -349,24 +352,20 @@ diff — no primary template edit, no `CODE_REVIEW_PROMPT_VERSION` bump.
    truncation; explicit rules are never truncated for inferred because the
    advisory pass never carries explicit rules).
 6. `convention` category stays out of the primary pass's requested in-scope
-   categories (`CATEGORY_ORDER` unchanged); advisory findings must carry NO
-   `ruleId` — missing is the only valid state. ANY supplied `ruleId` on an
-   advisory finding is rejected at the orchestration boundary before
-   validation: `inf-*` and fabricated ids (which `rule_id_unknown` would
-   reject) AND real rule ids (which validation would otherwise ACCEPT via the
-   `rule_ok` path — hence presence itself is rejected in orchestration).
-   P6-05 pins the four-case matrix.
+   categories (`CATEGORY_ORDER` unchanged); the advisory `ruleId` boundary
+   and four-case matrix live canonically in P6-05 item 1 (not restated
+   here) — P6-04 tests feed all four cases at the merge boundary.
 
 **Tests:** primary prompt/payload byte-identical with conventions on/off
 (template bytes, version, categories, hash, serialization, output contract);
 primary template hash + version pinned unchanged; separate advisory
 template/version/hash/contract present and distinct from primary; advisory
 authority text present verbatim in the advisory template only; budget
-truncation drops whole conventions; non-convention, above-`low`, or
-`ruleId`-carrying advisory output rejected at the merge boundary (four-case
-ruleId matrix: missing ok, `inf-*` / real / fabricated rejected);
+truncation drops whole conventions; advisory boundary gates per §5 kinds
+2–3 (category / severity / `ruleId` presence per the P6-05 four-case
+matrix: missing ok, `inf-*` / real / fabricated rejected);
 model-supplied provenance overwritten by code stamping;
-`--no-llm`/demo carry no advisory pass.
+`--no-llm`/demo exclusion per P6-00 (no advisory build or pass).
 
 **Accept:** primary prompt provably inference-free and byte-identical on/off
 (no primary diff exists); advisory lives only under its separate contract;
@@ -386,21 +385,26 @@ present verbatim).
    orchestration); (d) fabricated id ⇒ rejected (`rule_id_unknown`). No new
    Phase 5 codes. Check codes stay closed; `run.json` shape unchanged.
 2. Confirm `convention` gate behavior unchanged (always passes; no toggle).
-   Category=`convention` + severity≤`low` gates run at the orchestration
-   boundary BEFORE validation; validation never sees violating advisory
-   output.
+   Category=`convention` + severity==`low` gates run at the orchestration
+   boundary BEFORE validation (`info` is below the advisory threshold and
+   equally rejected — §5.2; above-`low` likewise); validation never sees
+   violating advisory output.
 3. Pin the caps at the orchestration boundary (app-enforced, tested): the
    merge step rejects advisory output that is not `convention`-category, is
-   above `low`, or carries any `ruleId`, before it can reach validation.
-   Prompt authority text is guidance (tested verbatim); the caps are
+   not exactly `low`, or carries any `ruleId`, before it can reach
+   validation; the advisory count cap (`MAX_ADVISORY_FINDINGS_PER_RUN`,
+   §5.3 steps 8–9) applies post-validation at orchestration. Prompt
+   authority text is guidance (tested verbatim); the caps are
    invariants (tested by feeding violating advisory output at the boundary).
 4. Provenance: `origin.pass` for advisory findings is stamped by trusted
    orchestration code; any model-supplied pass value is overwritten, never
    trusted (test: forged pass value does not survive the merge).
-5. Sync `systemdesign.md` §6/§13 rows, `docs/validation.md` (one line: inferred
-   is advisory, never validation evidence), and README docs index if a new doc
-   is added. No ADR rewrites.
-6. Assemble the Phase 6 matrix: explicit-beats-inferred precedence,
+5. Sync `systemdesign.md` §6/§13 rows, `docs/validation.md` (inferred-advisory
+   pointer: separate `validate()` call under the isolated §5.2 policy,
+   orchestration-owned count cap, no Phase 5 semantic change), and README
+   docs index if a new doc is added. No ADR rewrites.
+6. Assemble the Phase 6 matrix: explicit-beats-inferred precedence (§5
+   cases 1–10), merge domains (M1–M8), head-coordinate conflict (C1–C12),
    advisory-label presence, cache round-trip, cap behavior, offline determinism
    (zero provider/GitHub calls — reuse the Phase 5 fetch-guard pattern).
 
@@ -446,8 +450,9 @@ Five guarantee kinds — do not conflate them:
    the model. Holds only when the model obeys.
 2. **App-enforced invariants** (orchestration merge boundary, tested against a
    disobedient model): advisory output must be `convention`-category AND
-   severity ≤ `low` AND carry no `ruleId` — violations rejected before
-   validation. Hold even when the model disobeys.
+   severity == `low` (above-`low` AND `info` both rejected — §5.2) AND
+   carry no `ruleId` — violations rejected before validation. Hold even
+   when the model disobeys.
 3. **Provenance** (trusted code): `origin.pass` stamped `"primary"` vs
    `"convention-advisory"` by orchestration; any model-supplied pass value is
    overwritten, never trusted.
@@ -455,8 +460,9 @@ Five guarantee kinds — do not conflate them:
    only; primary findings never altered, dropped, or re-ranked; explicit wins
    on conflict per §5.1.
 5. **Phase 5 unchanged:** closed check-code set, validator, publisher, and
-   artifact shape untouched; caps enforced before validation, never by new
-   codes.
+   artifact shape untouched; boundary caps enforced at orchestration
+   (category / severity / `ruleId` pre-validation, advisory count cap
+   post-validation per §5.3), never by new codes.
 
 1. **Two passes.** Primary: explicit rules + existing context, ordinary
    categories, zero inferred input; template, version, categories, hash,
@@ -480,10 +486,13 @@ comparison: model prose is untrusted and non-deterministic):
   `finding.symbol ?? unit-symbol-name` on each side — a finding without its
   own symbol inherits its unit's symbol. Comparison after fallback is exact;
   no fuzzy matching.
-- **Overlapping target/evidence ranges:** resolved head-side target line plus
-  cited evidence spans; same canonical file sharing ≥ 1 line (shared-line
-  overlap, same safe direction as P5-07 `rangesOverlap`). Near-misses with no
-  shared line are NOT conflicts.
+- **Overlapping target/evidence ranges:** verified head-side coordinates
+  ONLY — the code-owned `derivedTarget` line plus VERIFIED actual evidence
+  ranges mapped to head coordinates per §5.4 (never model-cited ranges;
+  base-side locations map only via exact one-to-one diff correspondence,
+  unmappable evidence is excluded). Same canonical file sharing ≥ 1 head
+  line (shared-line overlap, same safe direction as P5-07 `rangesOverlap`).
+  Near-misses with no shared line are NOT conflicts.
 - **When conflicting:** same canonical path AND same fallback-resolved symbol
   AND overlapping ranges. Category and title are IGNORED (advisory is always
   `convention`, primary never is; titles are model prose).
@@ -492,8 +501,10 @@ comparison: model prose is untrusted and non-deterministic):
   safe direction; false merging would hide a defect).
 - **Renames:** head-side path is the identity; evidence citing the old path
   canonicalizes to it before comparison.
-- **Overlap calc:** interval intersection over `{target line} ∪ {evidence
-  spans}` per finding, same file only; ≥ 1 shared line ⇒ overlap.
+- **Overlap calc:** interval intersection over `{derivedTarget line} ∪
+  {head-mapped verified evidence spans}` per finding (§5.4 rule D), same
+  file only; ≥ 1 shared head line ⇒ overlap. Cited ranges that were not
+  verified contribute nothing — never treated as exact.
 - **Multi-primary:** an advisory finding conflicting with ANY retained primary
   finding is suppressed (one suppression record; the primary side is
   untouched).
@@ -541,8 +552,297 @@ mutation, no re-rank, no annotation).
    primaries suppressed once; advisory-advisory dupes collapse to first;
    primary set byte-identical (I1 + I2 together).
 10. Phase 5 validation + publisher behavior unchanged (validator/publisher
-    diffs empty; no new codes, statuses, or artifact fields; advisory caps
-    enforced before validation, never by new codes).
+    diffs empty; no new codes, statuses, or artifact fields; advisory
+    boundary caps enforced at orchestration — category / severity / `ruleId`
+    pre-validation (§5 kind 2), advisory count cap post-validation (§5.3
+    step 8) — never by new codes).
+
+### 5.2 Isolated advisory validation policy (Blocker A)
+
+**Root cause (verified in tree).** Under default config the advisory happy
+path above cannot validate: `DEFAULT_SEVERITY_THRESHOLD = "medium"`
+(`src/config/defaults.ts:12`, wired as the schema default at
+`src/config/schema.ts:80`) with rank `low = 1 < medium = 2`
+(`src/validate/policy.ts:42-48`). The `convention` category gate passes
+unconditionally (`src/validate/policy.ts:126-129`, group `convention` at
+`:16-27`), but the severity gate has no category exemption: with no
+`groupOverride` for `convention`, the threshold resolves
+`effective.severityThreshold ?? groupOverride ?? config.review.severity_threshold`
+(`:177-179`) to the global `medium`, and a `convention`/`low` finding is
+rejected (`severity_below_threshold`, `:180-186`). With no `ruleId` cited,
+`effectiveSeverity = finding.severity` (`:141`, `:170-172`), so the
+advisory contract (NO `ruleId` on advisory output, §0 item 2) leaves no
+rule-severity rescue. Routing advisory findings through unmodified
+`validatePolicy` under default config therefore rejects every advisory
+`low`. This section is the plan fix; no validator or config change.
+
+**Fix (plan-only, orchestration boundary + separate call, no new codes).**
+Advisory findings NEVER enter the primary `validate()` array. Orchestration
+makes TWO `validate()` calls on disjoint inputs with the same engine code:
+
+1. **Primary call:** findings from the primary pass only, full user config
+   (path-override → category-override → global precedence, unchanged).
+2. **Advisory call:** findings that survived the §5 boundary gate only,
+   under an isolated advisory policy pinned in orchestration/test code (NOT
+   user config, NOT a validator flag, NOT a schema change):
+   - Severity threshold fixed to `low` (named constant locked in P6-00,
+     e.g. `ADVISORY_SEVERITY_THRESHOLD = "low"`). No inherited path
+     thresholds: `path_overrides` severity entries and category severity
+     overrides do NOT apply to the advisory call (advisory scope is global,
+     never path-tuned).
+   - Confidence threshold PRESERVED: the resolved effective confidence
+     threshold for the finding's canonical path (path → global, same as
+     primary) applies unchanged — advisory narrows authority scope, never
+     weakens evidence strength.
+   - Convention category gate KEPT: always passes, identical to primary.
+   - Effective severity is ALWAYS `finding.severity`: no `ruleId` exists to
+     override it (any present `ruleId` was already rejected pre-validation
+     per the four-case matrix, §5 case 7).
+3. **Explicitly forbidden:** minting a fake explicit rule to carry `low`
+   severity; mutating the global default or schema; adding a `convention`
+   slot to `category_overrides`; lowering user thresholds to admit
+   advisories.
+4. **`info` is below-threshold (ineligible), stated explicitly:** the
+   advisory call accepts exactly severity `low`. An advisory `info` finding
+   is below the advisory threshold and is rejected at the boundary (dropped
+   + bounded count, never validated, never merged). `info` is not a quieter
+   advisory — it is not advisory-eligible at all. Primary default `medium`
+   already excludes both `low` and `info`; the advisory domain admits `low`
+   only.
+
+The validation engine, policy function, check codes, and config schema are
+UNCHANGED: isolation comes from separate calls with separate inputs and a
+pinned advisory threshold at orchestration, plus the pre-validation
+boundary gates. P6-00 locks the constant name/value with tests; P6-05 pins
+the two-call separation (feed an advisory `low` through the primary call
+in a test and assert it still fails `severity_below_threshold` under
+default config — the test that proves the separate call is load-bearing).
+
+### 5.3 Two independent merge domains and execution order (Blocker B)
+
+**Root cause (verified in tree).** `ValidationEngineImpl.validate` runs
+per-finding stages into ONE `pending: PendingAccepted[]` array
+(`src/validate/engine.ts:102-177`), then `resolveDuplicates` over it
+(`:182`) and `selectWithinCap` over the survivors with
+`config.review.max_findings` (`:201-204`). Dedupe is scoped to validated
+candidates only (`src/validate/dedupe.ts:118-124`) and the cap to
+post-dedupe winners (`:214-221`), with Phase 5 winner order (effective
+severity, confidence, path, line, fingerprint, id; `:59-71`). The engine
+takes ONE `findings[]` set (`:85-91`): any advisory item merged into that
+array before `validate()` shares the pending set, the dedupe, and the
+ranked cap — advisory `low`s lose the cap race by severity order AND the
+cap is computed over the mixed set, so primary byte-identity (I1) cannot
+hold. Two domains are therefore mandatory, not stylistic.
+
+**Domains (no shared set, no shared dedupe, no shared cap):**
+
+- **Primary domain:** primary-pass findings → `validate()` (user config) →
+  `resolveDuplicates` (primary validated only) →
+  `selectWithinCap(config.review.max_findings)` (Phase 5 order, unchanged).
+  Advisory input NEVER enters this domain at any stage.
+- **Advisory domain:** boundary-surviving advisories → separate `validate()`
+  (isolated policy §5.2) → conflict suppression vs RETAINED primaries
+  (§5.1 as canonicalized by §5.4) → advisory-internal
+  `resolveDuplicates` (advisory validated only) → advisory-internal
+  `selectWithinCap` with the named advisory cap below (same comparator,
+  advisory-only ranking).
+
+**Named advisory cap (P6-00 locks name + value with tests).**
+`MAX_ADVISORY_FINDINGS_PER_RUN` (suggestion e.g. 5 — P6-00 justifies and
+freezes). Rationale vs `MAX_CONVENTIONS_PER_RUN` (P6-00, e.g. 20): the two
+caps bound DIFFERENT units at different stages. `MAX_CONVENTIONS_PER_RUN`
+caps INPUT patterns admitted to the advisory prompt (prompt-bloat guard);
+`MAX_ADVISORY_FINDINGS_PER_RUN` caps OUTPUT findings merged per run
+(comment-noise guard). One convention can yield several findings, so the
+pattern cap alone cannot bound merged output — the findings cap is
+independently required. NO user config option: a named tested constant is
+the default; a `.reviewer.yml` knob is added only if Phase 8 evaluation
+proves a need (YAGNI — no speculative configurability). Advisory count-cap
+overflow is recorded as a bounded orchestration merge diagnostic (counts
+only), NEVER a new `VALIDATION_CHECK_CODE` (closed set, §5 kind 5).
+
+**Normative execution order (1–9, no combined cap):**
+
+1. Validate primary findings (one `validate()` call, user config).
+2. Dedupe primary validated winners (`resolveDuplicates`, primary-only).
+3. Cap primary (`selectWithinCap`, `config.review.max_findings`).
+4. Boundary-gate advisory output (category / severity / `ruleId` presence /
+   provenance stamping — §5 kinds 2–3; violators dropped pre-validation).
+5. Validate surviving advisories (SEPARATE `validate()` call, §5.2 policy).
+6. Conflict-suppress advisories vs retained primaries (head-coordinate
+   contract §5.4; suppressed advisory dropped wholly + bounded diagnostic).
+7. Dedupe surviving advisories advisory-internally (`resolveDuplicates`
+   over advisory validated only; advisory-advisory identity per §5.1).
+8. Cap advisories (`selectWithinCap` with
+   `MAX_ADVISORY_FINDINGS_PER_RUN`, advisory-only winner order).
+9. Append + aggregate: surviving advisories appended AFTER primaries in
+   deterministic order; `run.json` aggregates per-domain counts; a combined
+   `selectWithinCap` over concatenated primaries+advisories is FORBIDDEN
+   (pinned by M2/M3 below).
+
+### Merge-domain acceptance matrix (8 — each a test in P6-04/P6-05/§6)
+
+- **M1** `max_findings = 1` with 1 accepted primary + N accepted advisories
+  ⇒ primary kept; advisories appended up to the advisory cap (advisory
+  count never evicts the primary).
+- **M2** Full primary cap (e.g. 12 accepted primaries, `max_findings = 10`,
+  plus advisories) ⇒ exactly the top-10 primaries kept, byte-identical
+  with advisories absent (no combined-cap recomputation).
+- **M3** Advisory over-cap (e.g. 8 validated surviving advisories, advisory
+  cap 5) ⇒ top 5 in advisory winner order kept; rest dropped with a bounded
+  merge diagnostic (counts only, no new check code).
+- **M4** Duplicate primaries + duplicate advisories in one run ⇒ primary
+  dedupe and advisory dedupe resolve independently (neither domain's
+  duplicates consume the other's cap).
+- **M5** Advisory-advisory dupes ⇒ collapse to first in deterministic order;
+  primary set untouched.
+- **M6** Conflicting advisory vs retained primary (§5.4) ⇒ advisory
+  suppressed wholly, primary byte-identical (I1 + I2 together at domain
+  scale).
+- **M7** Reversed merge input order (advisories supplied before primaries to
+  the merge function) ⇒ byte-identical output (domains computed separately;
+  append order fixed primaries-then-advisories, never input order).
+- **M8** Conventions on/off ⇒ primary validated/deduped/capped set
+  byte-identical (extends §5 cases 1–2 from prompt bytes to validated
+  output).
+
+### 5.4 Canonical head-coordinate conflict contract (Blocker C)
+
+**Root cause (verified in tree).** The §5.1 identity needs head-canonical
+coordinates the current code does not hand it directly. Per-finding
+identity pieces exist — `canonicalPath` from P5-02 provenance, fallback
+symbol `finding.symbol ?? unit.symbol.name`, head-side `location.target`
+(`src/validate/engine.ts:169-175`) — and P5-07 precedent keys on
+canonical path + symbol + category + normalized title + overlap
+(`src/validate/dedupe.ts:163-180`, `rangesOverlap` `:108-116` over
+`candidateSpans` `:97-103`: target line ∪ evidence spans, same-file
+shared-line). But three gaps break a naive reuse: (1) base-side verified
+evidence spans use BASE line numbers (and possibly `oldPath`), while
+`derivedTarget` uses HEAD line numbers — direct line intersection across
+sides is meaningless without a head-mapping (`src/validate/evidence.ts`
+side routing `:305-392`; identical-both-sides stays
+`evidence_side_ambiguous` `:357-366`); (2) fallback verification records
+ACTUAL matched lines (`resolved` start/end, e.g. `:275-277,:367-380`),
+which can diverge from model-cited ranges — cited ranges are claims,
+actuals are coordinates; (3) `rangesOverlap` assumes same-side
+comparability (all-head targets). The conflict step therefore canonicalizes
+EVERYTHING to head coordinates under the rules below before any overlap is
+computed. No validator change: the inputs (verified locations with
+side + actual lines, §5.4 rule D) are carried on the orchestration-internal
+conflict candidate, never added to `ValidatedFinding` or `run.json`.
+
+**Canonical rules (normative, A–E):**
+
+- **A — Path: validated POSIX, rename → head, never raw model.** Conflict
+  path is `provenance.canonicalPath` (P5-02 validated). A rename's
+  `oldPath` spelling maps to the head-side path before comparison
+  (`oldPath` never forms a separate identity). The raw model
+  `finding.file` (unvalidated, possibly `./`-prefixed or otherwise
+  non-normal) is NEVER compared directly.
+- **B — Target: verified head `derivedTarget`, never cited.** Conflict
+  target is the code-owned P5-03 `location.target` (head side). Model-cited
+  `finding.line`/`endLine` are NEVER used — after the ±3-line fallback they
+  routinely differ from the verified anchor.
+- **C — Symbol: `finding.symbol ?? unit.symbol.name`, exact, no fuzzy,
+  missing explicit.** Comparison after fallback is exact string equality
+  (no case-folding beyond what provenance already normalizes, no
+  substring/fuzzy match). A finding carrying neither its own symbol nor a
+  resolvable unit symbol name is UNMAPPABLE for conflict purposes (excluded
+  from comparison, never force-matched) — in v1 units always carry symbols,
+  so this path is defensive-only and tested as such.
+- **D — Evidence: no base-vs-head direct compare; verified actuals only;
+  exact mapping or exclusion.** The overlap set per finding is
+  `{derivedTarget line} ∪ {head-mapped VERIFIED evidence spans}`:
+  - Head-side verified locations (`side == "head"`) contribute their ACTUAL
+    start/end lines as-is.
+  - Base-side verified locations map to head coordinates ONLY via exact
+    one-to-one diff correspondence: lines provably unchanged between
+    `mergeBase` and `head` (identical content carried by the same hunk
+    context, exact line-pair identity). No offset inference (no
+    line-number arithmetic across hunks), no deleted→head mapping
+    (deleted lines have NO head coordinate), no renamed-path arithmetic
+    beyond rule A.
+  - Replacement-overlap items that verified on ONE side only follow that
+    side's rule; items that matched identically on BOTH sides never reach
+    conflict (already `evidence_side_ambiguous` in validation, never
+    accepted).
+  - Unverified / cited-only ranges contribute NOTHING — never treated as
+    exact, never a fallback coordinate.
+  - Base-side evidence with NO exact head correspondent (deleted lines,
+    non-corresponding base lines) is UNMAPPABLE: excluded from the overlap
+    set. Exclusion means NO manufactured conflict — the advisory finding
+    survives the conflict step on that ground (still subject to every other
+    gate).
+- **E — Outcome: equal path + equal symbol + head-interval overlap ⇒
+  suppress advisory wholly.** All three required; category and title are
+  IGNORED (advisory is always `convention`, primary never is; titles are
+  model prose). Suppression is total (finding dropped, never partially
+  merged) with a bounded diagnostic (ids, canonical paths, symbol, head
+  line interval, counts). The primary is NEVER mutated: no annotation, no
+  re-rank, no merge of advisory text. Advisory-advisory identity uses the
+  SAME A–E contract between two advisories (first in deterministic winner
+  order retained, second drops as advisory-duplicate); primaries are never
+  involved.
+
+**Side-mapping table (conflict step only):**
+
+| Advisory evidence | Verified location | Head coordinate used | Usable? |
+|---|---|---|---|
+| head file (== canonical) | `side head`, actual lines | as-is | yes |
+| head context-only file | `side head`, actual lines | as-is (must equal primary canonical path to conflict) | yes, same file only |
+| rename oldPath, base side | `side base`, oldPath lines | oldPath → head canonical path; lines ONLY via exact one-to-one unchanged-context correspondence | only exact-mapped lines |
+| deleted lines, base side | `side base`, no head correspondent | none | NO — excluded, no manufactured conflict |
+| replacement overlap, one side | per that side's rule above | per that side's rule | per that side's rule |
+| both-sides-identical | n/a (inconclusive in validation) | n/a — never reaches conflict | n/a |
+| cited-only, unverified | none | none | NO — never treated as exact |
+
+**Metadata-internal rule.** The conflict step persists ONLY ids, canonical
+paths, symbol names, head line intervals, and counts in `run.json`
+diagnostics (existing v2 shape — counts/diagnostics fields, no new
+fields). NO evidence quotes/excerpts, NO secrets, NO snapshot text, NO
+source. Verified locations beyond side/path/actual-lines stay
+orchestration-transient (as in Phase 5, where they are fed to attribution
+then dropped). Unmappable findings are recorded as excluded-by-rule
+(count), never expanded into a manufactured conflict. **No prose
+similarity, ever:** title/description/category are not compared (model
+prose is untrusted and non-deterministic); same prose at disjoint locations
+is NOT a conflict.
+
+### Conflict acceptance matrix (12 — each a test in P6-04/P6-05/§6)
+
+- **C1** Same canonical path + same fallback symbol + shared
+  `derivedTarget` head line ⇒ advisory suppressed wholly, primary
+  byte-identical.
+- **C2** Targets disjoint but a head-side VERIFIED evidence span shares a
+  head line with the primary interval ⇒ suppressed (evidence overlap
+  counts when verified).
+- **C3** Near-miss: intervals adjacent but sharing NO head line ⇒ both kept
+  (false separation is the safe direction).
+- **C4** Same lines, different fallback-resolved symbols ⇒ both kept
+  (distinct defects, even adjacent).
+- **C5** Rename: advisory evidence cites `oldPath`, primary cites head path,
+  same symbol, mapped overlap ⇒ same identity, advisory suppressed.
+- **C6** Raw-path spelling (`./` prefix / non-normal vs canonical) with
+  overlap ⇒ canonicalized first, advisory suppressed (raw strings never
+  compared).
+- **C7** Cited-vs-actual divergence: cited ranges overlap but verified
+  ACTUALS are disjoint ⇒ both kept; conversely cited disjoint but actuals
+  overlap ⇒ suppressed. Actuals govern in both directions.
+- **C8** Base-side advisory evidence with an exact one-to-one
+  unchanged-context head correspondent overlapping the primary interval ⇒
+  suppressed (mapped overlap is real overlap).
+- **C9** Base-side evidence on deleted lines (no head correspondent) ⇒
+  unmappable, excluded, NO manufactured conflict — advisory survives the
+  conflict step.
+- **C10** Same line NUMBER on opposite sides with NO exact mapping proven
+  ⇒ no conflict (offset/identity-by-number inference forbidden; test pins
+  the naive comparator would have merged and the canonical one does not).
+- **C11** Advisory-advisory same A–E identity ⇒ collapse to first in
+  deterministic winner order + bounded diagnostic; primary set untouched.
+- **C12** Metadata + prose guards: conflict diagnostics carry
+  ids/paths/symbol/lines/counts ONLY (assert no quote/excerpt/secret/
+  snapshot text in `run.json` conflict records); identical titles/
+  descriptions at disjoint locations ⇒ both kept (prose never compared).
 
 ---
 
@@ -554,8 +854,8 @@ mutation, no re-rank, no annotation).
 | Detectors (P6-01) | positive/negative/mixed/empty per family, eligibility exclusion, determinism under permutation |
 | Support (P6-02) | per-detector eligible denominator, ratio + count boundaries, zero-eligible safety, cap order stability |
 | Cache (P6-03) | key stability/drift (content, detector, schema, sampling-policy), stale rebuild, failure matrix (never fails run), atomic write, path containment |
-| Prompt (P6-04) | primary inference-free + byte-identical pin (template/version/categories/hash/serialization/contract), separate advisory template+version+hash+contract, advisory authority text (advisory template only), boundary caps (category/severity/ruleId-presence), provenance overwrite, budget truncation, no-llm/demo exclusion |
-| Guards (P6-05) | advisory ruleId matrix (missing ok; inf-*/real/fabricated rejected pre-validation), convention gate unchanged, §5 authority cases 1–10 (§5.1 conflict identity, I1/I2), zero provider/GitHub calls, validator+publisher diff empty |
+| Prompt (P6-04) | primary inference-free + byte-identical pin (template/version/categories/hash/serialization/contract), separate advisory template+version+hash+contract, advisory authority text (advisory template only), boundary gates (§5 kinds 2–3; cases 4–7, M1–M8), provenance overwrite, budget truncation, no-llm/demo exclusion per P6-00 |
+| Guards (P6-05) | isolated advisory policy §5.2 (threshold `low`, confidence preserved, no `ruleId`, `info` ineligible) + two-call separation pin, convention gate unchanged, §5 cases 1–10 + §5.3 M1–M8 + §5.4 C1–C12 (I1/I2 throughout), zero provider/GitHub calls, validator+publisher diff empty |
 | Integration | fixture repo end-to-end (conventions appear advisory; explicit rule wins on conflict); clean repo (no conventions, no findings change) |
 
 **Global accept:** `bun run check` green; deterministic (two runs, byte-identical
