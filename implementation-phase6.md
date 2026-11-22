@@ -544,6 +544,155 @@ mutation, no re-rank, no annotation).
     diffs empty; no new codes, statuses, or artifact fields; advisory caps
     enforced before validation, never by new codes).
 
+### 5.2 Isolated advisory validation policy (Blocker A)
+
+**Root cause (verified in tree).** Under default config the advisory happy
+path above cannot validate: `DEFAULT_SEVERITY_THRESHOLD = "medium"`
+(`src/config/defaults.ts:12`, wired as the schema default at
+`src/config/schema.ts:80`) with rank `low = 1 < medium = 2`
+(`src/validate/policy.ts:42-48`). The `convention` category gate passes
+unconditionally (`src/validate/policy.ts:126-129`, group `convention` at
+`:16-27`), but the severity gate has no category exemption: with no
+`groupOverride` for `convention`, the threshold resolves
+`effective.severityThreshold ?? groupOverride ?? config.review.severity_threshold`
+(`:177-179`) to the global `medium`, and a `convention`/`low` finding is
+rejected (`severity_below_threshold`, `:180-186`). With no `ruleId` cited,
+`effectiveSeverity = finding.severity` (`:141`, `:170-172`), so the
+advisory contract (NO `ruleId` on advisory output, §0 item 2) leaves no
+rule-severity rescue. Routing advisory findings through unmodified
+`validatePolicy` under default config therefore rejects every advisory
+`low`. This section is the plan fix; no validator or config change.
+
+**Fix (plan-only, orchestration boundary + separate call, no new codes).**
+Advisory findings NEVER enter the primary `validate()` array. Orchestration
+makes TWO `validate()` calls on disjoint inputs with the same engine code:
+
+1. **Primary call:** findings from the primary pass only, full user config
+   (path-override → category-override → global precedence, unchanged).
+2. **Advisory call:** findings that survived the §5 boundary gate only,
+   under an isolated advisory policy pinned in orchestration/test code (NOT
+   user config, NOT a validator flag, NOT a schema change):
+   - Severity threshold fixed to `low` (named constant locked in P6-00,
+     e.g. `ADVISORY_SEVERITY_THRESHOLD = "low"`). No inherited path
+     thresholds: `path_overrides` severity entries and category severity
+     overrides do NOT apply to the advisory call (advisory scope is global,
+     never path-tuned).
+   - Confidence threshold PRESERVED: the resolved effective confidence
+     threshold for the finding's canonical path (path → global, same as
+     primary) applies unchanged — advisory narrows authority scope, never
+     weakens evidence strength.
+   - Convention category gate KEPT: always passes, identical to primary.
+   - Effective severity is ALWAYS `finding.severity`: no `ruleId` exists to
+     override it (any present `ruleId` was already rejected pre-validation
+     per the four-case matrix, §5 case 7).
+3. **Explicitly forbidden:** minting a fake explicit rule to carry `low`
+   severity; mutating the global default or schema; adding a `convention`
+   slot to `category_overrides`; lowering user thresholds to admit
+   advisories.
+4. **`info` is below-threshold (ineligible), stated explicitly:** the
+   advisory call accepts exactly severity `low`. An advisory `info` finding
+   is below the advisory threshold and is rejected at the boundary (dropped
+   + bounded count, never validated, never merged). `info` is not a quieter
+   advisory — it is not advisory-eligible at all. Primary default `medium`
+   already excludes both `low` and `info`; the advisory domain admits `low`
+   only.
+
+The validation engine, policy function, check codes, and config schema are
+UNCHANGED: isolation comes from separate calls with separate inputs and a
+pinned advisory threshold at orchestration, plus the pre-validation
+boundary gates. P6-00 locks the constant name/value with tests; P6-05 pins
+the two-call separation (feed an advisory `low` through the primary call
+in a test and assert it still fails `severity_below_threshold` under
+default config — the test that proves the separate call is load-bearing).
+
+### 5.3 Two independent merge domains and execution order (Blocker B)
+
+**Root cause (verified in tree).** `ValidationEngineImpl.validate` runs
+per-finding stages into ONE `pending: PendingAccepted[]` array
+(`src/validate/engine.ts:102-177`), then `resolveDuplicates` over it
+(`:182`) and `selectWithinCap` over the survivors with
+`config.review.max_findings` (`:201-204`). Dedupe is scoped to validated
+candidates only (`src/validate/dedupe.ts:118-124`) and the cap to
+post-dedupe winners (`:214-221`), with Phase 5 winner order (effective
+severity, confidence, path, line, fingerprint, id; `:59-71`). The engine
+takes ONE `findings[]` set (`:85-91`): any advisory item merged into that
+array before `validate()` shares the pending set, the dedupe, and the
+ranked cap — advisory `low`s lose the cap race by severity order AND the
+cap is computed over the mixed set, so primary byte-identity (I1) cannot
+hold. Two domains are therefore mandatory, not stylistic.
+
+**Domains (no shared set, no shared dedupe, no shared cap):**
+
+- **Primary domain:** primary-pass findings → `validate()` (user config) →
+  `resolveDuplicates` (primary validated only) →
+  `selectWithinCap(config.review.max_findings)` (Phase 5 order, unchanged).
+  Advisory input NEVER enters this domain at any stage.
+- **Advisory domain:** boundary-surviving advisories → separate `validate()`
+  (isolated policy §5.2) → conflict suppression vs RETAINED primaries
+  (§5.1 as canonicalized by §5.4) → advisory-internal
+  `resolveDuplicates` (advisory validated only) → advisory-internal
+  `selectWithinCap` with the named advisory cap below (same comparator,
+  advisory-only ranking).
+
+**Named advisory cap (P6-00 locks name + value with tests).**
+`MAX_ADVISORY_FINDINGS_PER_RUN` (suggestion e.g. 5 — P6-00 justifies and
+freezes). Rationale vs `MAX_CONVENTIONS_PER_RUN` (P6-00, e.g. 20): the two
+caps bound DIFFERENT units at different stages. `MAX_CONVENTIONS_PER_RUN`
+caps INPUT patterns admitted to the advisory prompt (prompt-bloat guard);
+`MAX_ADVISORY_FINDINGS_PER_RUN` caps OUTPUT findings merged per run
+(comment-noise guard). One convention can yield several findings, so the
+pattern cap alone cannot bound merged output — the findings cap is
+independently required. NO user config option: a named tested constant is
+the default; a `.reviewer.yml` knob is added only if Phase 8 evaluation
+proves a need (YAGNI — no speculative configurability). Advisory count-cap
+overflow is recorded as a bounded orchestration merge diagnostic (counts
+only), NEVER a new `VALIDATION_CHECK_CODE` (closed set, §5 kind 5).
+
+**Normative execution order (1–9, no combined cap):**
+
+1. Validate primary findings (one `validate()` call, user config).
+2. Dedupe primary validated winners (`resolveDuplicates`, primary-only).
+3. Cap primary (`selectWithinCap`, `config.review.max_findings`).
+4. Boundary-gate advisory output (category / severity / `ruleId` presence /
+   provenance stamping — §5 kinds 2–3; violators dropped pre-validation).
+5. Validate surviving advisories (SEPARATE `validate()` call, §5.2 policy).
+6. Conflict-suppress advisories vs retained primaries (head-coordinate
+   contract §5.4; suppressed advisory dropped wholly + bounded diagnostic).
+7. Dedupe surviving advisories advisory-internally (`resolveDuplicates`
+   over advisory validated only; advisory-advisory identity per §5.1).
+8. Cap advisories (`selectWithinCap` with
+   `MAX_ADVISORY_FINDINGS_PER_RUN`, advisory-only winner order).
+9. Append + aggregate: surviving advisories appended AFTER primaries in
+   deterministic order; `run.json` aggregates per-domain counts; a combined
+   `selectWithinCap` over concatenated primaries+advisories is FORBIDDEN
+   (pinned by M2/M3 below).
+
+### Merge-domain acceptance matrix (8 — each a test in P6-04/P6-05/§6)
+
+- **M1** `max_findings = 1` with 1 accepted primary + N accepted advisories
+  ⇒ primary kept; advisories appended up to the advisory cap (advisory
+  count never evicts the primary).
+- **M2** Full primary cap (e.g. 12 accepted primaries, `max_findings = 10`,
+  plus advisories) ⇒ exactly the top-10 primaries kept, byte-identical
+  with advisories absent (no combined-cap recomputation).
+- **M3** Advisory over-cap (e.g. 8 validated surviving advisories, advisory
+  cap 5) ⇒ top 5 in advisory winner order kept; rest dropped with a bounded
+  merge diagnostic (counts only, no new check code).
+- **M4** Duplicate primaries + duplicate advisories in one run ⇒ primary
+  dedupe and advisory dedupe resolve independently (neither domain's
+  duplicates consume the other's cap).
+- **M5** Advisory-advisory dupes ⇒ collapse to first in deterministic order;
+  primary set untouched.
+- **M6** Conflicting advisory vs retained primary (§5.4) ⇒ advisory
+  suppressed wholly, primary byte-identical (I1 + I2 together at domain
+  scale).
+- **M7** Reversed merge input order (advisories supplied before primaries to
+  the merge function) ⇒ byte-identical output (domains computed separately;
+  append order fixed primaries-then-advisories, never input order).
+- **M8** Conventions on/off ⇒ primary validated/deduped/capped set
+  byte-identical (extends §5 cases 1–2 from prompt bytes to validated
+  output).
+
 ---
 
 ## 6. Test coverage and acceptance
