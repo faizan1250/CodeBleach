@@ -83,9 +83,18 @@ const LOG_LEVELS: readonly string[] = ["debug", "info", "warn", "error"];
 export const VALIDATION_SCOPE_NOTE =
   "validation verifies diff/path/location/evidence/provenance/policy only; it does not prove a finding is semantically correct.";
 
-/** Stderr warning when the run completes but run.json cannot be read/parsed. */
-export const VALIDATION_SUMMARY_UNAVAILABLE_WARNING =
-  "review completed but validation summary unavailable: run.json unreadable or unparseable; see the run.json artifact path in the stage line above";
+/**
+ * Stderr warning when the run completes but run.json cannot be read/parsed.
+ * Names the configured artifact path (the stage line above carries no path),
+ * static text plus path only — never contents, validation counts, or the
+ * raw error.
+ */
+export function validationSummaryUnavailableWarning(outDir: string): string {
+  return (
+    `review completed but validation summary unavailable: ${join(outDir, "run.json")} unreadable or unparseable; ` +
+    `validation may still have run, see the artifact for details`
+  );
+}
 
 /** One-line CLI validation counts; null when validation did not run (skipped review). */
 export function formatValidationLine(args: {
@@ -219,9 +228,9 @@ export async function printValidationSummary(outDir: string): Promise<void> {
       console.log(VALIDATION_SCOPE_NOTE);
     }
   } catch {
-    // Static text only — never the raw error, evidence, or source — and no
-    // validation counts are claimed.
-    console.error(VALIDATION_SUMMARY_UNAVAILABLE_WARNING);
+    // Static text plus the artifact path only — never the raw error,
+    // evidence, or source — and no validation counts are claimed.
+    console.error(validationSummaryUnavailableWarning(outDir));
   }
 }
 
