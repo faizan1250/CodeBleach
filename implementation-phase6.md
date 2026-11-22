@@ -392,11 +392,6 @@ primary secondary divergence per C7/C10).
 no silent guard change (test asserts the primary suppression line is still
 present verbatim); order 1–9 + entry-point choice recorded.
 
-**Accept:** primary prompt provably inference-free and byte-identical on/off
-(no primary diff exists); advisory lives only under its separate contract;
-no silent guard change (test asserts the primary suppression line is still
-present verbatim).
-
 ### P6-05 — Policy/validation guards and docs hardening
 
 **Work:**
@@ -441,11 +436,6 @@ present verbatim).
 review of the Phase 6 diff); docs agree; matrix green; Phase 5
 validation/publisher behavior unchanged (no new codes, no new statuses, no
 artifact change); order 1–9 locked with no combined cap.
-
-**Accept:** validator + publisher diffs are empty by construction (assert via
-review of the Phase 6 diff); docs agree; matrix green; Phase 5
-validation/publisher behavior unchanged (no new codes, no new statuses, no
-artifact change).
 
 ---
 
@@ -723,8 +713,10 @@ Two conforming shapes (P6-04 implements one; P6-00 records the choice):
 - **Preferred: shared per-finding core + separate batch policies.** The
   per-finding stages (provenance → location → evidence → attribution →
   policy, `src/validate/engine.ts:103-177`) stay one shared code path;
-  batch policies (`resolveDuplicates` `:182`,
-  `selectWithinCap` `:201-204`) run separately per domain over
+  `resolveDuplicates` (`:182`) runs primary-only while advisory dedupe is
+  a wholly separate A–E implementation (never the `resolveDuplicates`
+  code path, even with a different identity function — see below);
+  `selectWithinCap` (`:201-204`) runs separately per domain over
   domain-scoped inputs only.
 - **Alternative: dedicated advisory entry** reusing the EXACT per-finding
   checks above, deferring batch dedupe/cap to the advisory domain.
@@ -739,6 +731,13 @@ dedupe never invokes that secondary). Advisory dedupe is the §5.1/§5.4
 A–E verified head-coordinate identity (verified actuals +
 `derivedTarget`, base via exact mapping only, §5.5 envelope); titles,
 categories, and unverified/cited ranges contribute nothing.
+Rationale: `resolveDuplicates` (`src/validate/dedupe.ts:126`) takes only
+`inputs` with no identity-fn parameter and keys on the stored fingerprint
+plus a category/title/cited-range secondary — every key the advisory
+contract excludes — so reuse would force a Phase 5 comparator change
+(forbidden above); only `selectWithinCap` is shared (generic ordering,
+parameterized cap, step 8). The P6-04/P6-05 C7/C10 divergence tests pin
+advisory A–E vs primary-secondary behavior as separate implementations.
 
 ### Merge-domain acceptance matrix (8 — each a test in P6-04/P6-05/§6)
 
