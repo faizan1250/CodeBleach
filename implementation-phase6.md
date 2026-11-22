@@ -215,7 +215,10 @@ verified-actuals-only, `ValidatedFinding` shape unchanged, run-scoped
 disposal).
 
 **Accept:** thresholds are named constants with tests; carrier decision
-documented; envelope locked per §5.5; no code beyond types/constants.
+documented; envelope locked per §5.5; advisory entry API locked per
+§5.3.1 (`validateAdvisoryCandidates` name + exact repo input/return
+types + internal ownership + transient handoff lifecycle); no code
+beyond types/constants.
 
 ### P6-01 — Deterministic detectors (naming, exports, errors, tests, wrappers)
 
@@ -371,9 +374,10 @@ diff — no primary template edit, no `CODE_REVIEW_PROMPT_VERSION` bump.
    categories (`CATEGORY_ORDER` unchanged); the advisory `ruleId` boundary
    and four-case matrix live canonically in P6-05 item 1 (not restated
    here) — P6-04 tests feed all four cases at the merge boundary.
-7. Advisory execution entry point (§5.3.1): implement the preferred
-   shared-per-finding-core + separate-batch-policies shape (or record the
-   dedicated-entry alternative); pin the §5.3 order 1–9, the M1–M8 matrix,
+7. Advisory execution entry point (§5.3.1): implement the locked
+   shared-per-finding-core + internal advisory entry
+   (`validateAdvisoryCandidates`, batch deferred — no dedicated-entry
+   alternative); pin the §5.3 order 1–9, the M1–M8 matrix,
    and advisory dedupe via §§5.1/5.4 A–E (never the primary secondary).
 
 **Tests:** primary prompt/payload byte-identical with conventions on/off
@@ -386,13 +390,14 @@ truncation drops whole conventions; advisory boundary gates per §5 kinds
 matrix: missing ok, `inf-*` / real / fabricated rejected);
 model-supplied provenance overwritten by code stamping;
 `--no-llm`/demo exclusion per P6-00 (no advisory build or pass);
-entry-point + order tests (two-call separation, M1–M8, advisory A–E vs
+entry-point + order tests (two-run separation via public `validate()` +
+internal `validateAdvisoryCandidates`, M1–M8, advisory A–E vs
 primary secondary divergence per C7/C10).
 
 **Accept:** primary prompt provably inference-free and byte-identical on/off
 (no primary diff exists); advisory lives only under its separate contract;
 no silent guard change (test asserts the primary suppression line is still
-present verbatim); order 1–9 + entry-point choice recorded.
+present verbatim); order 1–9 + locked entry recorded (no alternative).
 
 ### P6-05 — Policy/validation guards and docs hardening
 
@@ -429,9 +434,10 @@ present verbatim); order 1–9 + entry-point choice recorded.
    cases 1–10), merge domains (M1–M8), head-coordinate conflict (C1–C12),
    advisory-label presence, cache round-trip, cap behavior, offline determinism
    (zero provider/GitHub calls — reuse the Phase 5 fetch-guard pattern).
-7. Pin the §5.3 order 1–9 + §5.3.1 entry point + §5.5 envelope wiring:
-   primary `validate()` behavior/order exact, advisory independent/bounded/
-   deterministic, no Phase 5 comparator change, advisory dedupe via A–E
+7. Pin the §5.3 order 1–9 + §5.3.1 locked entry + §5.5 envelope wiring:
+   primary `validate()` behavior/order exact, advisory entry internal with
+   batch deferred (independent/bounded/deterministic), no Phase 5
+   comparator change, advisory dedupe via A–E
    (never category/title/cited ranges), envelope verified-actuals-only.
 
 **Accept:** validator + publisher diffs are empty by construction (assert via
@@ -602,13 +608,15 @@ rule-severity rescue. Routing advisory findings through unmodified
 `validatePolicy` under default config therefore rejects every advisory
 `low`. This section is the plan fix; no validator or config change.
 
-**Fix (plan-only, orchestration boundary + separate call, no new codes).**
+**Fix (plan-only, orchestration boundary + separate run, no new codes).**
 Advisory findings NEVER enter the primary `validate()` array. Orchestration
-makes TWO `validate()` calls on disjoint inputs with the same engine code:
+runs validation TWICE on disjoint inputs through one shared per-finding
+core — once via the public `validate()` (primary domain, §5.3.1) and once
+via the internal advisory entry (advisory domain, §5.3.1, batch deferred):
 
 1. **Primary call:** findings from the primary pass only, full user config
    (path-override → category-override → global precedence, unchanged).
-2. **Advisory call:** findings that survived the §5 boundary gate only,
+2. **Advisory run:** findings that survived the §5 boundary gate only,
    under an isolated advisory policy pinned in orchestration/test code (NOT
    user config, NOT a validator flag, NOT a schema change):
    - Severity threshold fixed to `low` (named constant locked in P6-00,
@@ -637,12 +645,12 @@ makes TWO `validate()` calls on disjoint inputs with the same engine code:
    only.
 
 The validation engine, policy function, check codes, and config schema are
-UNCHANGED: isolation comes from separate calls with separate inputs and a
+UNCHANGED: isolation comes from separate runs with separate inputs and a
 pinned advisory threshold at orchestration, plus the pre-validation
 boundary gates. P6-00 locks the constant name/value with tests; P6-05 pins
-the two-call separation (feed an advisory `low` through the primary call
+the two-run separation (feed an advisory `low` through the primary call
 in a test and assert it still fails `severity_below_threshold` under
-default config — the test that proves the separate call is load-bearing).
+default config — the test that proves the separate run is load-bearing).
 
 ### 5.3 Two independent merge domains and execution order (Blocker B)
 
@@ -713,36 +721,83 @@ only), NEVER a new `VALIDATION_CHECK_CODE` (closed set, §5 kind 5).
 
 #### 5.3.1 Advisory execution entry point (Blocker B)
 
-Two conforming shapes (P6-04 implements one; P6-00 records the choice):
+**Locked shape: shared per-finding core + internal advisory entry (the
+dedicated-entry alternative is REJECTED for this ticket).** The
+per-finding stages (provenance → location → evidence → attribution →
+policy, `src/validate/engine.ts:103-177`) stay one shared code path.
+Internally, the public `validate()` is that shared core PLUS the primary
+batch policies (`resolveDuplicates` `:182` + `selectWithinCap` with
+`config.review.max_findings` `:201-204`); the advisory entry runs the
+same shared core and DEFERS all batch work (no dedupe, no cap, no
+conflict step inside the entry) to orchestration per the §5.3 order 1–9.
 
-- **Preferred: shared per-finding core + separate batch policies.** The
-  per-finding stages (provenance → location → evidence → attribution →
-  policy, `src/validate/engine.ts:103-177`) stay one shared code path;
-  `resolveDuplicates` (`:182`) runs primary-only while advisory dedupe is
-  a wholly separate A–E implementation (never the `resolveDuplicates`
-  code path, even with a different identity function — see below);
-  `selectWithinCap` (`:201-204`) runs separately per domain over
-  domain-scoped inputs only.
-- **Alternative: dedicated advisory entry** reusing the EXACT per-finding
-  checks above, deferring batch dedupe/cap to the advisory domain.
+Public `validate()` is UNCHANGED — same params, same return, same order,
+same dedupe/cap/codes/semantics/output
+(`ValidationEngine.validate(findings, diff, units, config, options?)`
+per `src/core/contracts.ts:45-53`, implemented at
+`src/validate/engine.ts:85-91`). The advisory entry is INTERNAL ONLY
+(orchestration-owned composition, never a public contract widening):
 
-Both reuse provenance/location/evidence/attribution/policy unchanged;
-primary `validate()` behavior + stage order stay exact; the advisory run
-is independent, bounded, and deterministic; NO Phase 5 comparator change
-(`resolveDuplicates` fingerprint verbatim `:131-161` plus secondary
-canonical-path/symbol/category/title/overlap `:163-180` over
-`candidateSpans` target ∪ cited ranges `:97-116` untouched — advisory
-dedupe never invokes that secondary). Advisory dedupe is the §5.1/§5.4
-A–E verified head-coordinate identity (verified actuals +
-`derivedTarget`, base via exact mapping only, §5.5 envelope); titles,
-categories, and unverified/cited ranges contribute nothing.
-Rationale: `resolveDuplicates` (`src/validate/dedupe.ts:126`) takes only
-`inputs` with no identity-fn parameter and keys on the stored fingerprint
-plus a category/title/cited-range secondary — every key the advisory
-contract excludes — so reuse would force a Phase 5 comparator change
-(forbidden above); only `selectWithinCap` is shared (generic ordering,
-parameterized cap, step 8). The P6-04/P6-05 C7/C10 divergence tests pin
-advisory A–E vs primary-secondary behavior as separate implementations.
+```ts
+// Plan-only shape, exact repo types (Finding/DiffResult/ReviewUnit from
+// src/types, ResolvedConfig from src/config/schema.ts,
+// ValidationOptions from src/core/contracts.ts:56-58).
+interface ValidatedFindingCandidate {
+  finding: Finding;
+  handoff?: ValidationHandoffEntry | undefined; // §5.5 envelope, present when evidence verified
+}
+validateAdvisoryCandidates(
+  findings: Finding[],
+  diff: DiffResult,
+  units: ReviewUnit[],
+  config: ResolvedConfig,
+  options?: ValidationOptions | undefined,
+): Promise<{ validated: ValidatedFinding[]; handoff: ValidationHandoffEntry[] }>;
+```
+
+Ownership/DI boundary (verified in tree): stage interfaces live in
+`src/core/contracts.ts` (AGENTS.md ownership rule); only `src/core/pipeline`
++ `src/cli/` wire engines (`PipelineDeps.validation: ValidationEngine`,
+`contracts.ts:181-189`); the pipeline calls
+`deps.validation.validate(...)` once today (`src/core/pipeline.ts:186-204`,
+single `summarizeValidation` aggregate). Orchestration — not the engine —
+owns the advisory run: boundary gates (§5 kinds 2–3), the advisory policy
+projection (§5.2: severity pinned to `low`, no inherited path thresholds,
+confidence preserved, convention gate kept, effective severity always
+`finding.severity`), conflict suppression (§§5.1/5.4), advisory-internal
+dedupe (A–E only), the `MAX_ADVISORY_FINDINGS_PER_RUN` cap via
+`selectWithinCap` domain-only reuse, and `AdvisoryExecutionResult`
+assembly (primaries-then-advisories + transient aggregate
+`conflictMetadata`).
+
+Ten-point entry contract (each pinned by a P6-04/P6-05 test):
+
+1. Reuses provenance/location/evidence/attribution/policy unchanged
+   (same stage order, same check codes as the primary domain).
+2. Returns validated candidates PLUS the transient handoff
+   (`ValidationHandoffEntry[]` keyed by `findingId`, verified actuals
+   only — §5.5).
+3. NO primary `resolveDuplicates` in the entry (primary-only,
+   `src/validate/dedupe.ts:126` verbatim fingerprint + category/title/
+   cited-range secondary).
+4. NO primary `max_findings` in the entry (primary cap stays in the
+   primary domain, step 3).
+5. NO conflict/dedupe step in the entry (orchestration owns steps 6–8).
+6. Verified actual locations ride the handoff (actual matched lines,
+   never model-cited ranges — §5.4 rule D).
+7. Handoff keyed by stable `findingId` (never array index); canonical
+   path + fallback symbol resolved pre-validate (§5.4 rules A–C).
+8. Internal entry: public `validate()` contract unwidened; orchestration
+   owns boundary/conflict/dedupe/cap per the DI boundary above.
+9. Advisory policy projection at orchestration: severity `low`, no path
+   overrides, confidence kept, convention gate kept, effective severity
+   always `finding.severity` (§5.2).
+10. `selectWithinCap` (`src/validate/dedupe.ts:220-233`, generic ordering
+    + parameterized cap) reused domain-only at step 8; NO combined cap
+    over concatenated primaries+advisories (FORBIDDEN, M2/M3).
+
+The P6-04/P6-05 C7/C10 divergence tests pin advisory A–E vs
+primary-secondary behavior as separate implementations.
 
 ### Merge-domain acceptance matrix (8 — each a test in P6-04/P6-05/§6)
 
@@ -980,10 +1035,10 @@ carries no locations/quotes/secrets and no per-finding conflict records
 raw model-cited ranges never enter it; no global/cross-run state.
 
 **Narrow internal API/refactor (if needed).** If carrying the envelope
-requires one (e.g. returning the envelope alongside `ValidatedFinding[]`
-on an internal path, or splitting the per-finding core from batch
-dedupe/cap per §5.3.1), P6-00 documents WHY (Blocker A unreachability
-above) and HOW Phase 5 stays unchanged: same per-finding stage order,
+requires one (e.g. the internal `validateAdvisoryCandidates` returning the
+envelope alongside `ValidatedFinding[]` — splitting the per-finding core
+from batch dedupe/cap per the locked §5.3.1 entry), P6-00 documents WHY
+(Blocker A unreachability above) and HOW Phase 5 stays unchanged: same per-finding stage order,
 same check codes, same `resolveDuplicates`/`selectWithinCap` comparators
 for the primary domain, same artifact bytes with advisories absent
 (M8), pinned by the §6 matrix.
@@ -999,7 +1054,7 @@ for the primary domain, same artifact bytes with advisories absent
 | Support (P6-02) | per-detector eligible denominator, ratio + count boundaries, zero-eligible safety, cap order stability |
 | Cache (P6-03) | key stability/drift (content, detector, schema, sampling-policy), stale rebuild, failure matrix (never fails run), atomic write, path containment |
 | Prompt (P6-04) | primary inference-free + byte-identical pin (template/version/categories/hash/serialization/contract), separate advisory template+version+hash+contract, advisory authority text (advisory template only), boundary gates (§5 kinds 2–3; cases 4–7, M1–M8), provenance overwrite, budget truncation, no-llm/demo exclusion per P6-00 |
-| Guards (P6-05) | isolated advisory policy §5.2 (threshold `low`, confidence preserved, no `ruleId`, `info` ineligible) + two-call separation pin, convention gate unchanged, §5 cases 1–10 + §5.3 M1–M8 + §5.3.1 entry point + §5.4 C1–C12 + §5.5 envelope (I1/I2 throughout), zero provider/GitHub calls, validator+publisher diff empty |
+| Guards (P6-05) | isolated advisory policy §5.2 (threshold `low`, confidence preserved, no `ruleId`, `info` ineligible) + two-run separation pin (public `validate()` + internal `validateAdvisoryCandidates`), convention gate unchanged, §5 cases 1–10 + §5.3 M1–M8 + §5.3.1 locked entry + §5.4 C1–C12 + §5.5 envelope (I1/I2 throughout), zero provider/GitHub calls, validator+publisher diff empty |
 | Integration | fixture repo end-to-end (conventions appear advisory; explicit rule wins on conflict); clean repo (no conventions, no findings change) |
 
 **Global accept:** `bun run check` green; deterministic (two runs, byte-identical
