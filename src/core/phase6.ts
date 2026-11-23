@@ -55,9 +55,10 @@ function emptyPassDiagnostics(): AdvisoryPassDiagnostics {
 }
 
 // Bounded fan-out over advisory batches: at most two requests in flight, and
-// never more than the configured global request ceiling. Slots preserve batch
-// order, so completion order cannot affect output order. Per-batch failures
-// are recorded, never thrown; caller abort is rethrown after the join.
+// the run-scoped shared limiter caps the combined primary + advisory ceiling
+// at the provider-call boundary. Slots preserve batch order, so completion
+// order cannot affect output order. Per-batch failures are recorded, never
+// thrown; caller abort is rethrown after the join.
 async function reviewBatchesLimited(input: {
   review: Phase6PipelineDeps["advisoryReview"];
   batches: ConventionAdvisoryBatchInput[];

@@ -80,8 +80,9 @@ export interface ConventionAdvisoryEngineOptions {
  * Advisory-only model pass (plan 4.3, 9.3-9.6). Exactly one provider
  * invocation per reviewBatch call: no JSON repair retry, no cap escalation,
  * no transport retry here. The injected provider instance must be
- * advisory-specific with maxRetries 0 (wired by the P6-05 composition root);
- * this engine never calls complete() twice for one batch either way.
+ * advisory-specific with maxRetries 0 (wired by the composition root) and
+ * wrapped in the run-scoped shared limiter; this engine never calls
+ * complete() twice for one batch either way.
  */
 export class ConventionAdvisoryReviewEngineImpl implements ConventionAdvisoryReviewEngine {
   private readonly provider: LlmProvider;

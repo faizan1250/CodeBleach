@@ -18,6 +18,7 @@ import { FIXED_MODEL_ID, FIXED_PROVIDER, TRAINING_OPT_IN_ENV } from "../../llm/c
 import type { Logger } from "../../core/logger.ts";
 import { runPipeline } from "../../core/pipeline.ts";
 import { OpenCodeProvider } from "../../providers/opencode.ts";
+import { RunConcurrencyLimiter } from "../../providers/limiter.ts";
 import { ConventionAdvisoryReviewEngineImpl } from "../../review/convention-engine.ts";
 import { ReviewEngineImpl } from "../../review/engine.ts";
 import { skippedReviewResult } from "../../review/result.ts";
@@ -57,12 +58,15 @@ export interface RealReviewEngineInput {
   maxRetries?: number | undefined;
   timeoutMs?: number | undefined;
   fetchFn?: typeof fetch | undefined;
+  /** Run-scoped shared ceiling; when present the provider is wrapped so its
+   * complete() calls contend with the advisory pass for the same permits. */
+  limiter?: RunConcurrencyLimiter | undefined;
 }
 
 /** Composition root for live review: fixed provider + engine, one opaque session per run. */
 export function createRealReviewEngine(input: RealReviewEngineInput): ReviewEngineImpl {
   const sessionId = `ses_${input.runId.replace(/-/g, "")}`;
-  const provider = new OpenCodeProvider({
+  const inner = new OpenCodeProvider({
     env: input.env,
     sessionId,
     version: input.version,
@@ -70,12 +74,38 @@ export function createRealReviewEngine(input: RealReviewEngineInput): ReviewEngi
     timeoutMs: input.timeoutMs,
     fetchFn: input.fetchFn,
   });
+  const provider = input.limiter === undefined ? inner : input.limiter.wrap(inner);
   return new ReviewEngineImpl({
     provider,
     logger: input.logger,
     env: input.env,
     secrets: input.secrets,
   });
+}
+
+export interface AdvisoryReviewEngineInput {
+  runId: string;
+  version: string;
+  env: Record<string, string | undefined>;
+  timeoutMs?: number | undefined;
+  fetchFn?: typeof fetch | undefined;
+  /** Same run-scoped instance the primary engine wraps: combined in-flight
+   * calls stay within the configured ceiling. Sessions stay separate. */
+  limiter?: RunConcurrencyLimiter | undefined;
+}
+
+/** Advisory composition: zero-retry provider on its own session, sharing the run limiter. */
+export function createAdvisoryReviewEngine(input: AdvisoryReviewEngineInput): ConventionAdvisoryReviewEngineImpl {
+  const inner = new OpenCodeProvider({
+    env: input.env,
+    sessionId: `ses_${input.runId.replace(/-/g, "")}-advisory`,
+    version: input.version,
+    maxRetries: 0,
+    timeoutMs: input.timeoutMs,
+    fetchFn: input.fetchFn,
+  });
+  const provider = input.limiter === undefined ? inner : input.limiter.wrap(inner);
+  return new ConventionAdvisoryReviewEngineImpl({ provider, env: input.env });
 }
 
 const LOG_LEVELS: readonly string[] = ["debug", "info", "warn", "error"];
@@ -177,21 +207,25 @@ export async function runReview(options: ReviewOptions, logger: Logger): Promise
   // rejects a flagged run whose bundle is missing, so a live flagged run
   // always carries one.
   let phase6: Phase6PipelineDeps | undefined;
+  // Run-scoped shared limiter (one instance per live run): the primary and
+  // advisory providers contend for the same max_concurrent_requests permits,
+  // so their combined in-flight calls never exceed it. Sessions and retry
+  // policies stay separate; only the ceiling is shared.
+  const limiter = new RunConcurrencyLimiter(loaded.value.config.llm.max_concurrent_requests);
   if (options.conventionAdvisory === true) {
     // Advisory-specific provider: zero retries and its own session, sharing
     // the operator env (training gate, key) with the primary provider. Batch
     // fan-out stays within the advisory concurrency cap orchestration-side.
-    const advisoryProvider = new OpenCodeProvider({
-      env,
-      sessionId: `ses_${options.runId.replace(/-/g, "")}-advisory`,
-      version: await readVersion(),
-      maxRetries: 0,
-      timeoutMs: loaded.value.config.llm.request_timeout_ms,
-    });
     phase6 = {
       conventions: new ConventionEngineImpl(),
       advisoryProjector: createPinnedAdvisoryProjector(options.repo),
-      advisoryReview: new ConventionAdvisoryReviewEngineImpl({ provider: advisoryProvider, env }),
+      advisoryReview: createAdvisoryReviewEngine({
+        runId: options.runId,
+        version: await readVersion(),
+        env,
+        timeoutMs: loaded.value.config.llm.request_timeout_ms,
+        limiter,
+      }),
       validation: createPhase6ValidationEngine({ repoDir: options.repo }),
     };
   }
@@ -208,6 +242,7 @@ export async function runReview(options: ReviewOptions, logger: Logger): Promise
     logger,
     maxRetries: loaded.value.config.llm.max_retries,
     timeoutMs: loaded.value.config.llm.request_timeout_ms,
+    limiter,
   });
   const loadAgain: LoadConfigFn = async () => loaded;
   return runEngines(
