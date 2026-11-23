@@ -141,6 +141,13 @@ export interface Phase6PipelineDeps {
 /** Explicit runtime option; driven only by the CLI flag, default false. */
 export interface PipelineOptions {
   conventionAdvisoryEnabled?: boolean | undefined;
+  /**
+   * Separate explicit opt-in for publishing convention advisories. Generation
+   * (conventionAdvisoryEnabled) never implies publication: advisories stay
+   * withheld unless this is true. Routine primary findings publish under the
+   * existing accepted-only contract regardless. Default false.
+   */
+  conventionAdvisoryPublishEnabled?: boolean | undefined;
 }
 
 /** Narrowing guard for the accepted-only publisher contract. Status alone
@@ -165,6 +172,13 @@ export function isAcceptedFinding(finding: ValidatedFinding): finding is Accepte
   if (attribution === null || attribution === undefined || typeof attribution !== "object") return false;
   if (attribution.introducedByPr !== true) return false;
   return isValidAttributionBasis(attribution.basis);
+}
+
+// Advisory publish boundary: stamped convention-advisory provenance only.
+// Generation and publication stay distinct, so a future Phase 7 publisher
+// cannot publish advisories merely because they were generated.
+export function isConventionAdvisoryFinding(finding: ValidatedFinding): boolean {
+  return finding.finding.origin.pass === "convention-advisory";
 }
 
 function isValidValidationTarget(target: unknown): target is ValidationTarget {
