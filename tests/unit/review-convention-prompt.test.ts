@@ -18,7 +18,9 @@ function batch(): ConventionAdvisoryBatchInput {
         path: "src/a.ts",
         language: "typescript",
         symbol: { name: "f", kind: "function", signature: "f(): number", side: "head", startLine: 1 },
-        diffHunks: [{ baseStartLine: 1, headStartLine: 1, lines: [" export function f(): number {", "+  return 2;", " }"] }],
+        diffHunks: [
+          { baseStartLine: 1, headStartLine: 1, lines: [" export function f(): number {", "+  return 2;", " }"] },
+        ],
         changedSymbolSource: "export function f(): number {\n  return 2;\n}",
       },
     ],
@@ -73,10 +75,10 @@ describe("convention advisory prompt serialization", () => {
   test("embeds units and convention summaries as parseable json data", () => {
     const built = buildConventionAdvisoryPrompt(batch());
     const payload = JSON.parse(built.user.slice(built.user.indexOf("{"))) as Record<string, unknown>;
-    const units = payload["advisoryUnits"] as Array<Record<string, unknown>>;
+    const units = payload.advisoryUnits as Array<Record<string, unknown>>;
     expect(units).toHaveLength(1);
     expect(units[0]).toMatchObject({ unitId: "unit-1", path: "src/a.ts", language: "typescript" });
-    const conventions = payload["conventions"] as Array<Record<string, unknown>>;
+    const conventions = payload.conventions as Array<Record<string, unknown>>;
     expect(conventions).toEqual([
       {
         detector: "naming-exports",
@@ -128,9 +130,9 @@ describe("convention advisory prompt serialization", () => {
   test("rejects control-character paths before serialization", () => {
     const input = batch();
     const unit = input.units[0]!;
-    expect(() =>
-      buildConventionAdvisoryPrompt({ ...input, units: [{ ...unit, path: "src/bad\u0007.ts" }] }),
-    ).toThrow(ReviewerError);
+    expect(() => buildConventionAdvisoryPrompt({ ...input, units: [{ ...unit, path: "src/bad\u0007.ts" }] })).toThrow(
+      ReviewerError,
+    );
   });
 });
 

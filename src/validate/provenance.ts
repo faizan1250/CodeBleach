@@ -1,4 +1,4 @@
-import type { ChangedFile, DiffResult, Finding, ReviewUnit } from "../types/index.ts";
+import type { ChangedFile, DiffResult, Finding } from "../types/index.ts";
 import type { CheckResult } from "../types/validation.ts";
 import { SKIPPED_DETAIL, makeCheck } from "./checks.ts";
 import { validateSnapshotPath } from "./snapshot.ts";
@@ -12,10 +12,17 @@ export type ProvenanceCheckName =
   | "finding_symbol"
   | "evidence_provenance";
 
-export interface ProvenanceSuccess {
+export interface ProvenanceUnitView {
+  readonly id: string;
+  readonly file: { readonly path: string };
+  readonly symbol: { readonly name: string };
+  readonly context: readonly { readonly file: string }[];
+}
+
+export interface ProvenanceSuccess<TUnit extends ProvenanceUnitView = ProvenanceUnitView> {
   ok: true;
   checks: CheckResult[];
-  unit: ReviewUnit;
+  unit: TUnit;
   changedFile: ChangedFile;
   /** Head-side diff path; the only future read/target identity. Never a read grant. */
   canonicalPath: string;
@@ -28,10 +35,12 @@ export interface ProvenanceFailure {
   checks: CheckResult[];
 }
 
-export type ProvenanceResult = ProvenanceSuccess | ProvenanceFailure;
+export type ProvenanceResult<TUnit extends ProvenanceUnitView = ProvenanceUnitView> =
+  | ProvenanceSuccess<TUnit>
+  | ProvenanceFailure;
 
 /** Phase 4 stamps `symbol` from the originating unit, so only exact identity is valid. */
-function symbolMatches(finding: Finding, unit: ReviewUnit): boolean {
+function symbolMatches(finding: Finding, unit: ProvenanceUnitView): boolean {
   return finding.symbol === unit.symbol.name;
 }
 
@@ -41,7 +50,11 @@ function symbolMatches(finding: Finding, unit: ReviewUnit): boolean {
  * `canonicalPath` (head side) or the rename old path for deleted-line
  * evidence; anything else is rejected here.
  */
-export function validateFindingProvenance(finding: Finding, diff: DiffResult, units: ReviewUnit[]): ProvenanceResult {
+export function validateFindingProvenance<TUnit extends ProvenanceUnitView>(
+  finding: Finding,
+  diff: DiffResult,
+  units: readonly TUnit[],
+): ProvenanceResult<TUnit> {
   const checks: CheckResult[] = [];
   const pending: ProvenanceCheckName[] = [
     "finding_identity",

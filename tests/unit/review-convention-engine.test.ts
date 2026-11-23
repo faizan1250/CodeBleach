@@ -6,10 +6,7 @@ import { TRAINING_OPT_IN_ENV } from "../../src/llm/constants.ts";
 import { FakeProvider } from "../../src/providers/fake.ts";
 import { ConventionAdvisoryReviewEngineImpl } from "../../src/review/convention-engine.ts";
 import { CONVENTION_ADVISORY_PROMPT_VERSION } from "../../src/review/convention-prompt.ts";
-import type {
-  ConventionAdvisoryBatchInput,
-  ConventionAdvisoryUnit,
-} from "../../src/types/conventions.ts";
+import type { ConventionAdvisoryBatchInput, ConventionAdvisoryUnit } from "../../src/types/conventions.ts";
 import { estimateTokens } from "../../src/utils/tokens.ts";
 
 const OPT_IN_ENV = { [TRAINING_OPT_IN_ENV]: "true" };
@@ -23,7 +20,9 @@ function unit(overrides: Partial<ConventionAdvisoryUnit> & { unitId: string }): 
     path: "src/a.ts",
     language: "typescript",
     symbol: { name: "f", kind: "function", signature: "f(): number", side: "head", startLine: 1 },
-    diffHunks: [{ baseStartLine: 1, headStartLine: 1, lines: [" export function f(): number {", "+  return 2;", " }"] }],
+    diffHunks: [
+      { baseStartLine: 1, headStartLine: 1, lines: [" export function f(): number {", "+  return 2;", " }"] },
+    ],
     changedSymbolSource: "export function f(): number {\n  return 2;\n}",
     ...overrides,
   };
@@ -33,7 +32,11 @@ function batch(): ConventionAdvisoryBatchInput {
   return {
     units: [
       unit({ unitId: "unit-1", path: "src/a.ts" }),
-      unit({ unitId: "unit-2", path: "src/b.ts", symbol: { name: "g", kind: "function", signature: "g(): void", side: "head", startLine: 5 } }),
+      unit({
+        unitId: "unit-2",
+        path: "src/b.ts",
+        symbol: { name: "g", kind: "function", signature: "g(): void", side: "head", startLine: 5 },
+      }),
     ],
     conventions: [
       {
@@ -64,7 +67,10 @@ function rawFinding(overrides: Record<string, unknown> = {}): Record<string, unk
 
 function responseFor(entries: Array<{ unitId: string; file: string; line: number }>): string {
   return JSON.stringify({
-    findings: entries.map((entry) => ({ unitId: entry.unitId, finding: rawFinding({ file: entry.file, line: entry.line }) })),
+    findings: entries.map((entry) => ({
+      unitId: entry.unitId,
+      finding: rawFinding({ file: entry.file, line: entry.line }),
+    })),
   });
 }
 
@@ -126,9 +132,7 @@ describe("convention advisory engine happy path", () => {
   });
 
   test("assigns identifiers through the injected generator", async () => {
-    const provider = new FakeProvider([
-      { respond: responseFor([{ unitId: "unit-1", file: "src/a.ts", line: 2 }]) },
-    ]);
+    const provider = new FakeProvider([{ respond: responseFor([{ unitId: "unit-1", file: "src/a.ts", line: 2 }]) }]);
     const engine = new ConventionAdvisoryReviewEngineImpl({
       provider,
       env: OPT_IN_ENV,
@@ -222,8 +226,20 @@ describe("convention advisory engine single-attempt failures", () => {
 
   test.each([
     ["unknown unitId", [{ unitId: "nope", file: "src/a.ts", line: 2 }]],
-    ["duplicate unitId", [{ unitId: "unit-1", file: "src/a.ts", line: 2 }, { unitId: "unit-1", file: "src/a.ts", line: 3 }]],
-    ["two findings for one unit", [{ unitId: "unit-1", file: "src/a.ts", line: 2 }, { unitId: "unit-1", file: "src/a.ts", line: 2 }]],
+    [
+      "duplicate unitId",
+      [
+        { unitId: "unit-1", file: "src/a.ts", line: 2 },
+        { unitId: "unit-1", file: "src/a.ts", line: 3 },
+      ],
+    ],
+    [
+      "two findings for one unit",
+      [
+        { unitId: "unit-1", file: "src/a.ts", line: 2 },
+        { unitId: "unit-1", file: "src/a.ts", line: 2 },
+      ],
+    ],
   ])("%s drops the batch after exactly one provider call", async (_label, entries) => {
     const provider = new FakeProvider([{ respond: responseFor(entries) }]);
     const engine = new ConventionAdvisoryReviewEngineImpl({ provider, env: OPT_IN_ENV });

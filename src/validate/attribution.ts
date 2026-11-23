@@ -1,4 +1,4 @@
-import type { ChangedFile, Finding, ReviewUnit } from "../types/index.ts";
+import type { ChangedFile, Finding } from "../types/index.ts";
 import type { AttributionBasis, CheckResult } from "../types/validation.ts";
 import { makeCheck } from "./checks.ts";
 import type { VerifiedEvidenceLocation } from "./evidence.ts";
@@ -27,9 +27,16 @@ export interface AttributionFailure {
 
 export type AttributionResult = AttributionSuccess | AttributionFailure;
 
+export interface AttributionUnitView {
+  readonly symbol: {
+    readonly changedLines: readonly number[];
+    readonly deletedLines?: readonly number[] | undefined;
+  };
+}
+
 export interface AttributionInput {
   finding: Finding;
-  unit: ReviewUnit;
+  unit: AttributionUnitView;
   changedFile: ChangedFile;
   /** P5-02 head-side identity; old-path evidence still attributes the merge-base side. */
   canonicalPath: string;

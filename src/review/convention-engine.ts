@@ -51,9 +51,7 @@ const AdvisoryRawFindingSchema = z
   });
 
 const AdvisoryRawBatchSchema = z.strictObject({
-  findings: z
-    .array(z.strictObject({ unitId: z.string().min(1), finding: AdvisoryRawFindingSchema }))
-    .max(5),
+  findings: z.array(z.strictObject({ unitId: z.string().min(1), finding: AdvisoryRawFindingSchema })).max(5),
 });
 
 type AdvisoryRawBatch = z.infer<typeof AdvisoryRawBatchSchema>;
@@ -115,7 +113,10 @@ export class ConventionAdvisoryReviewEngineImpl implements ConventionAdvisoryRev
     const units = input?.units;
     const conventions = input?.conventions;
     if (!Array.isArray(units) || !Array.isArray(conventions)) {
-      throw new ReviewerError({ code: "INTERNAL", message: "advisory reviewBatch requires units and conventions arrays" });
+      throw new ReviewerError({
+        code: "INTERNAL",
+        message: "advisory reviewBatch requires units and conventions arrays",
+      });
     }
     if (units.length === 0) {
       return { candidates: [], inputTokens: 0, outputTokens: 0, codes: ["advisory_skipped_no_units"] };
