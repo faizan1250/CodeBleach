@@ -41,6 +41,20 @@ function mergeCompleted(overrides: Record<string, unknown> = {}): string {
   });
 }
 
+function mergeSkipped(overrides: Record<string, unknown> = {}): string {
+  return event(ADVISORY_MERGE_SKIPPED, { candidates: 0, retained: 0, codes: [], ...overrides });
+}
+
+function skippedPass(overrides: Record<string, unknown> = {}): string {
+  return event(ADVISORY_PASS_SKIPPED, {
+    projectedUnits: 0,
+    skippedUnits: 5,
+    batches: 0,
+    codes: ["advisory_skipped_no_conventions"],
+    ...overrides,
+  });
+}
+
 describe("eval advisory metrics", () => {
   test("parses completed pass and merge events", () => {
     const stderr = [event("stage completed", { stage: "diff" }), passCompleted(), mergeCompleted()].join("\n");
@@ -58,12 +72,7 @@ describe("eval advisory metrics", () => {
   });
 
   test("treats skipped pass events as genuine zeros", () => {
-    const stderr = event(ADVISORY_PASS_SKIPPED, {
-      projectedUnits: 0,
-      skippedUnits: 5,
-      batches: 0,
-      codes: ["advisory_skipped_no_conventions"],
-    });
+    const stderr = [skippedPass(), mergeSkipped()].join("\n");
     const metrics = collectAdvisoryMetrics(stderr);
     expect(metrics.status).toBe("skipped");
     expect(metrics.batches).toBe(0);
@@ -72,6 +81,49 @@ describe("eval advisory metrics", () => {
     expect(metrics.skippedUnits).toBe(5);
     expect(metrics.codes).toEqual(["advisory_skipped_no_conventions"]);
     expect(metrics.detail).toBeNull();
+  });
+
+  test("requires a merge outcome after a skipped pass", () => {
+    const metrics = collectAdvisoryMetrics(skippedPass());
+    expect(metrics.status).toBe("missing");
+    expect(metrics.detail).toContain("merge");
+  });
+
+  test("rejects merge-completed after a skipped pass", () => {
+    const stderr = [skippedPass(), mergeCompleted()].join("\n");
+    const metrics = collectAdvisoryMetrics(stderr);
+    expect(metrics.status).toBe("missing");
+    expect(metrics.detail).toContain("contradictory");
+  });
+
+  test("rejects duplicate merge outcomes after a skipped pass", () => {
+    const doubled = [skippedPass(), mergeSkipped(), mergeSkipped()].join("\n");
+    expect(collectAdvisoryMetrics(doubled).status).toBe("missing");
+    expect(collectAdvisoryMetrics(doubled).detail).toContain("duplicate");
+    const mixed = [skippedPass(), mergeSkipped(), mergeCompleted()].join("\n");
+    expect(collectAdvisoryMetrics(mixed).status).toBe("missing");
+    expect(collectAdvisoryMetrics(mixed).detail).toContain("contradictory");
+  });
+
+  test("rejects duplicate skipped pass events", () => {
+    const stderr = [skippedPass(), skippedPass(), mergeSkipped()].join("\n");
+    const metrics = collectAdvisoryMetrics(stderr);
+    expect(metrics.status).toBe("missing");
+    expect(metrics.detail).toContain("duplicate");
+  });
+
+  test("rejects malformed merge-skipped numerics after a skipped pass", () => {
+    const stderr = [skippedPass(), mergeSkipped({ retained: "zero" })].join("\n");
+    const metrics = collectAdvisoryMetrics(stderr);
+    expect(metrics.status).toBe("missing");
+    expect(metrics.detail).toContain("malformed");
+  });
+
+  test("rejects nonzero merge counts after a skipped pass", () => {
+    const stderr = [skippedPass(), mergeSkipped({ retained: 1 })].join("\n");
+    const metrics = collectAdvisoryMetrics(stderr);
+    expect(metrics.status).toBe("missing");
+    expect(metrics.detail).toContain("contradictory");
   });
 
   test("reports missing telemetry instead of silent zeros", () => {
@@ -140,6 +192,7 @@ describe("eval advisory metrics", () => {
     const stderr = [
       event("advisory conventions build failed open", {}),
       event(ADVISORY_PASS_SKIPPED, { projectedUnits: 0, skippedUnits: 0, batches: 0, codes: [] }),
+      mergeSkipped(),
     ].join("\n");
     const metrics = collectAdvisoryMetrics(stderr);
     expect(metrics.status).toBe("skipped");

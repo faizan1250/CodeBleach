@@ -1268,6 +1268,13 @@ called out and decided in ADR 0044.
 - **Status:** the harness is built; the gate has not been run to pass.
   `--convention-advisory` stays a development/experiment flag (default
   off). A failing gate never weakens thresholds.
+- **Closure 01 — gate SHA-freshness + skipped-path metrics** (this
+  branch): the gate pins corpus integrity (≥30 merged PRs, ≥5 repos,
+  unique PR URLs, linked repo/PR/SHA fields) and matches every result's
+  provenance plus history-recomputed merge-base against its corpus pin;
+  `manifest.json` is consumed as the run index (missing/drifted
+  manifests fail closed); a skipped pass requires exactly one
+  merge-skipped outcome, otherwise telemetry is missing and fails.
 
 ### Hardening A–D (on this branch, after P6-05)
 
