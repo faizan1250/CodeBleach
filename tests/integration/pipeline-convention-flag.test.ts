@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { createLogger } from "../../src/core/logger.ts";
 import { runPipeline } from "../../src/core/pipeline.ts";
 import type { Phase6PipelineDeps } from "../../src/core/contracts.ts";
-import type { ReviewerError } from "../../src/core/errors.ts";
 import { createFixtureEngines } from "../fixtures/stubs.ts";
 
 function testLogger() {
@@ -108,7 +107,7 @@ describe("p6-00 convention advisory flag", () => {
     }
   });
 
-  test("flag enabled with a bundle waits for P6-05 orchestration", async () => {
+  test("flag enabled with a failing bundle fails open to byte-identical primary output", async () => {
     const { dir, cleanup } = await makeOutDir();
     try {
       const promise = runPipeline(
@@ -123,13 +122,23 @@ describe("p6-00 convention advisory flag", () => {
           options: { conventionAdvisoryEnabled: true },
         },
       );
-      let code: string | undefined;
-      try {
-        await promise;
-      } catch (error) {
-        code = (error as ReviewerError).code;
-      }
-      expect(code).toBe("NOT_IMPLEMENTED");
+      // The offline fixture review engine bypasses Phase 6 regardless of the
+      // flag, so the unreachable bundle is never called and primary output
+      // matches the flag-off run exactly.
+      await promise;
+      const artifact = JSON.parse(await readFile(join(dir, "run.json"), "utf8")) as {
+        validated: unknown;
+        stages: Array<{ name: string; status: string }>;
+      };
+      expect(artifact.stages.map((stage) => stage.status)).toEqual([
+        "completed",
+        "completed",
+        "completed",
+        "completed",
+        "completed",
+        "skipped",
+      ]);
+      expect(artifact.validated).toHaveLength(1);
     } finally {
       await cleanup();
     }

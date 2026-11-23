@@ -117,7 +117,8 @@ export interface ConventionAdvisoryUnitProjector {
 /**
  * Advisory-only model pass (plan 4.3, 9.3-9.4). Exactly one provider
  * invocation per call on an advisory-specific instance with maxRetries 0,
- * sharing the global concurrency limiter and honoring the
+ * obeying the configured concurrency ceiling orchestration-side (no shared
+ * limiter object exists) and honoring the
  * CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING gate per call.
  */
 export interface ConventionAdvisoryReviewEngine {

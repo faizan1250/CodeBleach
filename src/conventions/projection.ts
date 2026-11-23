@@ -15,7 +15,7 @@ import { ReviewerError } from "../core/errors.ts";
 import { getAdapter } from "../context/language.ts";
 import type { Definition, TypeDefinition } from "../context/language.ts";
 import { parseSource } from "../context/parser.ts";
-import type { SnapshotReader } from "../context/snapshot.ts";
+import { SnapshotReader } from "../context/snapshot.ts";
 import type { ChangedSymbol, DiffHunk, DiffLine, DiffResult, Language, ReviewUnit } from "../types/index.ts";
 import type { ConventionAdvisoryProjectionResult, ConventionAdvisoryUnit } from "../types/conventions.ts";
 import { MAX_ADVISORY_SYMBOL_SOURCE_TOKENS, MAX_ADVISORY_UNIT_TOKENS } from "./constants.ts";
@@ -425,4 +425,29 @@ export class ConventionAdvisoryUnitProjectorImpl implements ConventionAdvisoryUn
     }
     return { units: projected, skippedUnits };
   }
+}
+
+/**
+ * Run-pinned projector factory (P6-05 composition seam). The CLI binds the
+ * repository directory once; every project() call pins a fresh
+ * SnapshotReader to that run's diff SHAs, so projection reads the same
+ * base/head snapshot as validation and never the working tree or a moving ref.
+ */
+export function createPinnedAdvisoryProjector(repoDir: string): ConventionAdvisoryUnitProjector {
+  if (typeof repoDir !== "string" || repoDir.length === 0) {
+    throw new ReviewerError({
+      code: "INTERNAL",
+      message: "createPinnedAdvisoryProjector requires a non-empty repoDir",
+    });
+  }
+  return {
+    project: (input) => {
+      const reader = new SnapshotReader({
+        repoRoot: repoDir,
+        headSha: input.diff.headSha,
+        mergeBase: input.diff.mergeBase,
+      });
+      return new ConventionAdvisoryUnitProjectorImpl({ snapshot: snapshotReaderTexts(reader) }).project(input);
+    },
+  };
 }
