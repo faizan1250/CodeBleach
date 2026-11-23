@@ -33,6 +33,7 @@ export const CONVENTION_DETECTOR_COMMON_WRAPPERS_VERSION = 1;
 // Advisory request budgets and concurrency (plan 9.3).
 export const MAX_ADVISORY_REQUESTS_PER_RUN = 5;
 export const MAX_ADVISORY_UNITS_PER_REQUEST = 3;
+export const MAX_ADVISORY_SUMMARIES_PER_REQUEST = 8;
 export const MAX_ADVISORY_UNITS_PER_RUN = 15;
 export const MAX_ADVISORY_UNIT_TOKENS = 1500;
 export const MAX_ADVISORY_FIXED_INPUT_TOKENS = 900;

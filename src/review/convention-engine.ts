@@ -14,6 +14,7 @@ import type {
 import {
   MAX_ADVISORY_INPUT_TOKENS_PER_REQUEST,
   MAX_ADVISORY_OUTPUT_TOKENS_PER_REQUEST,
+  MAX_ADVISORY_SUMMARIES_PER_REQUEST,
   MAX_ADVISORY_UNITS_PER_REQUEST,
 } from "../conventions/constants.ts";
 import type { ResolvedConfig } from "../config/schema.ts";
@@ -55,9 +56,6 @@ const AdvisoryRawBatchSchema = z.strictObject({
 });
 
 type AdvisoryRawBatch = z.infer<typeof AdvisoryRawBatchSchema>;
-
-// Packer-selected summaries per request (plan 9.3): never more than eight.
-const MAX_SUMMARIES_PER_REQUEST = 8;
 
 function badOutput(message: string, cause?: unknown): ReviewerError {
   return new ReviewerError({
@@ -129,9 +127,9 @@ export class ConventionAdvisoryReviewEngineImpl implements ConventionAdvisoryRev
         `advisory batch holds ${units.length} units, above the ${MAX_ADVISORY_UNITS_PER_REQUEST}-unit ceiling`,
       );
     }
-    if (conventions.length > MAX_SUMMARIES_PER_REQUEST) {
+    if (conventions.length > MAX_ADVISORY_SUMMARIES_PER_REQUEST) {
       throw invalidInput(
-        `advisory batch holds ${conventions.length} convention summaries, above the ${MAX_SUMMARIES_PER_REQUEST}-summary ceiling`,
+        `advisory batch holds ${conventions.length} convention summaries, above the ${MAX_ADVISORY_SUMMARIES_PER_REQUEST}-summary ceiling`,
       );
     }
     const unitIds = new Set<string>();

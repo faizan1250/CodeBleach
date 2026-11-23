@@ -294,6 +294,9 @@ describe("advisory candidate validation", () => {
     const units = [advisoryUnit()];
     const config = configWith({});
     expect(
+      await engine.validateAdvisoryCandidates([advisoryFinding("i", { severity: "info" })], diff, units, config),
+    ).toEqual([]);
+    expect(
       await engine.validateAdvisoryCandidates([advisoryFinding("m", { severity: "medium" })], diff, units, config),
     ).toEqual([]);
     expect(

@@ -17,15 +17,13 @@ import {
   MAX_ADVISORY_FIXED_INPUT_TOKENS,
   MAX_ADVISORY_INPUT_TOKENS_PER_REQUEST,
   MAX_ADVISORY_REQUESTS_PER_RUN,
+  MAX_ADVISORY_SUMMARIES_PER_REQUEST,
   MAX_ADVISORY_UNITS_PER_REQUEST,
   MAX_ADVISORY_UNITS_PER_RUN,
   MAX_CONVENTION_SUMMARY_TOKENS_PER_REQUEST,
 } from "./constants.ts";
 import { orderAdvisoryUnits, serializeConventionAdvisoryUnit } from "./projection.ts";
 import { countAdvisoryTokens } from "./token-budget.ts";
-
-// Convention summary records carried per request (plan 9.3).
-const MAX_SUMMARIES_PER_REQUEST = 8;
 
 function compareStrings(a: string, b: string): number {
   if (a < b) return -1;
@@ -62,7 +60,7 @@ function selectSummaries(conventions: readonly InferredConvention[]): AdvisoryCo
   const ranked = [...conventions].sort(compareConventions);
   const selected: AdvisoryConventionSummary[] = [];
   for (const convention of ranked) {
-    if (selected.length >= MAX_SUMMARIES_PER_REQUEST) break;
+    if (selected.length >= MAX_ADVISORY_SUMMARIES_PER_REQUEST) break;
     const summary = toSummary(convention);
     if (countAdvisoryTokens(JSON.stringify([...selected, summary])) > MAX_CONVENTION_SUMMARY_TOKENS_PER_REQUEST) break;
     selected.push(summary);
