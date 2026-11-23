@@ -1,4 +1,4 @@
-import type { ChangedFile, Finding, ReviewUnit } from "../types/index.ts";
+import type { ChangedFile, Finding } from "../types/index.ts";
 import type { CheckResult, ValidationCheckCode } from "../types/validation.ts";
 import { normalizeQuoteForFingerprint } from "../review/normalize.ts";
 import { redactSource } from "../utils/redact.ts";
@@ -106,9 +106,13 @@ export interface EvidenceFailure {
 
 export type EvidenceResult = EvidenceSuccess | EvidenceFailure;
 
+export interface EvidenceUnitView {
+  readonly context: readonly { readonly file: string }[];
+}
+
 export interface EvidenceInput {
   finding: Finding;
-  unit: ReviewUnit;
+  unit: EvidenceUnitView;
   changedFile: ChangedFile;
   /** P5-02 head-side identity; old-path evidence still reads the merge-base side. */
   canonicalPath: string;

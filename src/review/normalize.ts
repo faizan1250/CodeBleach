@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { ReviewUnit } from "../types/context.ts";
 import type { Finding, RawFinding } from "../types/finding.ts";
 import { CODE_REVIEW_PROMPT_VERSION } from "./prompt.ts";
 
@@ -64,8 +63,14 @@ export function fingerprintForFinding(input: {
     .digest("hex");
 }
 
+export interface NormalizeUnitView {
+  readonly id: string;
+  readonly symbol: { readonly name: string };
+  readonly rules: readonly { readonly id: string }[];
+}
+
 export interface NormalizeContext {
-  unit: ReviewUnit;
+  unit: NormalizeUnitView;
   headSha: string;
   pass?: string | undefined;
   generateId?: (() => string) | undefined;

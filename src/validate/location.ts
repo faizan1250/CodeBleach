@@ -1,4 +1,4 @@
-import type { ChangedFile, Finding, ReviewUnit } from "../types/index.ts";
+import type { ChangedFile, Finding } from "../types/index.ts";
 import type { CheckResult, ValidationCheckCode, ValidationTarget } from "../types/validation.ts";
 import { SKIPPED_DETAIL, makeCheck } from "./checks.ts";
 import type { ValidationSnapshotReader } from "./snapshot.ts";
@@ -26,9 +26,17 @@ export interface LocationFailure {
 
 export type LocationResult = LocationSuccess | LocationFailure;
 
+export interface LocationUnitView {
+  readonly symbol: {
+    readonly changedLines: readonly number[];
+    readonly deletedLines?: readonly number[] | undefined;
+    readonly anchorLine?: number | undefined;
+  };
+}
+
 export interface LocationInput {
   finding: Finding;
-  unit: ReviewUnit;
+  unit: LocationUnitView;
   changedFile: ChangedFile;
   /** P5-02 head-side identity; the only read/target path, never the raw model path. */
   canonicalPath: string;
