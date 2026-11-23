@@ -85,7 +85,7 @@ describe("p6-00 sampling and support bounds", () => {
     expect(CONVENTION_DETECTOR_ERROR_HANDLING).toBe("error-handling");
     expect(CONVENTION_DETECTOR_ERROR_HANDLING_VERSION).toBe(1);
     expect(CONVENTION_DETECTOR_COMMON_WRAPPERS).toBe("common-wrappers");
-    expect(CONVENTION_DETECTOR_COMMON_WRAPPERS_VERSION).toBe(1);
+    expect(CONVENTION_DETECTOR_COMMON_WRAPPERS_VERSION).toBe(2);
   });
 
   test("pins sampled language extensions", () => {

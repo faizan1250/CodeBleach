@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { ConfigFileSchema } from "../../src/config/schema.ts";
 import type { ResolvedConfig } from "../../src/config/schema.ts";
 import type { Phase6PipelineDeps } from "../../src/core/contracts.ts";
-import { createLogger } from "../../src/core/logger.ts";
+import { createLogger, type Logger } from "../../src/core/logger.ts";
 import type { DiffResult, Finding, ValidatedFinding } from "../../src/types/index.ts";
 import type {
   ConventionAdvisoryUnit,
@@ -407,5 +407,131 @@ describe("phase6 advisory merge", () => {
     });
     expect(merged.advisory).toEqual([]);
     expect(merged.diagnostics.codes).toContain("advisory_validation_failed");
+  });
+});
+
+interface LoggedEvent {
+  level: string;
+  msg: string;
+  fields: Record<string, unknown>;
+}
+
+function collectingLogger(): { logger: Logger; events: LoggedEvent[] } {
+  const events: LoggedEvent[] = [];
+  const push =
+    (level: string) =>
+    (msg: string, fields?: Record<string, unknown>): void => {
+      events.push({ level, msg, fields: fields ?? {} });
+    };
+  return {
+    logger: { debug: push("debug"), info: push("info"), warn: push("warn"), error: push("error") },
+    events,
+  };
+}
+
+describe("phase6 advisory telemetry", () => {
+  test("emits one skipped metrics event on early exit", async () => {
+    const { logger, events } = collectingLogger();
+    const deps = fakeDeps({ conventions: [] });
+    const result = await runPhase6AdvisoryPass({
+      phase6: deps,
+      repoDir: "/repo",
+      diff: diff(),
+      units: [],
+      config: config(),
+      logger,
+    });
+    expect(result.findings).toEqual([]);
+    const passEvents = events.filter((event) => event.msg.startsWith("advisory pass"));
+    expect(passEvents.map((event) => event.msg)).toEqual(["advisory pass skipped"]);
+    expect(passEvents[0]?.fields).toEqual({
+      projectedUnits: 0,
+      skippedUnits: 0,
+      batches: 0,
+      codes: ["advisory_skipped_no_conventions"],
+    });
+  });
+
+  test("emits one completed metrics event matching returned diagnostics", async () => {
+    const { logger, events } = collectingLogger();
+    const units = [leanUnit("unit-1"), leanUnit("unit-2")];
+    const deps = fakeDeps({ units });
+    const result = await runPhase6AdvisoryPass({
+      phase6: deps,
+      repoDir: "/repo",
+      diff: diff(),
+      units: [],
+      config: config(),
+      logger,
+    });
+    expect(result.findings.length).toBeGreaterThan(0);
+    const passEvents = events.filter((event) => event.msg.startsWith("advisory pass"));
+    expect(passEvents.map((event) => event.msg)).toEqual(["advisory pass completed"]);
+    const fields = passEvents[0]?.fields ?? {};
+    expect(fields.batches).toBe(result.diagnostics.batches);
+    expect(fields.inputTokens).toBe(result.diagnostics.inputTokens);
+    expect(fields.outputTokens).toBe(result.diagnostics.outputTokens);
+    expect(fields.projectedUnits).toBe(result.diagnostics.projectedUnits);
+    expect(fields.skippedUnits).toBe(result.diagnostics.skippedUnits);
+    expect(fields.candidates).toBe(result.diagnostics.candidates);
+  });
+
+  test("skipped metrics carry only numbers and codes", async () => {
+    const { logger, events } = collectingLogger();
+    await runPhase6AdvisoryPass({
+      phase6: fakeDeps({ projectThrows: new Error("snapshot exploded") }),
+      repoDir: "/repo",
+      diff: diff(),
+      units: [],
+      config: config(),
+      logger,
+    });
+    const skipped = events.find((event) => event.msg === "advisory pass skipped");
+    expect(skipped?.level).toBe("info");
+    const fields = skipped?.fields ?? {};
+    expect(Object.keys(fields).sort()).toEqual(["batches", "codes", "projectedUnits", "skippedUnits"]);
+    for (const [key, value] of Object.entries(fields)) {
+      if (key === "codes") {
+        expect(Array.isArray(value) && (value as unknown[]).every((code) => typeof code === "string")).toBe(true);
+      } else {
+        expect(typeof value).toBe("number");
+      }
+    }
+  });
+
+  test("emits a merge skipped event for empty findings", async () => {
+    const { logger, events } = collectingLogger();
+    const merged = await mergePhase6Advisory({
+      phase6: fakeDeps({}),
+      primary: { findings: [acceptedPrimary("p1")], handoff: [{ findingId: "p1", headLocations: [] }] },
+      gated: { findings: [], units: [] },
+      diff: diff(),
+      config: config(),
+      logger,
+    });
+    expect(merged.advisory).toEqual([]);
+    const mergeEvents = events.filter((event) => event.msg.startsWith("advisory merge"));
+    expect(mergeEvents.map((event) => event.msg)).toEqual(["advisory merge skipped"]);
+    expect(mergeEvents[0]?.fields.retained).toBe(0);
+    expect(mergeEvents[0]?.fields.codes).toEqual(["advisory_skipped_no_candidates"]);
+  });
+
+  test("emits a merge completed event with the retained count", async () => {
+    const { logger, events } = collectingLogger();
+    const merged = await mergePhase6Advisory({
+      phase6: fakeDeps({}),
+      primary: {
+        findings: [acceptedPrimary("p1")],
+        handoff: [{ findingId: "p1", headLocations: [] }],
+      },
+      gated: { findings: [advisoryFinding("a1"), advisoryFinding("a2")], units: [leanUnit("unit-1")] },
+      diff: diff(),
+      config: config(),
+      logger,
+    });
+    expect(merged.advisory.length).toBe(2);
+    const completed = events.find((event) => event.msg === "advisory merge completed");
+    expect(completed?.fields.retained).toBe(merged.advisory.length);
+    expect(completed?.fields.candidates).toBe(2);
   });
 });

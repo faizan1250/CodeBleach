@@ -28,7 +28,7 @@ export const CONVENTION_DETECTOR_NAMING_VERSION = 1;
 export const CONVENTION_DETECTOR_ERROR_HANDLING = "error-handling" as const;
 export const CONVENTION_DETECTOR_ERROR_HANDLING_VERSION = 1;
 export const CONVENTION_DETECTOR_COMMON_WRAPPERS = "common-wrappers" as const;
-export const CONVENTION_DETECTOR_COMMON_WRAPPERS_VERSION = 1;
+export const CONVENTION_DETECTOR_COMMON_WRAPPERS_VERSION = 2;
 
 // Advisory request budgets and concurrency (plan 9.3).
 export const MAX_ADVISORY_REQUESTS_PER_RUN = 5;
