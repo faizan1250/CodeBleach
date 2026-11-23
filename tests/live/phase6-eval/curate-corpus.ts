@@ -117,12 +117,14 @@ export async function curateCorpus(repoList: readonly string[], perRepo: number)
   return corpus;
 }
 
-const perRepo = Number.parseInt(argValue("--per-repo", "5"), 10);
-if (!Number.isSafeInteger(perRepo) || perRepo < 1) throw new Error("--per-repo must be a positive integer");
-const out = argValue("--out", "tests/live/phase6-eval/corpus.json");
-const corpus = await curateCorpus(REPOS, perRepo);
-if (corpus.length < REPOS.length * perRepo) {
-  console.warn(`short corpus: ${corpus.length} entries (rate limit or strict filters); rerun later to fill`);
+if (import.meta.main) {
+  const perRepo = Number.parseInt(argValue("--per-repo", "5"), 10);
+  if (!Number.isSafeInteger(perRepo) || perRepo < 1) throw new Error("--per-repo must be a positive integer");
+  const out = argValue("--out", "tests/live/phase6-eval/corpus.json");
+  const corpus = await curateCorpus(REPOS, perRepo);
+  if (corpus.length < REPOS.length * perRepo) {
+    console.warn(`short corpus: ${corpus.length} entries (rate limit or strict filters); rerun later to fill`);
+  }
+  await (await import("node:fs/promises")).writeFile(out, `${JSON.stringify(corpus, null, 2)}\n`, "utf8");
+  console.log(`wrote ${corpus.length} entries to ${out}`);
 }
-await (await import("node:fs/promises")).writeFile(out, `${JSON.stringify(corpus, null, 2)}\n`, "utf8");
-console.log(`wrote ${corpus.length} entries to ${out}`);

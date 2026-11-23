@@ -101,28 +101,30 @@ async function latencyReport(resultsDir: string): Promise<Record<string, number>
   };
 }
 
-const labelsPath = process.argv[2];
-if (labelsPath === undefined) {
-  console.error("usage: bun tests/live/phase6-eval/gate.ts <labels.json> [results-dir]");
-  process.exit(2);
-}
-const resultsDir = process.argv[3] ?? "tests/live/phase6-eval/results";
-const labels = parseLabels(JSON.parse(await readFile(labelsPath, "utf8")) as unknown);
-const gate = evaluateGate({ labels });
-const latency = await latencyReport(resultsDir);
-const report = {
-  gate: gate.passed ? "pass" : "fail",
-  totalCandidates: gate.totalCandidates,
-  useful: gate.useful,
-  usefulPrecision: gate.usefulPrecision,
-  violations: gate.violations,
-  reasons: gate.reasons,
-  ...latency,
-};
-console.log(JSON.stringify(report, null, 2));
-if (!gate.passed) {
-  console.error(
-    "evaluation gate failed: keep --convention-advisory for development/experiments; do not recommend routine use",
-  );
-  process.exit(1);
+if (import.meta.main) {
+  const labelsPath = process.argv[2];
+  if (labelsPath === undefined) {
+    console.error("usage: bun tests/live/phase6-eval/gate.ts <labels.json> [results-dir]");
+    process.exit(2);
+  }
+  const resultsDir = process.argv[3] ?? "tests/live/phase6-eval/results";
+  const labels = parseLabels(JSON.parse(await readFile(labelsPath, "utf8")) as unknown);
+  const gate = evaluateGate({ labels });
+  const latency = await latencyReport(resultsDir);
+  const report = {
+    gate: gate.passed ? "pass" : "fail",
+    totalCandidates: gate.totalCandidates,
+    useful: gate.useful,
+    usefulPrecision: gate.usefulPrecision,
+    violations: gate.violations,
+    reasons: gate.reasons,
+    ...latency,
+  };
+  console.log(JSON.stringify(report, null, 2));
+  if (!gate.passed) {
+    console.error(
+      "evaluation gate failed: keep --convention-advisory for development/experiments; do not recommend routine use",
+    );
+    process.exit(1);
+  }
 }
