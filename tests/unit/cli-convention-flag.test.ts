@@ -100,11 +100,11 @@ describe("p6-00 --convention-advisory composition", () => {
     }
   });
 
-  test("live run with the flag fails closed before config load", async () => {
+  test("live run with the flag composes the bundle and fails closed without credentials", async () => {
     const dir = await mkdtemp(join(tmpdir(), "codebleach-p6-00-live-"));
     try {
       const logger = createLogger({ level: "error", runId: "p6-00-live" });
-      const promise = runReview(
+      const code = await runReview(
         {
           base: "base",
           head: "head",
@@ -121,7 +121,7 @@ describe("p6-00 --convention-advisory composition", () => {
         },
         logger,
       );
-      await expect(promise).rejects.toMatchObject({ code: "CONFIG_INVALID" });
+      expect(code).toBe(2);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

@@ -9,6 +9,7 @@ import { requireLlmPreflight } from "../llm/preflight.ts";
 import type { DiffResult, Finding, PrMeta, PublishResult, ReviewUnit, ValidatedFinding } from "../types/index.ts";
 import type { ContextBuildDiagnostics } from "../types/context.ts";
 import type { ReviewBuildResult } from "../types/review.ts";
+import { mergePhase6Advisory, runPhase6AdvisoryPass, type AdvisoryPassResult } from "./phase6.ts";
 
 function toReviewerError(error: unknown, stage: string): ReviewerError {
   if (error instanceof ReviewerError) return error;
@@ -131,8 +132,9 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
     }
 
     // Phase 6 opt-in preflight (P6-00, ADR 0043): the flag requires the
-    // optional bundle, and the bundle has no orchestration until P6-05.
-    // Flag off (or absent) falls through to the exact Phase 5 pipeline.
+    // optional bundle; without it the run fails closed, never downgrades.
+    // Offline review engines (demo, --no-llm) bypass Phase 6 regardless of the
+    // flag, so a stale bundle with an offline engine stays primary-only.
     if (input.options?.conventionAdvisoryEnabled === true) {
       if (deps.phase6 === undefined) {
         throw new ReviewerError({
@@ -141,11 +143,12 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
             "convention advisory enabled without Phase 6 dependencies: explicit composition required, never silent downgrade",
         });
       }
-      throw new ReviewerError({
-        code: "NOT_IMPLEMENTED",
-        message: "convention advisory orchestration lands in P6-05; P6-00 locks contracts only",
-      });
     }
+    const phase6Active =
+      input.options?.conventionAdvisoryEnabled === true &&
+      deps.phase6 !== undefined &&
+      deps.review.requiresLlm !== false;
+    let advisoryGated: AdvisoryPassResult | null = null;
 
     const diffResult = await runStage(
       "diff",
@@ -170,12 +173,43 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
       // The exact head SHA comes from the diff, not the CLI flag: callers may
       // pass symbolic refs, and the engine must attribute code-owned metadata
       // to the resolved commit.
-      () => deps.review.review(contextResult.units, resolved, { headSha: diffResult.headSha }),
-      (value) => value.findings.length,
+      async () => {
+        if (!phase6Active || deps.phase6 === undefined) {
+          return {
+            primary: await deps.review.review(contextResult.units, resolved, { headSha: diffResult.headSha }),
+            advisory: null as AdvisoryPassResult | null,
+          };
+        }
+        // Phase 6 (plan 3.1, 12.1): the primary model pass starts immediately
+        // and the advisory pass starts as soon as conventions are ready,
+        // without awaiting primary completion. allSettled join: an advisory
+        // failure can never fail or erase a successful primary review.
+        const primaryPromise = deps.review.review(contextResult.units, resolved, { headSha: diffResult.headSha });
+        const advisoryPromise = runPhase6AdvisoryPass({
+          phase6: deps.phase6,
+          repoDir: input.repoDir,
+          diff: diffResult,
+          units: contextResult.units,
+          config: resolved,
+          signal: input.signal,
+          logger: deps.logger,
+        });
+        const [primarySettled, advisorySettled] = await Promise.allSettled([primaryPromise, advisoryPromise]);
+        if (primarySettled.status === "rejected") throw primarySettled.reason;
+        let advisory: AdvisoryPassResult | null = null;
+        if (advisorySettled.status === "fulfilled") advisory = advisorySettled.value;
+        else {
+          input.signal?.throwIfAborted();
+          deps.logger.warn("advisory pass failed open", {});
+        }
+        return { primary: primarySettled.value, advisory };
+      },
+      (value) => value.primary.findings.length,
     );
-    findings = result.findings;
-    reviewResult = result;
-    if (result.status === "skipped") {
+    findings = result.primary.findings;
+    advisoryGated = result.advisory;
+    reviewResult = result.primary;
+    if (reviewResult.status === "skipped") {
       // --no-llm preview: nothing exists to validate or publish. Replace the
       // "completed" record runStage just added with an explicit skip, then
       // skip validation/publish with reasons instead of entering Phase 5 stubs.
@@ -199,10 +233,34 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
 
     // P5-09: the deterministic validator is wired. Any validation failure
     // fails the stage, dry-run included; the Phase 4 NOT_IMPLEMENTED
-    // tolerance is removed.
+    // tolerance is removed. With Phase 6 active, primaries finalize exactly
+    // as Phase 5, then validated advisories merge after them (plan 12).
     const validatedList: ValidatedFinding[] = await runStage(
       "validation",
-      () => deps.validation.validate(findings, diffResult, contextResult.units, resolved, { signal: input.signal }),
+      async () => {
+        if (!phase6Active || deps.phase6 === undefined || advisoryGated === null) {
+          return deps.validation.validate(findings, diffResult, contextResult.units, resolved, {
+            signal: input.signal,
+          });
+        }
+        const primary = await deps.phase6.validation.validatePrimaryWithHandoff(
+          findings,
+          diffResult,
+          contextResult.units,
+          resolved,
+          { signal: input.signal },
+        );
+        const merged = await mergePhase6Advisory({
+          phase6: deps.phase6,
+          primary,
+          gated: { findings: advisoryGated.findings, units: advisoryGated.units },
+          diff: diffResult,
+          config: resolved,
+          signal: input.signal,
+          logger: deps.logger,
+        });
+        return [...primary.findings, ...merged.advisory];
+      },
       (result) => result.filter(isAcceptedFinding).length,
     );
     validated = validatedList;

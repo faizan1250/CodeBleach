@@ -11,15 +11,18 @@ import { ReviewerError } from "../../core/errors.ts";
 import { GitDiffEngine } from "../../diff/git.ts";
 import { ContextEngineImpl } from "../../context/engine.ts";
 import { loadConfig } from "../../config/load.ts";
-import type { LoadConfigFn, ValidationEngine } from "../../core/contracts.ts";
+import type { LoadConfigFn, Phase6PipelineDeps, ValidationEngine } from "../../core/contracts.ts";
+import { ConventionEngineImpl } from "../../conventions/engine.ts";
+import { createPinnedAdvisoryProjector } from "../../conventions/projection.ts";
 import { FIXED_MODEL_ID, FIXED_PROVIDER, TRAINING_OPT_IN_ENV } from "../../llm/constants.ts";
 import type { Logger } from "../../core/logger.ts";
 import { runPipeline } from "../../core/pipeline.ts";
 import { OpenCodeProvider } from "../../providers/opencode.ts";
+import { ConventionAdvisoryReviewEngineImpl } from "../../review/convention-engine.ts";
 import { ReviewEngineImpl } from "../../review/engine.ts";
 import { skippedReviewResult } from "../../review/result.ts";
 import { stubPublisher, stubValidationEngine } from "../../core/stubs.ts";
-import { createValidationEngine } from "../../validate/engine.ts";
+import { createPhase6ValidationEngine, createValidationEngine } from "../../validate/engine.ts";
 import { readVersion } from "./version.ts";
 import { exitCodeForError } from "../exit-codes.ts";
 import { readFile } from "node:fs/promises";
@@ -165,17 +168,33 @@ export async function runReview(options: ReviewOptions, logger: Logger): Promise
     );
   }
 
-  // Phase 6 (P6-00, ADR 0043): demo and --no-llm bypass the bundle regardless
-  // of the flag. Live use with the flag fails closed here: P6-00 locks
-  // contracts only, and orchestration lands in P6-05.
-  if (options.conventionAdvisory === true) {
-    throw usageError("--convention-advisory runtime lands in P6-05 (P6-00 locks contracts only)");
-  }
-
   // Live review: load config once for provider bounds, then reuse the same
   // loaded value inside the pipeline so CLI and stages cannot disagree.
   const loaded = await loadConfig(options.repo);
   if (!loaded.ok) throw loaded.error;
+  // Phase 6 (P6-05, ADR 0043): the flag composes the optional advisory
+  // bundle. Demo and --no-llm bypass it above; the pipeline preflight
+  // rejects a flagged run whose bundle is missing, so a live flagged run
+  // always carries one.
+  let phase6: Phase6PipelineDeps | undefined;
+  if (options.conventionAdvisory === true) {
+    // Advisory-specific provider: zero retries and its own session, sharing
+    // the operator env (training gate, key) with the primary provider. Batch
+    // fan-out stays within the advisory concurrency cap orchestration-side.
+    const advisoryProvider = new OpenCodeProvider({
+      env,
+      sessionId: `ses_${options.runId.replace(/-/g, "")}-advisory`,
+      version: await readVersion(),
+      maxRetries: 0,
+      timeoutMs: loaded.value.config.llm.request_timeout_ms,
+    });
+    phase6 = {
+      conventions: new ConventionEngineImpl(),
+      advisoryProjector: createPinnedAdvisoryProjector(options.repo),
+      advisoryReview: new ConventionAdvisoryReviewEngineImpl({ provider: advisoryProvider, env }),
+      validation: createPhase6ValidationEngine({ repoDir: options.repo }),
+    };
+  }
   logger.warn(
     `live review sends repository code to ${FIXED_MODEL_ID} (${FIXED_PROVIDER}), ` +
       `which is not zero-data-retention: prompts/completions may train future models; ` +
@@ -202,6 +221,7 @@ export async function runReview(options: ReviewOptions, logger: Logger): Promise
       // validator never runs); demo keeps its canned engine.
       validation: createValidationEngine({ repoDir: options.repo }),
       publisher: stubPublisher,
+      ...(phase6 === undefined ? {} : { phase6 }),
     },
     loadAgain,
     { ...options, base, head },
@@ -266,6 +286,7 @@ async function runEngines(
       | { review: () => Promise<ReturnType<typeof skippedReviewResult>>; requiresLlm?: boolean | undefined };
     validation: ValidationEngine;
     publisher: typeof demoPublisher | typeof stubPublisher;
+    phase6?: Phase6PipelineDeps | undefined;
   },
   loadConfig: LoadConfigFn | undefined,
   options: ResolvedReviewOptions,
