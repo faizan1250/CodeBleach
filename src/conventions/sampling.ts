@@ -7,10 +7,10 @@
 
 import { createHash } from "node:crypto";
 import { ReviewerError } from "../core/errors.ts";
-import { isRegularBlob, parseBatchContent, parseLsTreeZ } from "../context/snapshot.ts";
+import { isRegularBlob, parseBatchCheckLine, parseBatchContent, parseLsTreeZ } from "../context/snapshot.ts";
+import type { BatchCheckEntry } from "../context/snapshot.ts";
 import type { SupportedLanguage } from "../context/runtime.ts";
-import { batchCheckBlobSizes } from "../diff/blobs.ts";
-import { gitFailed } from "../diff/git-exec.ts";
+import { decode, gitFailed } from "../diff/git-exec.ts";
 import { isGeneratedContent, isLockfile } from "../diff/filters.ts";
 import { isFullCommitSha } from "../diff/revisions.ts";
 import { matchGlob } from "../utils/glob.ts";
@@ -27,6 +27,17 @@ import {
 const CONTROL_CHAR_PATTERN = /\p{Cc}/u;
 
 const SAMPLED_TIMEOUT_MS = 30_000;
+
+// One bounded `--batch-check` round-trip covers at most this many object ids.
+// The merge-base tree can list far more eligible blobs than the frozen caps
+// admit, so sizes resolve in rank order through successive batches instead of
+// one unbounded request.
+export const SAMPLING_SIZE_BATCH_OIDS = 200;
+
+// Per-OID stdout headroom for one `--batch-check` reply line (`<40-hex> SP
+// <type> SP <size> LF` is ~60 bytes; 128 mirrors the snapshot batch framing
+// slack and keeps one corrupt reply from buffering unbounded metadata).
+const SAMPLING_BATCH_CHECK_LINE_BYTES = 128;
 
 const textDecoder = new TextDecoder("utf-8", { fatal: false });
 
@@ -50,6 +61,7 @@ export interface MergeBaseSampleStats {
   ineligibleExcluded: number;
   sizeExcluded: number;
   contentSkipped: number;
+  sizeBatches: number;
 }
 
 export interface MergeBaseSample {
@@ -170,6 +182,60 @@ export function selectSampledFiles(candidates: readonly MergeBaseCandidate[]): M
   return selected;
 }
 
+// Exact stdout bound for a size batch: request count times per-line headroom.
+export function batchCheckStdoutCap(oidCount: number): number {
+  return oidCount * SAMPLING_BATCH_CHECK_LINE_BYTES;
+}
+
+// Pure parse of one bounded `--batch-check` reply. Every requested OID must
+// appear exactly once; truncated lines, unknown OIDs, missing entries, and
+// trailing garbage are explicit transport failures, never partial results.
+export function parseBatchCheckOutput(stdout: string, expectedOids: readonly string[]): Map<string, BatchCheckEntry> {
+  const wanted = new Set(expectedOids.map((oid) => oid.toLowerCase()));
+  const sizes = new Map<string, BatchCheckEntry>();
+  for (const line of stdout.split("\n")) {
+    if (line.length === 0) continue;
+    const entry = parseBatchCheckLine(line);
+    if (!wanted.has(entry.oid)) {
+      throw gitFailed(`unexpected batch-check entry for "${entry.oid}"`);
+    }
+    sizes.set(entry.oid, entry);
+  }
+  for (const oid of wanted) {
+    if (!sizes.has(oid)) {
+      throw gitFailed(`incomplete batch-check response (missing entry for "${oid}")`);
+    }
+  }
+  return sizes;
+}
+
+// One bounded `--batch-check` round-trip for at most SAMPLING_SIZE_BATCH_OIDS
+// object ids. Timeout, output-limit, and abort surface unchanged as GIT_FAILED
+// with the runProcess reason; malformed lines fail via parseBatchCheckOutput.
+export async function checkMergeBaseSizes(
+  repoRoot: string,
+  oids: readonly string[],
+  signal?: AbortSignal | undefined,
+): Promise<Map<string, BatchCheckEntry>> {
+  const unique = [...new Set(oids.map((oid) => oid.toLowerCase()))];
+  if (unique.length === 0) return new Map();
+  if (unique.length > SAMPLING_SIZE_BATCH_OIDS) {
+    throw new ReviewerError({
+      code: "INTERNAL",
+      message: `checkMergeBaseSizes requires at most ${String(SAMPLING_SIZE_BATCH_OIDS)} OIDs per batch`,
+    });
+  }
+  const result = await runProcess({
+    cmd: ["git", "cat-file", "--batch-check"],
+    cwd: repoRoot,
+    timeoutMs: SAMPLED_TIMEOUT_MS,
+    maxStdoutBytes: batchCheckStdoutCap(unique.length),
+    stdinData: `${unique.join("\n")}\n`,
+    ...(signal === undefined ? {} : { signal }),
+  });
+  return parseBatchCheckOutput(decode(result.stdout), unique);
+}
+
 function checkSha(value: string, label: string): string {
   if (!isFullCommitSha(value)) {
     throw new ReviewerError({ code: "INTERNAL", message: `sampleMergeBase requires ${label} to be a full commit SHA` });
@@ -184,19 +250,20 @@ async function readMergeBaseBlobs(
 ): Promise<Map<string, string>> {
   // One `cat-file --batch` spawn for the whole take-list: framing offsets
   // come from header sizes only, so embedded NUL/LF bytes in blob content
-  // never desynchronize the stream. Caller aborts propagate; protocol
-  // violations fail the run (transport failure, not per-file data).
-  const oids = candidates.map((candidate) => candidate.oid);
+  // never desynchronize the stream. Duplicate OIDs resolve once; path-level
+  // files still map back through the shared source. Caller aborts propagate;
+  // protocol violations fail the run (transport failure, not per-file data).
+  const uniqueOids = [...new Set(candidates.map((candidate) => candidate.oid))];
   const totalBytes = candidates.reduce((sum, candidate) => sum + candidate.sizeBytes, 0);
   const result = await runProcess({
     cmd: ["git", "cat-file", "--batch"],
     cwd: repoRoot,
     timeoutMs: SAMPLED_TIMEOUT_MS,
-    maxStdoutBytes: totalBytes + oids.length * 128,
-    stdinData: `${oids.join("\n")}\n`,
+    maxStdoutBytes: totalBytes + uniqueOids.length * 128,
+    stdinData: `${uniqueOids.join("\n")}\n`,
     ...(signal === undefined ? {} : { signal }),
   });
-  const frames = parseBatchContent(result.stdout, oids);
+  const frames = parseBatchContent(result.stdout, uniqueOids);
   const sources = new Map<string, string>();
   for (const candidate of candidates) {
     const frame = frames.get(candidate.oid.toLowerCase());
@@ -257,37 +324,71 @@ export async function sampleMergeBase(input: SampleMergeBaseInput): Promise<Merg
     oidByPath.set(path, entry.oid);
   }
 
-  // One batch-check process for every candidate size; a missing object fails
-  // the run (a merge-base tree must resolve) while non-blob types are
-  // defensively skipped.
-  const sizes = await batchCheckBlobSizes(input.repoRoot, [...oidByPath.values()]);
-  let sizeExcluded = 0;
+  // Rank-first bounded sizing: eligible paths rank before any size lookup,
+  // so enumeration order never affects the sample. Sizes resolve in rank
+  // order through successive bounded batches; the next batch issues only
+  // while the frozen caps are still unfilled, and oversized entries are
+  // skipped in place without disturbing rank order. Duplicate OIDs resolve
+  // once but select per path. Stopping early is exact: a full file count, or
+  // a full byte budget that not even a 1-byte file could fit, leaves nothing
+  // further selectable.
+  const rankedPaths = rankPathsForSampling([...oidByPath.keys()]);
   const sized: MergeBaseCandidate[] = [];
-  for (const [path, oid] of oidByPath) {
-    const size = sizes.get(oid);
-    if (size === undefined || size.type === "missing") {
-      throw gitFailed(
-        `merge-base object for "${path}" is missing; fetch sufficient history locally (no fetch is performed automatically)`,
-      );
+  const sizeByOid = new Map<string, BatchCheckEntry>();
+  let sizeExcluded = 0;
+  let sizeBatches = 0;
+  let selected = selectSampledFiles(sized);
+  let selectedBytes = 0;
+  let cursor = 0;
+  while (cursor < rankedPaths.length) {
+    input.signal?.throwIfAborted();
+    if (selected.length >= MAX_SAMPLED_FILES || selectedBytes >= MAX_SAMPLED_TOTAL_BYTES) break;
+    const window: string[] = [];
+    const needed: string[] = [];
+    const neededSet = new Set<string>();
+    for (let index = cursor; index < rankedPaths.length && needed.length < SAMPLING_SIZE_BATCH_OIDS; index += 1) {
+      const path = rankedPaths[index];
+      if (path === undefined) break;
+      window.push(path);
+      const oid = oidByPath.get(path);
+      if (oid === undefined) continue;
+      const key = oid.toLowerCase();
+      if (!sizeByOid.has(key) && !neededSet.has(key)) {
+        neededSet.add(key);
+        needed.push(oid);
+      }
     }
-    if (size.type !== "blob" || size.size <= 0 || size.size > MAX_SAMPLED_FILE_BYTES) {
-      sizeExcluded += 1;
-      continue;
+    cursor += window.length;
+    if (needed.length > 0) {
+      const resolved = await checkMergeBaseSizes(input.repoRoot, needed, input.signal);
+      sizeBatches += 1;
+      for (const [oid, entry] of resolved) sizeByOid.set(oid, entry);
     }
-    sized.push({ path, oid, sizeBytes: size.size });
+    for (const path of window) {
+      const oid = oidByPath.get(path);
+      if (oid === undefined) {
+        throw new ReviewerError({ code: "INTERNAL", message: `sampleMergeBase has no OID for ranked path "${path}"` });
+      }
+      const entry = sizeByOid.get(oid.toLowerCase());
+      if (entry === undefined) {
+        throw new ReviewerError({ code: "INTERNAL", message: `sampleMergeBase has no size for ranked path "${path}"` });
+      }
+      // A missing object fails the run (a merge-base tree must resolve)
+      // while non-blob types are defensively skipped.
+      if (entry.type === "missing" || entry.size === null) {
+        throw gitFailed(
+          `merge-base object for "${path}" is missing; fetch sufficient history locally (no fetch is performed automatically)`,
+        );
+      }
+      if (entry.type !== "blob" || entry.size <= 0 || entry.size > MAX_SAMPLED_FILE_BYTES) {
+        sizeExcluded += 1;
+        continue;
+      }
+      sized.push({ path, oid, sizeBytes: entry.size });
+    }
+    selected = selectSampledFiles(sized);
+    selectedBytes = selected.reduce((sum, candidate) => sum + candidate.sizeBytes, 0);
   }
-
-  const rankedPaths = rankPathsForSampling(sized.map((entry) => entry.path));
-  const rankIndex = new Map<string, number>();
-  rankedPaths.forEach((path, position) => {
-    rankIndex.set(path, position);
-  });
-  const ordered = [...sized].sort((a, b) => {
-    const left = rankIndex.get(a.path) ?? Number.MAX_SAFE_INTEGER;
-    const right = rankIndex.get(b.path) ?? Number.MAX_SAFE_INTEGER;
-    return left - right;
-  });
-  const selected = selectSampledFiles(ordered);
 
   let contentSkipped = 0;
   const files: SampledSourceFile[] = [];
@@ -318,6 +419,6 @@ export async function sampleMergeBase(input: SampleMergeBaseInput): Promise<Merg
 
   return {
     files,
-    stats: { listedBlobs, touchedExcluded, ineligibleExcluded, sizeExcluded, contentSkipped },
+    stats: { listedBlobs, touchedExcluded, ineligibleExcluded, sizeExcluded, contentSkipped, sizeBatches },
   };
 }
