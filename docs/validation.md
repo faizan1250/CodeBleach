@@ -4,8 +4,9 @@ Model findings are verified against the PR diff and exact Git snapshots before
 they can be accepted. The engine (`src/validate/`) makes no `LlmProvider`
 calls; `ValidatedFinding.llmVerdict` stays absent. Decisions: ADR 0028
 (decision matrix), ADR 0029 (result contract, artifact v2), ADR 0030 (P5-10
-hardening), ADRs 0040–0042 (Phase 6 advisory/merge/handoff/API integration,
-planning-only). Plan: `implementation-phase5.md` + `implementation-phase6.md`
+hardening), ADRs 0040–0042 (Phase 6 advisory/merge/handoff/API integration
+contracts; as-built record in `implementation-phase6.md` §22, hardening in
+ADR 0044). Plan: `implementation-phase5.md` + `implementation-phase6.md`
 §§4–13 (normative; not duplicated here).
 
 Limitation on record: deterministic validation proves a finding is
@@ -178,7 +179,7 @@ still fails `NOT_IMPLEMENTED` (no GitHub calls). `--no-llm`: review,
 validation, and publish are skipped with explicit reasons (offline preview).
 Demo uses its own canned engine and never touches git or the network.
 
-## Inferred conventions (Phase 6, P6-00 contracts locked)
+## Inferred conventions (Phase 6, implemented behind `--convention-advisory`, default off; eval gate not passed)
 
 Inferred conventions are advisory review input only — never validation
 evidence. Validation checks, codes, and statuses are unchanged by Phase 6

@@ -49,6 +49,12 @@ ends at the Phase 7 publisher stub with `NOT_IMPLEMENTED` (no GitHub calls).
 records review/validation as skipped and exits 0. Validation verifies
 provenance and support; it does not prove a finding is semantically correct.
 
+Experimental: `review --base <sha> --head <sha> --convention-advisory`
+(default off) adds a bounded inferred-convention advisory pass (separate
+model requests over repository code; see `implementation-phase6.md`).
+Demo and `--no-llm` runs ignore the flag. The labeled usefulness gate has
+not passed yet, so routine use is not recommended.
+
 ## Demo (offline, no network or secrets)
 
 ```bash
@@ -90,6 +96,7 @@ manual-only, Not-ZDR) runs the same shape against the live model; see
 - Phase 1 plan: `implementation.md`
 - Phase 4 plan: `implementation-phase4.md`
 - Phase 5 plan: `implementation-phase5.md`
+- Phase 6 plan + as-built record: `implementation-phase6.md`
 - Validation (deterministic checks, codes, `run.json` v2): `docs/validation.md`
 - Decisions: `docs/adr/` (Phase 4 freeze: `0020-phase4-freeze.md`; Phase 5 deterministic-only: `0028-phase5-deterministic-validation.md`, `0029-phase5-result-contract.md`, `0030-phase5-cli-docs-hardening.md`)
 
