@@ -109,7 +109,7 @@ Do not change:
 - `RunArtifact` or `RUN_ARTIFACT_SCHEMA_VERSION` (currently v2).
 - `ValidationSummary` fields or aggregate-only meaning.
 - The primary review prompt or primary prompt version/hash.
-- GitHub publisher behavior, Octokit integration, workflow files, or Phase 7 stub.
+- GitHub publisher behavior, Octokit integration, workflow files, or Phase 7 stub. Phase 7 remains a stub (`NOT_IMPLEMENTED`, no GitHub calls); advisory generation never implies publication — advisories are withheld from the publisher by default under a separate explicit opt-in (§4.3).
 - Provider choice, tool permissions, or network access policy.
 
 No DB, embeddings, vector database, persistent source index, model-based detector, training, feedback learning, auto-fix, additional language, or new dependency is part of Phase 6.
@@ -401,12 +401,18 @@ export interface PipelineDeps {
 
 export interface PipelineOptions {
   conventionAdvisoryEnabled?: boolean; // default false; driven only by CLI flag
+  // Separate explicit opt-in for publishing convention advisories.
+  // Generation never implies publication: advisories stay withheld unless
+  // this is true. Routine primary findings publish under the existing
+  // accepted-only contract regardless. Default false; not a CLI flag yet.
+  conventionAdvisoryPublishEnabled?: boolean;
 }
 ```
 
 The actual names may follow existing project style, but preserve these semantics:
 
 - `phase6` is constructed/injected only when `--convention-advisory` is enabled. Missing Phase 6 dependencies with the flag enabled is a preflight composition error; no partial run begins.
+- Advisory publish boundary (default off): without the explicit publish opt-in, the pipeline withholds advisories at publish time and emits a count-only diagnostic (`advisory publish withheld` with the withheld count); primaries publish alone. With the opt-in, accepted advisories publish alongside primaries. Every publishable still passes the accepted-only guard (`isAcceptedFinding`); advisory identity is classified by stamped `convention-advisory` provenance (`isConventionAdvisoryFinding`). The Phase 7 publisher stub itself is unchanged.
 - `advisoryProjector` must use the existing pinned base/head snapshot reader from the pipeline composition; it must never read the working tree or independently resolve a moving Git ref. The exact existing reader type is confirmed in P6-00 and reused rather than introducing a second snapshot abstraction.
 - The same concrete validator instance may implement both public and internal interfaces, but the public `ValidationEngine` interface is not widened.
 - Stage interfaces live in `src/core/contracts.ts`; only pipeline and CLI wire them. Do not introduce circular imports.
@@ -465,8 +471,10 @@ Initial bounds to lock in P6-00:
 | `MAX_SAMPLED_FILE_BYTES` | 131072 | Maximum bytes per blob |
 | `MAX_SAMPLED_TOTAL_BYTES` | 8388608 | Maximum sampled bytes |
 | `SAMPLING_POLICY_VERSION` | 2 | Bump when population, exclusion, eligibility, ordering, or caps change |
+| `SAMPLING_SIZE_BATCH_OIDS` | 200 | Maximum OIDs per `cat-file --batch-check` round-trip |
+| `SAMPLING_WINDOW_MAX_PATHS` | 2000 | Maximum ranked paths per sizing iteration (10x OID batch) |
 
-Rank canonical paths by `sha256("codebleach-phase6-base-sampling-v2\0" + canonicalPath)` ascending, then canonical path by code-unit order. Take the first paths that fit both caps. Enumeration order, OS, and process timing must not affect the sample. As implemented, sizing is rank-first: eligible paths rank before any size lookup, and blob sizes resolve in rank order through successive bounded `cat-file --batch-check` rounds of at most `SAMPLING_SIZE_BATCH_OIDS = 200` OIDs, stopping early once the file or byte budget is unfillable (ADR 0044).
+Rank canonical paths by `sha256("codebleach-phase6-base-sampling-v2\0" + canonicalPath)` ascending, then canonical path by code-unit order. Take the first paths that fit both caps. Enumeration order, OS, and process timing must not affect the sample. As implemented, sizing is rank-first: eligible paths rank before any size lookup, and blob sizes resolve in rank order through successive bounded `cat-file --batch-check` rounds of at most `SAMPLING_SIZE_BATCH_OIDS = 200` OIDs, stopping early once the file or byte budget is unfillable (ADR 0044). Each sizing iteration collects at most `SAMPLING_WINDOW_MAX_PATHS = 2000` ranked paths via `collectSizeWindow`; duplicate OIDs resolve once but select per path, and splitting a duplicate run across windows keeps rank order and the final sample — chunked windows select identically to one unbounded pass (tested), so the window bounds one round-trip without changing the sample.
 
 ### 5.4 Detector denominators
 
@@ -874,7 +882,7 @@ Existing review artifact metadata fields continue to represent the existing prim
 - Do not emit a per-finding conflict log.
 - Keep arrays bounded and de-duplicated; cap diagnostic code lists.
 
-Suggested non-validation diagnostics include sample empty/limit, projection skipped/budget-exceeded, detector skipped/failed, advisory skipped/failed, training gate denied, boundary rejected, conflict suppressed, advisory duplicate, and advisory cap overflow. These are orchestration diagnostics, not `VALIDATION_CHECK_CODES`.
+Suggested non-validation diagnostics include sample empty/limit, projection skipped/budget-exceeded, detector skipped/failed, advisory skipped/failed, training gate denied, boundary rejected, conflict suppressed, advisory duplicate, advisory publish withheld (count only), and advisory cap overflow. These are orchestration diagnostics, not `VALIDATION_CHECK_CODES`.
 
 ---
 
@@ -1070,6 +1078,9 @@ Each ticket is independently reviewable. Do not combine all Phase 6 work into on
 - At least 30 real-PR candidates must be emitted; fewer means insufficient evaluation, not a pass.
 - Useful precision must be at least 80%, with zero authority/severity violations.
 - Report per-run provider calls, input/output tokens, projection skips, and added median/p95 latency.
+- Measurement integrity is load-bearing, not advisory: every result's provenance (repo, repo URL, PR number/URL, pinned base/head SHAs) must match its corpus pin exactly, and the recorded merge-base is recomputed from the full-history checkout — stale SHAs or merge-bases fail closed.
+- `results/manifest.json` is the run index: it must list exactly the current run's result files with identical provenance; a missing or drifted manifest fails the gate, so stale files from an older run can never pass.
+- Advisory metrics are validated, never zero-filled: telemetry is parsed by exact `msg` match with finite-number field validation; each pass needs exactly one merge outcome (contradictory, duplicate, or missing outcomes fail); a skipped pass requires exactly one merge-skipped outcome with zero counts; missing or malformed telemetry fails the gate instead of reporting zero usage.
 - Evaluation failures block routine enablement; the default remains off.
 
 ---
@@ -1115,7 +1126,7 @@ Never rewrite ADRs 0039–0042. ADR 0043 records the internal handoff/pipeline s
 
 ## 19. Explicit non-goals and forbidden diffs
 
-Phase 6 does not include GitHub publishing changes, Phase 7 behavior, new languages, database/vector/embedding infrastructure, persistent convention cache, filename/test-layout detectors, LLM-based detectors, learning/feedback storage, autofix, repository execution, or new third-party dependencies.
+Phase 6 does not include GitHub publishing changes, Phase 7 behavior, new languages, database/vector/embedding infrastructure, persistent convention cache, filename/test-layout detectors, LLM-based detectors, learning/feedback storage, autofix, repository execution, or new third-party dependencies. The advisory publish opt-in (§4.3) withholds by default and does not change the Phase 7 stub: expected `src/github/` and workflow diffs remain empty.
 
 The detailed authority, contract, and persistence boundaries are defined in §§1, 4, 10, and 13. In particular, do not change the primary prompt, public `ValidationEngine.validate()`, `.reviewer.yml`, `ValidatedFinding`, validation check codes, artifact schema v2, or primary dedupe semantics. Expected `src/github/` and workflow diffs are empty.
 
@@ -1275,6 +1286,17 @@ called out and decided in ADR 0044.
   `manifest.json` is consumed as the run index (missing/drifted
   manifests fail closed); a skipped pass requires exactly one
   merge-skipped outcome, otherwise telemetry is missing and fails.
+- **Closure 02 — sampler window, publish boundary, metrics validation**
+  (this branch, docs sync with code): `SAMPLING_WINDOW_MAX_PATHS = 2000`
+  bounds each sizing iteration's ranked paths (10x `SAMPLING_SIZE_BATCH_OIDS`)
+  so OID duplication cannot grow one round-trip; chunked windows select
+  identically to one unbounded pass (§5.3). Advisory publish boundary is
+  default-off (`conventionAdvisoryPublishEnabled`, pipeline-level, not a CLI
+  flag): generation never implies publication, withheld advisories emit a
+  count-only diagnostic, the Phase 7 publisher stub is unchanged (§§1.4,
+  4.3, 13, 19). Metrics validation is finite-number fields, exactly one
+  merge outcome per pass, and no silent zeros (§16.5, `eval-metrics.ts` /
+  `gate.ts`; latency/token columns aggregate observed runs only).
 
 ### Hardening A–D (on this branch, after P6-05)
 
@@ -1289,8 +1311,9 @@ called out and decided in ADR 0044.
   gate counts emitted records, never labels; missing/malformed telemetry
   fails the gate; labels carrying category/severity/ruleId are rejected.
 - **C — rank-first bounded sizing**: sizes resolve in rank order through
-  successive ≤200-OID batches with early stop; enumeration order never
-  affects the sample.
+  successive ≤200-OID batches with early stop, each iteration capped at
+  2000 ranked paths (`SAMPLING_WINDOW_MAX_PATHS`); enumeration order never
+  affects the sample and chunked windows select identically.
 - **D — per-helper wrapper denominators + scope-aware calls**: each
   (helper, symbol) group carries its own importing-file denominator
   (importers count even without calls); bare-identifier calls resolve

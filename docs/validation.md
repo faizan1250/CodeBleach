@@ -203,4 +203,8 @@ after run; `ValidatedFinding` and `run.json` v2 unchanged — ADR 0041).
 Conflict/advisory diagnostics are transient-only (orchestration return +
 bounded logger aggregates; no `run.json` per-finding conflict records).
 Advisory count-cap overflow is an orchestration merge diagnostic,
-never a check code.
+never a check code. Advisory publish withholding is likewise pipeline-level
+and post-validation: without the separate explicit publish opt-in (default
+off), accepted advisories are withheld from the publisher with a count-only
+logger diagnostic; validation statuses, `run.json` v2 persistence, and the
+transient-only diagnostics rule above are unchanged.

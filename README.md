@@ -53,7 +53,10 @@ Experimental: `review --base <sha> --head <sha> --convention-advisory`
 (default off) adds a bounded inferred-convention advisory pass (separate
 model requests over repository code; see `implementation-phase6.md`).
 Demo and `--no-llm` runs ignore the flag. The labeled usefulness gate has
-not passed yet, so routine use is not recommended.
+not passed yet, so routine use is not recommended. Advisory generation
+never implies publication: advisories are withheld from the publisher by
+default (count-only diagnostic); publication needs a separate explicit
+pipeline opt-in, and the Phase 7 publisher is still a stub.
 
 ## Demo (offline, no network or secrets)
 
