@@ -18,6 +18,10 @@ import { evaluateGate, type EmittedAdvisoryCandidate, type LabeledAdvisoryCandid
 
 const LABELS = ["useful", "technically-correct-but-not-actionable", "incorrect/unsupported"] as const;
 
+const METRICS_STATUSES = ["completed", "skipped", "missing"] as const;
+
+type MetricsStatus = (typeof METRICS_STATUSES)[number];
+
 // Bounded excerpts in reasons: full evidence lives in the result files.
 const MAX_REASON_ITEMS = 5;
 const MAX_DETAIL_CHARS = 120;
@@ -92,7 +96,7 @@ interface HarnessResult {
   prUrl: string;
   error: string | null;
   advisory: {
-    metricsStatus: string;
+    metricsStatus: MetricsStatus;
     metricsDetail: string | null;
     ms: number | null;
     batches: number | null;
@@ -107,7 +111,7 @@ function numericField(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function parseHarnessResult(slug: string, raw: unknown): HarnessResult {
+export function parseHarnessResult(slug: string, raw: unknown): HarnessResult {
   if (!isRecord(raw)) throw new Error(`result ${slug}.json must hold a JSON object`);
   if (!isRecord(raw.entry) || typeof raw.entry.prUrl !== "string" || raw.entry.prUrl.length === 0) {
     throw new Error(`result ${slug}.json has no entry.prUrl string`);
@@ -122,8 +126,11 @@ function parseHarnessResult(slug: string, raw: unknown): HarnessResult {
   const primaryMs = isRecord(raw.primaryOnly) ? numericField(raw.primaryOnly.ms) : null;
   if (!isRecord(raw.advisory)) throw new Error(`result ${slug}.json completed without an advisory record`);
   const advisory = raw.advisory;
-  if (typeof advisory.metricsStatus !== "string") {
-    throw new Error(`result ${slug}.json advisory record has no metricsStatus`);
+  if (
+    typeof advisory.metricsStatus !== "string" ||
+    !(METRICS_STATUSES as readonly string[]).includes(advisory.metricsStatus)
+  ) {
+    throw new Error(`result ${slug}.json advisory record has an unknown metricsStatus`);
   }
   if (advisory.metricsDetail !== null && typeof advisory.metricsDetail !== "string") {
     throw new Error(`result ${slug}.json advisory record has a non-string metricsDetail`);
@@ -153,7 +160,7 @@ function parseHarnessResult(slug: string, raw: unknown): HarnessResult {
     prUrl,
     error: null,
     advisory: {
-      metricsStatus: advisory.metricsStatus as string,
+      metricsStatus: advisory.metricsStatus as MetricsStatus,
       metricsDetail: (advisory.metricsDetail as string | null) ?? null,
       ms: numericField(advisory.ms),
       batches: numericField(advisory.batches),
@@ -219,9 +226,7 @@ function latencyReport(inputs: LatencyInput[]): {
   };
 }
 
-async function loadGateInputs(
-  resultsDir: string,
-): Promise<{
+async function loadGateInputs(resultsDir: string): Promise<{
   emitted: EmittedAdvisoryCandidate[];
   knownPrUrls: string[];
   healthReasons: string[];

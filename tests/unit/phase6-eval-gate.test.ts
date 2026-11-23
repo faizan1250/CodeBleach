@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { parseHarnessResult } from "../live/phase6-eval/gate.ts";
 import {
   evaluateGate,
   MIN_EVAL_CANDIDATES,
@@ -170,5 +171,16 @@ describe("phase6 eval gate", () => {
     const second = evaluateGate({ labels: [...labels].reverse(), emitted: [...emittedList].reverse() });
     expect(first.missing).toEqual(second.missing);
     expect(first.reasons).toEqual(second.reasons);
+  });
+
+  test("rejects unknown metricsStatus values", () => {
+    const base = { entry: { prUrl: PR }, error: null, primaryOnly: null, advisoryFindings: [] };
+    for (const status of ["completed", "skipped", "missing"] as const) {
+      const parsed = parseHarnessResult("slug", { ...base, advisory: { metricsStatus: status, metricsDetail: null } });
+      expect(parsed.advisory?.metricsStatus).toBe(status);
+    }
+    expect(() =>
+      parseHarnessResult("slug", { ...base, advisory: { metricsStatus: "partial", metricsDetail: null } }),
+    ).toThrow(/unknown metricsStatus/);
   });
 });

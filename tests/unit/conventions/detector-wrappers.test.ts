@@ -355,6 +355,37 @@ describe("common-wrappers detector", () => {
     });
   });
 
+  test("for-in let shadows, bare targets still resolve", async () => {
+    const fixtures: SampleFixture[] = [{ path: "src/lib/wrap.ts", language: "typescript", source: HELPER }];
+    for (let index = 0; index < 5; index += 1) {
+      fixtures.push({
+        path: `src/pages/s${index}.ts`,
+        language: "typescript",
+        source: `// forin-shadow-${index}\nimport { wrap } from "../lib/wrap";\nconst obj = {};\nfor (let wrap in obj) {\n  wrap(() => 1);\n}\n`,
+      });
+    }
+    for (let index = 0; index < 5; index += 1) {
+      fixtures.push({
+        path: `src/pages/b${index}.ts`,
+        language: "typescript",
+        source: `// forin-bare-${index}\nimport { wrap } from "../lib/wrap";\nconst obj = {};\nfor (wrap in obj) {\n  wrap(() => 1);\n}\n`,
+      });
+    }
+    await withParsedSamples(fixtures, (files) => {
+      const candidates = detectCommonWrappers(files);
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0]?.matchingFiles).toBe(5);
+      expect(candidates[0]?.eligibleFiles).toBe(10);
+      expect(candidates[0]?.evidence.map((entry) => entry.file).sort()).toEqual([
+        "src/pages/b0.ts",
+        "src/pages/b1.ts",
+        "src/pages/b2.ts",
+        "src/pages/b3.ts",
+        "src/pages/b4.ts",
+      ]);
+    });
+  });
+
   test("is deterministic across input orders", async () => {
     const fixtures = [
       ...importerFixtures(5),
