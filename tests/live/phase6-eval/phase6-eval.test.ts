@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { API_KEY_ENV, TRAINING_OPT_IN_ENV } from "../../../src/llm/constants.ts";
+import { runProcess, type RunProcessResult } from "../../../src/utils/spawn.ts";
+import { collectAdvisoryMetrics, isAdvisoryProvenance, type AdvisoryMetricsStatus } from "./eval-metrics.ts";
 import { git } from "../../helpers/git-repo.ts";
 import corpus from "./corpus.json";
 
@@ -11,9 +13,11 @@ import corpus from "./corpus.json";
 // procedure are documented in tests/live/phase6-eval/README.md.
 //
 // For every corpus PR the harness runs the production CLI twice on the same
-// pinned merge-base/head pair (primary-only, then --convention-advisory) and
-// records per-PR results plus bounded log-derived advisory usage. Labeling
-// and the 30-candidate/80%-useful gate happen offline afterwards via gate.ts.
+// pinned merge-base/head pair at --log-level info (info carries the advisory
+// metrics events; warn would suppress them) and records per-PR results plus
+// structured advisory usage parsed from stderr JSON events, never substring
+// matching and never silent zeros. Labeling and the
+// emitted-validated gate happen offline afterwards via gate.ts.
 const EVAL = process.env.CODEBLEACH_PHASE6_EVAL === "1";
 const REPOS_ROOT = process.env.CODEBLEACH_PHASE6_EVAL_REPOS ?? join(process.cwd(), "..", "phase6-eval-repos");
 const OUT_ROOT = process.env.CODEBLEACH_PHASE6_EVAL_OUT ?? join(process.cwd(), "tests/live/phase6-eval/results");
@@ -43,7 +47,14 @@ interface EvalPrResult {
   slug: string;
   entry: CorpusEntry;
   mergeBase: string | null;
-  primaryOnly: { ms: number; status: string; validatedTotal: number; accepted: number } | null;
+  primaryOnly: {
+    ms: number;
+    status: string;
+    validatedTotal: number;
+    accepted: number;
+    promptVersion: string | null;
+    promptHash: string | null;
+  } | null;
   advisory: {
     ms: number;
     status: string;
@@ -55,6 +66,15 @@ interface EvalPrResult {
     projectedUnits: number;
     skippedUnits: number;
     retained: number;
+    // completed: pass + merge telemetry observed. skipped: the pass emitted
+    // its skipped event (genuine zero, not missing data). missing: neither
+    // usable telemetry nor a skipped event; see metricsDetail, never silent
+    // zeros.
+    metricsStatus: AdvisoryMetricsStatus;
+    metricsDetail: string | null;
+    diagnosticCodes: string[];
+    promptVersion: string | null;
+    promptHash: string | null;
   } | null;
   advisoryFindings: Array<{
     findingId: string;
@@ -108,6 +128,10 @@ async function runCli(
   const slug = slugFor(entry);
   const outDir = join(OUT_ROOT, advisory ? `${slug}-advisory` : `${slug}-primary`);
   await mkdir(outDir, { recursive: true });
+  // Info level is load-bearing: the advisory metrics events are info logs,
+  // so warn would suppress them and every token/projection column would read
+  // zero. Metrics parsing below treats a missing event as missing telemetry,
+  // never as zero usage.
   const args = [
     "src/cli/index.ts",
     "review",
@@ -121,59 +145,41 @@ async function runCli(
     outDir,
     "--dry-run",
     "--log-level",
-    "warn",
+    "info",
     ...(advisory ? ["--convention-advisory"] : []),
   ];
   const started = Date.now();
-  const child = Bun.spawn(["bun", ...args], {
-    cwd: process.cwd(),
-    env: { ...process.env },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ]);
-  const ms = Date.now() - started;
-  if (exitCode !== 0) {
-    throw new Error(`cli exit ${exitCode} for ${slug} (${advisory ? "advisory" : "primary"}): ${stdout.slice(-500)}`);
-  }
-  return { ms, stderr };
-}
-
-function tryParseNumbers(line: string): Record<string, number> | null {
+  // Bounded per-run execution: runProcess kills the child on RUN_TIMEOUT_MS
+  // (timeout behavior is unit-tested in tests/unit/spawn.test.ts), so a hung
+  // provider call can never stall the sweep indefinitely.
+  let result: RunProcessResult;
   try {
-    const parsed = JSON.parse(line) as Record<string, unknown>;
-    const numbers: Record<string, number> = {};
-    for (const [key, value] of Object.entries(parsed)) {
-      if (typeof value === "number") numbers[key] = value;
-    }
-    return numbers;
-  } catch {
-    return null;
+    result = await runProcess({ cmd: ["bun", ...args], cwd: process.cwd(), timeoutMs: RUN_TIMEOUT_MS });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`cli failed for ${slug} (${advisory ? "advisory" : "primary"}): ${detail.slice(0, 500)}`);
   }
-}
-
-function logField(stderr: string, message: string): Record<string, number> {
-  for (const line of stderr.split("\n")) {
-    if (!line.includes(`"msg":"${message}"`)) continue;
-    const numbers = tryParseNumbers(line);
-    if (numbers !== null) return numbers;
-  }
-  return {};
+  return { ms: Date.now() - started, stderr: new TextDecoder().decode(result.stderr) };
 }
 
 async function readArtifact(outDir: string): Promise<{
   validated: Array<{ finding: Record<string, unknown>; status: string }>;
   status: string;
+  promptVersion: string | null;
+  promptHash: string | null;
 }> {
   const raw = JSON.parse(await readFile(join(outDir, "run.json"), "utf8")) as {
     validated?: Array<{ finding: Record<string, unknown>; status: string }> | undefined;
     status?: string | undefined;
+    reviewPromptVersion?: unknown;
+    reviewPromptHash?: unknown;
   };
-  return { validated: raw.validated ?? [], status: raw.status ?? "unknown" };
+  return {
+    validated: raw.validated ?? [],
+    status: raw.status ?? "unknown",
+    promptVersion: typeof raw.reviewPromptVersion === "string" ? raw.reviewPromptVersion : null,
+    promptHash: typeof raw.reviewPromptHash === "string" ? raw.reviewPromptHash : null,
+  };
 }
 
 async function evaluatePr(entry: CorpusEntry): Promise<EvalPrResult> {
@@ -198,10 +204,12 @@ async function evaluatePr(entry: CorpusEntry): Promise<EvalPrResult> {
       status: primaryArtifact.status,
       validatedTotal: primaryArtifact.validated.length,
       accepted: primaryArtifact.validated.filter((item) => item.status === "accepted").length,
+      promptVersion: primaryArtifact.promptVersion,
+      promptHash: primaryArtifact.promptHash,
     };
     const advisoryRun = await runCli(entry, mergeBase, true);
     const advisoryArtifact = await readArtifact(join(OUT_ROOT, `${slug}-advisory`));
-    const passFields = logField(advisoryRun.stderr, "advisory pass completed");
+    const metrics = collectAdvisoryMetrics(advisoryRun.stderr);
     for (const item of advisoryArtifact.validated) {
       const finding = item.finding as {
         origin?: { pass?: string } | undefined;
@@ -213,7 +221,9 @@ async function evaluatePr(entry: CorpusEntry): Promise<EvalPrResult> {
         ruleId?: string | undefined;
         title?: string | undefined;
       };
-      if (finding.origin?.pass !== "convention-advisory") continue;
+      // Provenance-identified extraction: primaries from the paired advisory
+      // run never enter the gate, only convention-advisory findings do.
+      if (!isAdvisoryProvenance(finding.origin)) continue;
       result.advisoryFindings.push({
         findingId: String(finding.id ?? ""),
         file: String(finding.file ?? ""),
@@ -229,12 +239,17 @@ async function evaluatePr(entry: CorpusEntry): Promise<EvalPrResult> {
       status: advisoryArtifact.status,
       validatedTotal: advisoryArtifact.validated.length,
       accepted: advisoryArtifact.validated.filter((item) => item.status === "accepted").length,
-      batches: passFields.batches ?? 0,
-      inputTokens: passFields.inputTokens ?? 0,
-      outputTokens: passFields.outputTokens ?? 0,
-      projectedUnits: passFields.projectedUnits ?? 0,
-      skippedUnits: passFields.skippedUnits ?? 0,
+      batches: metrics.batches,
+      inputTokens: metrics.inputTokens,
+      outputTokens: metrics.outputTokens,
+      projectedUnits: metrics.projectedUnits,
+      skippedUnits: metrics.skippedUnits,
       retained: result.advisoryFindings.length,
+      metricsStatus: metrics.status,
+      metricsDetail: metrics.detail,
+      diagnosticCodes: metrics.codes,
+      promptVersion: advisoryArtifact.promptVersion,
+      promptHash: advisoryArtifact.promptHash,
     };
   } catch (error) {
     result.error = error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500);
@@ -262,6 +277,9 @@ describe.skipIf(!EVAL)("phase6 live usefulness evaluation (opt-in, Not-ZDR)", ()
             primaryMs: result.primaryOnly?.ms ?? null,
             advisoryMs: result.advisory?.ms ?? null,
             advisoryCandidates: result.advisoryFindings.length,
+            metricsStatus: result.advisory?.metricsStatus ?? null,
+            metricsDetail: result.advisory?.metricsDetail ?? null,
+            diagnosticCodes: result.advisory?.diagnosticCodes ?? null,
           }),
         );
       }

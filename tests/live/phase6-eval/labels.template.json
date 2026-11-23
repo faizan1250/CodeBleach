@@ -3,8 +3,6 @@
     "prUrl": "https://github.com/example/repo/pull/1",
     "findingId": "example-finding-id",
     "label": "useful",
-    "category": "convention",
-    "severity": "low",
     "notes": "optional adjudication note"
   }
 ]

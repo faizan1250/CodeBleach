@@ -41,12 +41,23 @@ bun test tests/live/phase6-eval/phase6-eval.test.ts
 ```
 
 Each entry runs the production CLI twice on the same pinned merge-base/head
-pair (primary-only, then `--convention-advisory`, both `--dry-run`) and
-writes `results/<slug>.json` plus `results/manifest.json`. A per-PR failure
-is recorded in its result file and never aborts the sweep; re-run with
-`_ONLY` after fixing checkouts. Advisory usage (batches ≈ provider calls,
-input/output tokens, projection skips) is parsed from bounded stderr log
-aggregates, never from prompts or source.
+pair (primary-only, then `--convention-advisory`) at `--log-level info` and
+writes `results/<slug>.json` plus `results/manifest.json`. Info level is
+load-bearing: the advisory metrics events are info logs, so warn would
+suppress them and every token/projection column would read zero. A per-PR
+failure is recorded in its result file and never aborts the sweep; re-run
+with `_ONLY` after fixing checkouts. Advisory usage (batches, input/output
+tokens, projected/skipped units, diagnostic codes) is parsed from stderr
+JSON events with exact `msg` matching, never substring matching and never
+silent zeros: a missing or malformed metrics event is recorded as
+`metricsStatus: "missing"` with a bounded detail, and early-exit paths emit
+their own `advisory pass skipped` / `advisory merge skipped` events so a
+genuine zero is distinguishable from lost telemetry. Per-run execution is
+bounded by `RUN_TIMEOUT_MS` (a hung provider call kills the child instead of
+stalling the sweep). The sweep also records the primary prompt version/hash
+for both runs so reviewers can confirm the pair compared identical prompts.
+Training gate and redaction hold throughout: metrics carry numbers and
+static codes only, never prompts, source, evidence, or secrets.
 
 ## 3. Label
 
@@ -58,8 +69,11 @@ file), two reviewers independently assign one label:
 - `incorrect/unsupported` — wrong, or not backed by the cited evidence.
 
 Resolve disagreements through an adjudication pass and record the final label
-per candidate in `labels.json` (shape in `labels.template.json`). Seeded
-fixtures never count: only real-PR candidates enter the gate.
+per candidate in `labels.json` (shape in `labels.template.json`): PR URL,
+finding ID, adjudicated label, optional notes. Category, severity, and ruleId
+are NOT labels: the gate derives authority from the emitted records, and
+labels files carrying those fields are rejected. Seeded fixtures never
+count: only real-PR emitted candidates enter the gate.
 
 ## 4. Apply the gate
 
@@ -67,12 +81,17 @@ fixtures never count: only real-PR candidates enter the gate.
 bun tests/live/phase6-eval/gate.ts labels.json tests/live/phase6-eval/results
 ```
 
-Pass requires all of plan §16.5: at least 30 labeled real-PR candidates, at
-least 80% `useful` precision, zero authority violations (category must be
-`convention`, severity exactly `low`, no `ruleId`). The report also prints
-per-run provider calls, input/output tokens, projection skips, and added
-median/p95 wall-clock latency. Exit 0 means pass; exit 1 prints reasons and
-keeps the flag experimental.
+Pass requires all of plan §16.5 plus measurement integrity: every corpus PR
+has a successful result; every emitted real-PR candidate (exactly 30 or more,
+counted from emitted records, never from labels) carries exactly one label;
+no duplicate, unmatched (label for a never-emitted finding), unknown-PR, or
+duplicate-emitted identities; at least 80% `useful` precision; zero authority
+violations (emitted category must be `convention`, severity exactly `low`, no
+`ruleId`); and advisory metrics present for every included run (missing or
+malformed telemetry fails instead of reporting zero usage). The report also
+prints per-run provider calls, input/output tokens, projection skips, and
+added median/p95 wall-clock latency. Exit 0 means pass; exit 1 prints reasons
+and keeps the flag experimental.
 
 ## 5. If the gate fails
 

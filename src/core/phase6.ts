@@ -124,6 +124,15 @@ export async function runPhase6AdvisoryPass(input: {
   const signal = input.signal;
   const fail = (code: string): AdvisoryPassResult => {
     pushCode(diagnostics.codes, code);
+    // Machine-readable early-exit outcome: the harness runs at info level, so
+    // this event (numbers and static codes only, never prompts or evidence)
+    // distinguishes a genuine skipped pass from lost log telemetry.
+    input.logger.info("advisory pass skipped", {
+      projectedUnits: diagnostics.projectedUnits,
+      skippedUnits: diagnostics.skippedUnits,
+      batches: diagnostics.batches,
+      codes: diagnostics.codes,
+    });
     return { findings: [], units: [], diagnostics };
   };
   // Pre-aborted signals cancel before any convention, projection, or provider work.
@@ -240,6 +249,13 @@ export async function mergePhase6Advisory(input: {
   };
   if (input.gated.findings.length === 0) {
     pushCode(codes, "advisory_skipped_no_candidates");
+    // Machine-readable merge outcome for the harness: numbers and static
+    // codes only, never prompts, evidence, or secrets.
+    input.logger.info("advisory merge skipped", {
+      candidates: 0,
+      retained: 0,
+      codes,
+    });
     return { advisory: [], metadata: emptyMetadata, diagnostics: { codes } };
   }
   try {
