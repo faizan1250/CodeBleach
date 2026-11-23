@@ -34,6 +34,13 @@ const SAMPLED_TIMEOUT_MS = 30_000;
 // one unbounded request.
 export const SAMPLING_SIZE_BATCH_OIDS = 200;
 
+// Temporary rank-order path window per sizing iteration. Duplicate OIDs let
+// one OID batch span many paths, so the path window needs its own fixed cap:
+// 10x the OID batch absorbs moderate duplication in one round-trip while
+// bounding memory. Rank order, duplicate-OID dedup, and early stopping are
+// unchanged; frozen selection caps are untouched.
+export const SAMPLING_WINDOW_MAX_PATHS = 2000;
+
 // Per-OID stdout headroom for one `--batch-check` reply line (`<40-hex> SP
 // <type> SP <size> LF` is ~60 bytes; 128 mirrors the snapshot batch framing
 // slack and keeps one corrupt reply from buffering unbounded metadata).
@@ -187,6 +194,38 @@ export function batchCheckStdoutCap(oidCount: number): number {
   return oidCount * SAMPLING_BATCH_CHECK_LINE_BYTES;
 }
 
+// Next bounded sizing window over rank order. Collects ranked paths from
+// cursor until the OID batch fills or the path window cap hits, deduping OIDs
+// already resolved or already needed. Pure and deterministic: rank order kept,
+// duplicate OIDs resolve once, early-stop caps enforced by the caller.
+export function collectSizeWindow(
+  rankedPaths: readonly string[],
+  cursor: number,
+  oidByPath: ReadonlyMap<string, string>,
+  sizeByOid: ReadonlyMap<string, BatchCheckEntry>,
+): { window: string[]; needed: string[] } {
+  const window: string[] = [];
+  const needed: string[] = [];
+  const neededSet = new Set<string>();
+  for (
+    let index = cursor;
+    index < rankedPaths.length && needed.length < SAMPLING_SIZE_BATCH_OIDS && window.length < SAMPLING_WINDOW_MAX_PATHS;
+    index += 1
+  ) {
+    const path = rankedPaths[index];
+    if (path === undefined) break;
+    window.push(path);
+    const oid = oidByPath.get(path);
+    if (oid === undefined) continue;
+    const key = oid.toLowerCase();
+    if (!sizeByOid.has(key) && !neededSet.has(key)) {
+      neededSet.add(key);
+      needed.push(oid);
+    }
+  }
+  return { window, needed };
+}
+
 // Pure parse of one bounded `--batch-check` reply. Every requested OID must
 // appear exactly once; truncated lines, unknown OIDs, missing entries, and
 // trailing garbage are explicit transport failures, never partial results.
@@ -329,9 +368,12 @@ export async function sampleMergeBase(input: SampleMergeBaseInput): Promise<Merg
   // order through successive bounded batches; the next batch issues only
   // while the frozen caps are still unfilled, and oversized entries are
   // skipped in place without disturbing rank order. Duplicate OIDs resolve
-  // once but select per path. Stopping early is exact: a full file count, or
-  // a full byte budget that not even a 1-byte file could fit, leaves nothing
-  // further selectable.
+  // once but select per path. The path window itself is bounded
+  // (SAMPLING_WINDOW_MAX_PATHS) so OID duplication cannot grow it without
+  // limit; splitting a duplicate run across windows keeps rank order and the
+  // final sample. Stopping early is exact: a full file count, or a full byte
+  // budget that not even a 1-byte file could fit, leaves nothing further
+  // selectable.
   const rankedPaths = rankPathsForSampling([...oidByPath.keys()]);
   const sized: MergeBaseCandidate[] = [];
   const sizeByOid = new Map<string, BatchCheckEntry>();
@@ -343,21 +385,7 @@ export async function sampleMergeBase(input: SampleMergeBaseInput): Promise<Merg
   while (cursor < rankedPaths.length) {
     input.signal?.throwIfAborted();
     if (selected.length >= MAX_SAMPLED_FILES || selectedBytes >= MAX_SAMPLED_TOTAL_BYTES) break;
-    const window: string[] = [];
-    const needed: string[] = [];
-    const neededSet = new Set<string>();
-    for (let index = cursor; index < rankedPaths.length && needed.length < SAMPLING_SIZE_BATCH_OIDS; index += 1) {
-      const path = rankedPaths[index];
-      if (path === undefined) break;
-      window.push(path);
-      const oid = oidByPath.get(path);
-      if (oid === undefined) continue;
-      const key = oid.toLowerCase();
-      if (!sizeByOid.has(key) && !neededSet.has(key)) {
-        neededSet.add(key);
-        needed.push(oid);
-      }
-    }
+    const { window, needed } = collectSizeWindow(rankedPaths, cursor, oidByPath, sizeByOid);
     cursor += window.length;
     if (needed.length > 0) {
       const resolved = await checkMergeBaseSizes(input.repoRoot, needed, input.signal);

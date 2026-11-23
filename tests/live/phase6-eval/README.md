@@ -78,12 +78,19 @@ count: only real-PR emitted candidates enter the gate.
 ## 4. Apply the gate
 
 ```sh
-bun tests/live/phase6-eval/gate.ts labels.json tests/live/phase6-eval/results
+bun tests/live/phase6-eval/gate.ts labels.json tests/live/phase6-eval/results [--repos-root ../phase6-eval-repos]
 ```
 
-Pass requires all of plan §16.5 plus measurement integrity: every corpus PR
-has a successful result; every emitted real-PR candidate (exactly 30 or more,
-counted from emitted records, never from labels) carries exactly one label;
+Pass requires all of plan §16.5 plus measurement integrity: the corpus pins at
+least 30 merged PRs across at least 5 repos with unique PR URLs; every corpus
+PR has a successful result whose provenance (repo, repo URL, PR number/URL,
+pinned base/head SHAs) matches its corpus pin exactly, with the recorded
+merge-base recomputed from the full-history checkout under `--repos-root`
+(missing checkouts or SHAs fail closed); `results/manifest.json` is the run
+index and must list exactly the current run's result files with identical
+provenance (a missing or drifted manifest fails the gate, so stale files from
+an older run can never pass); every emitted real-PR candidate (exactly 30 or
+more, counted from emitted records, never from labels) carries exactly one label;
 no duplicate, unmatched (label for a never-emitted finding), unknown-PR, or
 duplicate-emitted identities; at least 80% `useful` precision; zero authority
 violations (emitted category must be `convention`, severity exactly `low`, no

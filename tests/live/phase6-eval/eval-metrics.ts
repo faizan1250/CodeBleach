@@ -23,8 +23,9 @@ export const ADVISORY_FAIL_OPEN_WARNINGS: readonly string[] = [
 
 // completed: pass completed event plus a merge outcome (completed, skipped,
 // or fail-open warn) were all observed. skipped: the pass emitted its skipped
-// event before any provider work. missing: no usable telemetry (absent,
-// contradictory, or malformed events).
+// event plus exactly one merge-skipped outcome (a skipped pass yields no
+// findings, so any other merge outcome is contradictory). missing: no usable
+// telemetry (absent, contradictory, duplicated, or malformed events).
 export type AdvisoryMetricsStatus = "completed" | "skipped" | "missing";
 
 export interface AdvisoryStderrMetrics {
@@ -94,6 +95,15 @@ export function findLogEvent(events: readonly JsonEvent[], msg: string): JsonEve
     if (event.msg === msg) return event;
   }
   return null;
+}
+
+/** Exact-`msg` occurrence count; duplicates are contradictory telemetry. */
+export function countLogEvents(events: readonly JsonEvent[], msg: string): number {
+  let count = 0;
+  for (const event of events) {
+    if (event.msg === msg) count += 1;
+  }
+  return count;
 }
 
 /**
@@ -172,12 +182,50 @@ export function collectAdvisoryMetrics(stderr: string): AdvisoryStderrMetrics {
     }
   };
   if (skipped !== null) {
+    if (countLogEvents(events, ADVISORY_PASS_SKIPPED) > 1) {
+      return { ...zero, codes, detail: `duplicate ${ADVISORY_PASS_SKIPPED} events` };
+    }
     const failures: string[] = [];
     const numbers = takeNumbers(skipped, ["projectedUnits", "skippedUnits", "batches"], failures);
     if (numbers === null) {
       return { ...zero, codes, detail: `malformed ${ADVISORY_PASS_SKIPPED} event: ${truncate(failures.join(", "))}` };
     }
     absorbCodes(skipped);
+    // A skipped pass runs no provider work and yields no findings, so the
+    // merge must record exactly one skipped outcome. Merge-completed is
+    // unreachable with zero findings; anything else is contradictory,
+    // duplicated, or lost telemetry, never a genuine zero.
+    if (findLogEvent(events, ADVISORY_MERGE_COMPLETED) !== null) {
+      return {
+        ...zero,
+        codes,
+        detail: `contradictory advisory merge outcome after ${ADVISORY_PASS_SKIPPED}: merge completed observed`,
+      };
+    }
+    const mergeSkipped = findLogEvent(events, ADVISORY_MERGE_SKIPPED);
+    if (mergeSkipped === null) {
+      return { ...zero, codes, detail: `missing advisory merge outcome after ${ADVISORY_PASS_SKIPPED}` };
+    }
+    if (countLogEvents(events, ADVISORY_MERGE_SKIPPED) > 1) {
+      return { ...zero, codes, detail: `duplicate ${ADVISORY_MERGE_SKIPPED} events` };
+    }
+    const mergeFailures: string[] = [];
+    const mergeNumbers = takeNumbers(mergeSkipped, ["candidates", "retained"], mergeFailures);
+    if (mergeNumbers === null) {
+      return {
+        ...zero,
+        codes,
+        detail: `malformed ${ADVISORY_MERGE_SKIPPED} event: ${truncate(mergeFailures.join(", "))}`,
+      };
+    }
+    if ((mergeNumbers.candidates ?? 0) !== 0 || (mergeNumbers.retained ?? 0) !== 0) {
+      return {
+        ...zero,
+        codes,
+        detail: `contradictory advisory merge outcome after ${ADVISORY_PASS_SKIPPED}: skipped merge carries nonzero counts`,
+      };
+    }
+    absorbCodes(mergeSkipped);
     return {
       status: "skipped",
       batches: numbers.batches ?? 0,

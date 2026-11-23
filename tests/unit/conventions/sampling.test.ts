@@ -11,6 +11,7 @@ import {
 import {
   batchCheckStdoutCap,
   checkMergeBaseSizes,
+  collectSizeWindow,
   collectTouchedPaths,
   isCanonicalSamplePath,
   isSamplePathEligible,
@@ -19,11 +20,13 @@ import {
   rankPathsForSampling,
   sampleMergeBase,
   SAMPLING_SIZE_BATCH_OIDS,
+  SAMPLING_WINDOW_MAX_PATHS,
   selectSampledFiles,
 } from "../../../src/conventions/sampling.ts";
 import { ReviewerError } from "../../../src/core/errors.ts";
 import { runProcess } from "../../../src/utils/spawn.ts";
 import type { MergeBaseCandidate } from "../../../src/conventions/sampling.ts";
+import type { BatchCheckEntry } from "../../../src/context/snapshot.ts";
 import { commitIndex, git, makeRepo } from "../../helpers/git-repo.ts";
 
 function candidate(path: string, sizeBytes: number, oid = "0".repeat(40)): MergeBaseCandidate {
@@ -617,4 +620,54 @@ describe("rank-first batched sizing from git", () => {
       await repo.cleanup();
     }
   }, 30000);
+});
+
+describe("bounded rank-order path window", () => {
+  test("pins the window cap above the OID batch", () => {
+    expect(SAMPLING_WINDOW_MAX_PATHS).toBe(2000);
+    expect(SAMPLING_WINDOW_MAX_PATHS).toBeGreaterThan(SAMPLING_SIZE_BATCH_OIDS);
+  });
+
+  test("bounds a high-duplication run without losing rank order", () => {
+    const dupOid = "c".repeat(40);
+    const paths = [
+      ...Array.from({ length: 5000 }, (_, index) => `src/dup-${index}.ts`),
+      ...Array.from({ length: 10 }, (_, index) => `src/uniq-${index}.ts`),
+    ];
+    const ranked = rankPathsForSampling(paths);
+    const oidByPath = new Map<string, string>();
+    for (const path of ranked) {
+      if (path.startsWith("src/dup-")) oidByPath.set(path, dupOid);
+      else {
+        const index = Number(path.slice("src/uniq-".length, -".ts".length));
+        oidByPath.set(path, index.toString(16).padStart(40, "0"));
+      }
+    }
+    const first = collectSizeWindow(ranked, 0, oidByPath, new Map<string, BatchCheckEntry>());
+    expect(first.window.length).toBeLessThanOrEqual(SAMPLING_WINDOW_MAX_PATHS);
+    expect(first.needed.length).toBeLessThanOrEqual(SAMPLING_SIZE_BATCH_OIDS);
+    expect(first.window).toEqual(ranked.slice(0, first.window.length));
+  });
+
+  test("chunked windows select identically to one unbounded pass", () => {
+    const dupOid = "d".repeat(40);
+    const paths = Array.from({ length: 3000 }, (_, index) => `src/hd-${index}.ts`);
+    const ranked = rankPathsForSampling(paths);
+    const unbounded = selectSampledFiles(ranked.map((path) => ({ path, oid: dupOid, sizeBytes: 100 })));
+    const oidByPath = new Map<string, string>(ranked.map((path) => [path, dupOid]));
+    const sizeByOid = new Map<string, BatchCheckEntry>();
+    let cursor = 0;
+    const chunked: Array<{ path: string; oid: string; sizeBytes: number }> = [];
+    while (cursor < ranked.length) {
+      const { window, needed } = collectSizeWindow(ranked, cursor, oidByPath, sizeByOid);
+      expect(window.length).toBeLessThanOrEqual(SAMPLING_WINDOW_MAX_PATHS);
+      expect(needed.length).toBeLessThanOrEqual(SAMPLING_SIZE_BATCH_OIDS);
+      cursor += window.length;
+      for (const oid of needed) sizeByOid.set(oid.toLowerCase(), { oid: oid.toLowerCase(), type: "blob", size: 100 });
+      for (const path of window) chunked.push({ path, oid: dupOid, sizeBytes: 100 });
+    }
+    expect(cursor).toBe(ranked.length);
+    expect(selectSampledFiles(chunked)).toEqual(unbounded);
+    expect(unbounded).toHaveLength(MAX_SAMPLED_FILES);
+  });
 });

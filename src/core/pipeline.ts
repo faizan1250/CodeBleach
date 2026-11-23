@@ -2,7 +2,7 @@ import { loadConfig as defaultLoadConfig } from "../config/load.ts";
 import type { ResolvedConfig } from "../config/schema.ts";
 import { ReviewerError } from "./errors.ts";
 import type { ConfigSource, PipelineDeps, PipelineInput, RunSummary, StageName, StageResult } from "./contracts.ts";
-import { isAcceptedFinding } from "./contracts.ts";
+import { isAcceptedFinding, isConventionAdvisoryFinding } from "./contracts.ts";
 import { RUN_ARTIFACT_SCHEMA_VERSION, summarizeValidation, writeArtifact, type RunArtifact } from "./run-artifact.ts";
 import type { ValidationSummary } from "../types/index.ts";
 import { requireLlmPreflight } from "../llm/preflight.ts";
@@ -282,6 +282,17 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
       stages.push({ name: "publish", status: "skipped", ms: 0, reason: "dry-run" });
     } else {
       const accepted = validatedList.filter(isAcceptedFinding);
+      // Advisory publish boundary (default off): generation never implies
+      // publication. Without the explicit publish opt-in, advisories are
+      // withheld here with a count-only diagnostic; primaries publish alone.
+      const advisoryPublishEnabled = input.options?.conventionAdvisoryPublishEnabled === true;
+      const publishable = advisoryPublishEnabled
+        ? accepted
+        : accepted.filter((item) => !isConventionAdvisoryFinding(item));
+      const withheld = accepted.length - publishable.length;
+      if (withheld > 0) {
+        deps.logger.warn("advisory publish withheld", { withheld });
+      }
       const meta: PrMeta = input.pr ?? {
         owner: "unknown",
         repo: "unknown",
@@ -291,7 +302,7 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
       };
       publishResult = await runStage(
         "publish",
-        () => deps.publisher.publish(accepted, diffResult, meta),
+        () => deps.publisher.publish(publishable, diffResult, meta),
         (result) => result.published,
       );
     }
