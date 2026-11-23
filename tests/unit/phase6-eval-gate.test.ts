@@ -18,7 +18,9 @@ function many(count: number, label: LabeledAdvisoryCandidate["label"]): LabeledA
 
 describe("phase6 eval gate", () => {
   test("passes at thirty candidates and eighty percent useful", () => {
-    const result = evaluateGate({ labels: [...many(24, "useful"), ...many(6, "technically-correct-but-not-actionable")] });
+    const result = evaluateGate({
+      labels: [...many(24, "useful"), ...many(6, "technically-correct-but-not-actionable")],
+    });
     expect(result.passed).toBe(true);
     expect(result.totalCandidates).toBe(30);
     expect(result.usefulPrecision).toBe(0.8);
@@ -60,7 +62,11 @@ describe("phase6 eval gate", () => {
 
   test("counts only useful labels toward precision", () => {
     const result = evaluateGate({
-      labels: [...many(24, "useful"), ...many(3, "incorrect/unsupported"), ...many(3, "technically-correct-but-not-actionable")],
+      labels: [
+        ...many(24, "useful"),
+        ...many(3, "incorrect/unsupported"),
+        ...many(3, "technically-correct-but-not-actionable"),
+      ],
     });
     expect(result.totalCandidates).toBe(30);
     expect(result.usefulPrecision).toBe(0.8);

@@ -43,7 +43,7 @@ function argValue(name: string, fallback: string): string {
 }
 
 function headers(): Record<string, string> {
-  const token = process.env["GITHUB_TOKEN"];
+  const token = process.env.GITHUB_TOKEN;
   return {
     "User-Agent": "codebleach-phase6-eval",
     Accept: "application/vnd.github+json",

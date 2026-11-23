@@ -41,7 +41,17 @@ function diffFor(base: string, head: string, touched: string): DiffResult {
     baseSha: base,
     headSha: head,
     mergeBase: base,
-    files: [{ path: touched, oldPath: null, status: "modified", language: "typescript", hunks: [], commentableLines: [], symbols: [] }],
+    files: [
+      {
+        path: touched,
+        oldPath: null,
+        status: "modified",
+        language: "typescript",
+        hunks: [],
+        commentableLines: [],
+        symbols: [],
+      },
+    ],
   };
 }
 
@@ -51,7 +61,11 @@ describe("convention engine build", () => {
     try {
       const engine = new ConventionEngineImpl();
       const config = ConfigFileSchema.parse({});
-      const result = await engine.build({ repoDir: repo.dir, diff: diffFor(repo.base, repo.head, "src/mod-0.ts"), config });
+      const result = await engine.build({
+        repoDir: repo.dir,
+        diff: diffFor(repo.base, repo.head, "src/mod-0.ts"),
+        config,
+      });
       const naming = result.conventions.filter((convention) => convention.detector === "naming-exports");
       expect(naming).toHaveLength(1);
       expect(naming[0]?.matchingFiles).toBe(5);
@@ -68,7 +82,11 @@ describe("convention engine build", () => {
     try {
       const engine = new ConventionEngineImpl();
       const config = ConfigFileSchema.parse({});
-      const result = await engine.build({ repoDir: repo.dir, diff: diffFor(repo.base, repo.head, "src/mod-0.ts"), config });
+      const result = await engine.build({
+        repoDir: repo.dir,
+        diff: diffFor(repo.base, repo.head, "src/mod-0.ts"),
+        config,
+      });
       expect(result.conventions).toEqual([]);
       expect(result.diagnostics.conventions).toBe(0);
     } finally {

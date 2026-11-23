@@ -65,7 +65,10 @@ export class ConventionEngineImpl implements ConventionEngine {
         pushCode(codes, "convention_sample_empty");
         return { conventions: [], diagnostics: { sampledFiles, skippedFiles, conventions: 0, codes } };
       }
-      const parsed = await this.parseSampled(sample.files.map((file) => ({ ...file })), signal);
+      const parsed = await this.parseSampled(
+        sample.files.map((file) => ({ ...file })),
+        signal,
+      );
       skippedFiles += sample.files.length - parsed.files.length;
       if (parsed.files.length === 0) {
         pushCode(codes, "convention_sample_empty");
@@ -82,7 +85,7 @@ export class ConventionEngineImpl implements ConventionEngine {
         codes,
       };
       return { conventions, diagnostics };
-    } catch (error) {
+    } catch {
       signal?.throwIfAborted();
       pushCode(codes, "convention_sample_failed");
       const diagnostics: ConventionBuildDiagnostics = { sampledFiles, skippedFiles, conventions: 0, codes };

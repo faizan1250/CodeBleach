@@ -180,7 +180,10 @@ describe("p6-05 pipeline merge", () => {
     try {
       const fixture = createFixtureEngines();
       const liveReview = { ...fixture.review, requiresLlm: true as const };
-      const phase6 = stubPhase6({ candidates: [advisoryFinding("a1")], primaryValidate: fixture.validation.validate.bind(fixture.validation) });
+      const phase6 = stubPhase6({
+        candidates: [advisoryFinding("a1")],
+        primaryValidate: fixture.validation.validate.bind(fixture.validation),
+      });
       await runPipeline(
         { ...fixture, review: liveReview, logger: testLogger(), phase6 },
         {

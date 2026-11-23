@@ -5,8 +5,10 @@ import { MAX_ADVISORY_CONCURRENCY } from "../conventions/constants.ts";
 import { packAdvisoryBatches } from "../conventions/packer.ts";
 import type {
   ConventionAdvisoryBatchInput,
+  ConventionAdvisoryProjectionResult,
   ConventionAdvisoryUnit,
   AdvisoryConflictMetadata,
+  ConventionBuildResult,
   PrimaryValidationResult,
 } from "../types/conventions.ts";
 import type { DiffResult, Finding, ReviewUnit, ValidatedFinding } from "../types/index.ts";
@@ -125,7 +127,7 @@ export async function runPhase6AdvisoryPass(input: {
   };
   // Pre-aborted signals cancel before any convention, projection, or provider work.
   signal?.throwIfAborted();
-  let built;
+  let built: ConventionBuildResult;
   try {
     built = await input.phase6.conventions.build({
       repoDir: input.repoDir,
@@ -141,7 +143,7 @@ export async function runPhase6AdvisoryPass(input: {
   if (built.conventions.length === 0) {
     return fail("advisory_skipped_no_conventions");
   }
-  let projected;
+  let projected: ConventionAdvisoryProjectionResult;
   try {
     projected = await input.phase6.advisoryProjector.project({ units: input.units, diff: input.diff, signal });
   } catch {

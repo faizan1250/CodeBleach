@@ -23,25 +23,25 @@ function parseLabels(raw: unknown): LabeledAdvisoryCandidate[] {
   if (!Array.isArray(raw)) throw new Error("labels file must hold a JSON array");
   return raw.map((entry, index) => {
     if (!isRecord(entry)) throw new Error(`labels[${index}] must be an object`);
-    const label = entry["label"];
+    const label = entry.label;
     if (typeof label !== "string" || !(LABELS as readonly string[]).includes(label)) {
       throw new Error(`labels[${index}].label must be one of ${LABELS.join(" | ")}`);
     }
-    for (const field of ["prUrl", "findingId", "category", "severity"]) {
+    for (const field of ["prUrl", "findingId", "category", "severity"] as const) {
       if (typeof entry[field] !== "string" || (entry[field] as string).length === 0) {
         throw new Error(`labels[${index}].${field} must be a non-empty string`);
       }
     }
-    if (entry["ruleId"] !== undefined && typeof entry["ruleId"] !== "string") {
+    if (entry.ruleId !== undefined && typeof entry.ruleId !== "string") {
       throw new Error(`labels[${index}].ruleId must be a string when present`);
     }
     return {
-      prUrl: entry["prUrl"] as string,
-      findingId: entry["findingId"] as string,
+      prUrl: entry.prUrl as string,
+      findingId: entry.findingId as string,
       label: label as LabeledAdvisoryCandidate["label"],
-      category: entry["category"] as string,
-      severity: entry["severity"] as string,
-      ...(typeof entry["ruleId"] === "string" ? { ruleId: entry["ruleId"] as string } : {}),
+      category: entry.category as string,
+      severity: entry.severity as string,
+      ...(typeof entry.ruleId === "string" ? { ruleId: entry.ruleId as string } : {}),
     };
   });
 }
@@ -86,7 +86,7 @@ async function latencyReport(resultsDir: string): Promise<Record<string, number>
       outputTokens += result.advisory.outputTokens ?? 0;
       retained += result.advisory.retained ?? 0;
     } catch {
-      continue;
+      // Unreadable result files are skipped; readable entries still report.
     }
   }
   added.sort((a, b) => a - b);
@@ -121,6 +121,8 @@ const report = {
 };
 console.log(JSON.stringify(report, null, 2));
 if (!gate.passed) {
-  console.error("evaluation gate failed: keep --convention-advisory for development/experiments; do not recommend routine use");
+  console.error(
+    "evaluation gate failed: keep --convention-advisory for development/experiments; do not recommend routine use",
+  );
   process.exit(1);
 }

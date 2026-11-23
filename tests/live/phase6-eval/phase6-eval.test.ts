@@ -14,10 +14,10 @@ import corpus from "./corpus.json";
 // pinned merge-base/head pair (primary-only, then --convention-advisory) and
 // records per-PR results plus bounded log-derived advisory usage. Labeling
 // and the 30-candidate/80%-useful gate happen offline afterwards via gate.ts.
-const EVAL = process.env["CODEBLEACH_PHASE6_EVAL"] === "1";
-const REPOS_ROOT = process.env["CODEBLEACH_PHASE6_EVAL_REPOS"] ?? join(process.cwd(), "..", "phase6-eval-repos");
-const OUT_ROOT = process.env["CODEBLEACH_PHASE6_EVAL_OUT"] ?? join(process.cwd(), "tests/live/phase6-eval/results");
-const ONLY = (process.env["CODEBLEACH_PHASE6_EVAL_ONLY"] ?? "")
+const EVAL = process.env.CODEBLEACH_PHASE6_EVAL === "1";
+const REPOS_ROOT = process.env.CODEBLEACH_PHASE6_EVAL_REPOS ?? join(process.cwd(), "..", "phase6-eval-repos");
+const OUT_ROOT = process.env.CODEBLEACH_PHASE6_EVAL_OUT ?? join(process.cwd(), "tests/live/phase6-eval/results");
+const ONLY = (process.env.CODEBLEACH_PHASE6_EVAL_ONLY ?? "")
   .split(",")
   .map((entry) => entry.trim())
   .filter((entry) => entry.length > 0);
@@ -100,7 +100,11 @@ async function ensureCheckout(entry: CorpusEntry): Promise<void> {
   }
 }
 
-async function runCli(entry: CorpusEntry, mergeBase: string, advisory: boolean): Promise<{ ms: number; stderr: string }> {
+async function runCli(
+  entry: CorpusEntry,
+  mergeBase: string,
+  advisory: boolean,
+): Promise<{ ms: number; stderr: string }> {
   const slug = slugFor(entry);
   const outDir = join(OUT_ROOT, advisory ? `${slug}-advisory` : `${slug}-primary`);
   await mkdir(outDir, { recursive: true });
@@ -139,19 +143,24 @@ async function runCli(entry: CorpusEntry, mergeBase: string, advisory: boolean):
   return { ms, stderr };
 }
 
+function tryParseNumbers(line: string): Record<string, number> | null {
+  try {
+    const parsed = JSON.parse(line) as Record<string, unknown>;
+    const numbers: Record<string, number> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === "number") numbers[key] = value;
+    }
+    return numbers;
+  } catch {
+    return null;
+  }
+}
+
 function logField(stderr: string, message: string): Record<string, number> {
   for (const line of stderr.split("\n")) {
     if (!line.includes(`"msg":"${message}"`)) continue;
-    try {
-      const parsed = JSON.parse(line) as Record<string, unknown>;
-      const numbers: Record<string, number> = {};
-      for (const [key, value] of Object.entries(parsed)) {
-        if (typeof value === "number") numbers[key] = value;
-      }
-      return numbers;
-    } catch {
-      continue;
-    }
+    const numbers = tryParseNumbers(line);
+    if (numbers !== null) return numbers;
   }
   return {};
 }
@@ -220,11 +229,11 @@ async function evaluatePr(entry: CorpusEntry): Promise<EvalPrResult> {
       status: advisoryArtifact.status,
       validatedTotal: advisoryArtifact.validated.length,
       accepted: advisoryArtifact.validated.filter((item) => item.status === "accepted").length,
-      batches: passFields["batches"] ?? 0,
-      inputTokens: passFields["inputTokens"] ?? 0,
-      outputTokens: passFields["outputTokens"] ?? 0,
-      projectedUnits: passFields["projectedUnits"] ?? 0,
-      skippedUnits: passFields["skippedUnits"] ?? 0,
+      batches: passFields.batches ?? 0,
+      inputTokens: passFields.inputTokens ?? 0,
+      outputTokens: passFields.outputTokens ?? 0,
+      projectedUnits: passFields.projectedUnits ?? 0,
+      skippedUnits: passFields.skippedUnits ?? 0,
       retained: result.advisoryFindings.length,
     };
   } catch (error) {
@@ -238,9 +247,7 @@ describe.skipIf(!EVAL)("phase6 live usefulness evaluation (opt-in, Not-ZDR)", ()
     "sweeps the pinned corpus and records per-PR results",
     async () => {
       requireLiveEnv();
-      const entries = (corpus as CorpusEntry[]).filter(
-        (entry) => ONLY.length === 0 || ONLY.includes(slugFor(entry)),
-      );
+      const entries = (corpus as CorpusEntry[]).filter((entry) => ONLY.length === 0 || ONLY.includes(slugFor(entry)));
       expect(entries.length).toBeGreaterThan(0);
       await mkdir(OUT_ROOT, { recursive: true });
       const results: EvalPrResult[] = [];

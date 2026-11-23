@@ -114,7 +114,10 @@ function fakeDeps(input: {
   primary?: PrimaryValidationResult;
   conductors?: FakeConductors;
 }): Phase6PipelineDeps {
-  const conductors: FakeConductors = input.conductors ?? { calls: { builds: 0, projects: 0, batches: 0 }, maxInFlight: 0 };
+  const conductors: FakeConductors = input.conductors ?? {
+    calls: { builds: 0, projects: 0, batches: 0 },
+    maxInFlight: 0,
+  };
   let inFlight = 0;
   const unitById = new Map((input.units ?? []).map((unit) => [unit.unitId, unit]));
   return {
@@ -167,9 +170,7 @@ function fakeDeps(input: {
           input.primary ?? { findings: [acceptedPrimary("p1")], handoff: [{ findingId: "p1", headLocations: [] }] },
         ),
       validateAdvisoryCandidates: (findings) =>
-        Promise.resolve(
-          findings.map((candidate, index) => pendingFor(candidate, 20 + index * 10, 21 + index * 10)),
-        ),
+        Promise.resolve(findings.map((candidate, index) => pendingFor(candidate, 20 + index * 10, 21 + index * 10))),
       finalizeAdvisoryCandidates: (candidates) =>
         candidates.map((candidate) => ({ ...candidate.pendingFields, status: "accepted" as const })),
     },
@@ -280,6 +281,7 @@ describe("phase6 advisory pass", () => {
     try {
       await runPhase6AdvisoryPass({
         phase6: deps,
+        repoDir: "/repo",
         diff: diff(),
         units: [],
         config: config(),

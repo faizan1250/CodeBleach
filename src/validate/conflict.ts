@@ -1,5 +1,5 @@
 import { MAX_ADVISORY_FINDINGS_PER_RUN } from "../conventions/constants.ts";
-import type { Finding, ValidatedFinding } from "../types/index.ts";
+import type { Finding } from "../types/index.ts";
 import type {
   AdvisoryConflictMetadata,
   PendingAdvisoryCandidate,

@@ -43,7 +43,10 @@ function accepted(id: string, path = "src/a.ts"): ValidatedFinding {
     finding: owned,
     status: "accepted",
     checks: [],
-    derivedAttribution: { introducedByPr: true, basis: { kind: "added-lines", evidenceIndex: 0, file: path, lines: [2] } },
+    derivedAttribution: {
+      introducedByPr: true,
+      basis: { kind: "added-lines", evidenceIndex: 0, file: path, lines: [2] },
+    },
     derivedTarget: { file: path, line: 2, side: "RIGHT", kind: "added" },
   };
 }
@@ -56,11 +59,7 @@ function span(path: string, startLine: number, endLine: number): ValidationHando
   return { path, startLine, endLine };
 }
 
-function pending(
-  id: string,
-  headLocations: ValidationHandoffLocation[],
-  confidence = 0.9,
-): PendingAdvisoryCandidate {
+function pending(id: string, headLocations: ValidationHandoffLocation[], confidence = 0.9): PendingAdvisoryCandidate {
   const owned = finding(id, { confidence });
   return {
     phase: "pending-advisory-resolution",
@@ -78,7 +77,10 @@ function pending(
   };
 }
 
-function primaryWith(findings: ValidatedFinding[], handoff: PrimaryValidationResult["handoff"]): PrimaryValidationResult {
+function primaryWith(
+  findings: ValidatedFinding[],
+  handoff: PrimaryValidationResult["handoff"],
+): PrimaryValidationResult {
   return { findings, handoff };
 }
 
@@ -94,18 +96,24 @@ describe("primary handoff structure", () => {
   });
 
   test("rejects duplicate entries for one finding", () => {
-    const result = primaryWith([accepted("p1")], [
-      { findingId: "p1", headLocations: [] },
-      { findingId: "p1", headLocations: [] },
-    ]);
+    const result = primaryWith(
+      [accepted("p1")],
+      [
+        { findingId: "p1", headLocations: [] },
+        { findingId: "p1", headLocations: [] },
+      ],
+    );
     expect(validatePrimaryHandoffStructure(result).ok).toBe(false);
   });
 
   test("rejects an unknown extra entry", () => {
-    const result = primaryWith([accepted("p1")], [
-      { findingId: "p1", headLocations: [] },
-      { findingId: "ghost", headLocations: [] },
-    ]);
+    const result = primaryWith(
+      [accepted("p1")],
+      [
+        { findingId: "p1", headLocations: [] },
+        { findingId: "ghost", headLocations: [] },
+      ],
+    );
     expect(validatePrimaryHandoffStructure(result).ok).toBe(false);
   });
 
@@ -196,10 +204,7 @@ describe("C4-C7 fail-open merge", () => {
 
   test("C5 drops every advisory on malformed primary handoff and keeps primaries", () => {
     const primary = primaryWith([accepted("p1")], []);
-    const merged = resolveAdvisoryMerge(primary, [
-      pending("a1", [span("src/a.ts", 1, 2)]),
-      pending("a2", []),
-    ]);
+    const merged = resolveAdvisoryMerge(primary, [pending("a1", [span("src/a.ts", 1, 2)]), pending("a2", [])]);
     expect(merged.retained).toEqual([]);
     expect(merged.metadata.unmappableExcluded).toBe(2);
     expect(merged.metadata.codes).toContain("primary_handoff_invalid");
