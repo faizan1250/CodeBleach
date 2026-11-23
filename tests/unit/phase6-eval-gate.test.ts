@@ -333,9 +333,7 @@ describe("phase6 eval loader provenance", () => {
       const slug = slugFor(entry);
       const body = resultBody(entry);
       if (index === 0) {
-        body.advisoryFindings = [
-          { findingId: "f1", file: "a.ts", category: "convention", severity: "low" },
-        ];
+        body.advisoryFindings = [{ findingId: "f1", file: "a.ts", category: "convention", severity: "low" }];
       }
       await writeFile(join(dir, `${slug}.json`), `${JSON.stringify(body, null, 2)}\n`, "utf8");
       manifest.push({ slug, entry: { ...entry }, mergeBase: MERGE });
@@ -343,9 +341,7 @@ describe("phase6 eval loader provenance", () => {
     await writeFile(join(dir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   }
 
-  async function withRunDir(
-    run: (dir: string) => Promise<void>,
-  ): Promise<void> {
+  async function withRunDir(run: (dir: string) => Promise<void>): Promise<void> {
     const dir = await mkdtemp(join(tmpdir(), "codebleach-gate-"));
     try {
       await populate(dir);
@@ -359,7 +355,9 @@ describe("phase6 eval loader provenance", () => {
     return JSON.parse(await readFile(join(dir, `${slugFor(entry)}.json`), "utf8")) as ReturnType<typeof resultBody>;
   }
 
-  async function readManifest(dir: string): Promise<Array<{ slug: string; entry: ResultProvenance; mergeBase: string }>> {
+  async function readManifest(
+    dir: string,
+  ): Promise<Array<{ slug: string; entry: ResultProvenance; mergeBase: string }>> {
     return JSON.parse(await readFile(join(dir, "manifest.json"), "utf8")) as Array<{
       slug: string;
       entry: ResultProvenance;

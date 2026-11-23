@@ -209,9 +209,7 @@ export function collectSizeWindow(
   const neededSet = new Set<string>();
   for (
     let index = cursor;
-    index < rankedPaths.length &&
-    needed.length < SAMPLING_SIZE_BATCH_OIDS &&
-    window.length < SAMPLING_WINDOW_MAX_PATHS;
+    index < rankedPaths.length && needed.length < SAMPLING_SIZE_BATCH_OIDS && window.length < SAMPLING_WINDOW_MAX_PATHS;
     index += 1
   ) {
     const path = rankedPaths[index];

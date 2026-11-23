@@ -365,7 +365,9 @@ export function checkManifestConsistency(
       file.mergeBase !== record.mergeBase ||
       provenanceFields.some((field) => file.provenance[field] !== record.provenance[field]);
     if (drifted) {
-      reasons.push(`manifest entry for ${record.slug} differs from ${record.slug}.json (stale manifest or edited result)`);
+      reasons.push(
+        `manifest entry for ${record.slug} differs from ${record.slug}.json (stale manifest or edited result)`,
+      );
     }
   }
   return reasons;
