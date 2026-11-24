@@ -194,7 +194,7 @@ describe("advisory publish boundary", () => {
       let published: AcceptedValidatedFinding[] = [];
       fixture.publisher.publish = (items) => {
         published = items;
-        return Promise.resolve({ published: items.length, skipped: 0, failures: [] });
+        return Promise.resolve({ published: items.length, skipped: 0, failures: [], runFailures: [] });
       };
       await runPipeline(
         { ...fixture, logger: logger() },
@@ -225,7 +225,7 @@ describe("advisory publish boundary", () => {
       let published: AcceptedValidatedFinding[] = [];
       fixture.publisher.publish = (items) => {
         published = items;
-        return Promise.resolve({ published: items.length, skipped: 0, failures: [] });
+        return Promise.resolve({ published: items.length, skipped: 0, failures: [], runFailures: [] });
       };
       await runPipeline(
         { ...fixture, logger: logger() },
@@ -267,7 +267,7 @@ describe("advisory publish boundary", () => {
         publisher: {
           publish: (items: AcceptedValidatedFinding[]) => {
             published = items;
-            return Promise.resolve({ published: items.length, skipped: 0, failures: [] });
+            return Promise.resolve({ published: items.length, skipped: 0, failures: [], runFailures: [] });
           },
         },
       };
@@ -309,7 +309,7 @@ describe("advisory publish boundary", () => {
         publisher: {
           publish: (items: AcceptedValidatedFinding[]) => {
             published = items;
-            return Promise.resolve({ published: items.length, skipped: 0, failures: [] });
+            return Promise.resolve({ published: items.length, skipped: 0, failures: [], runFailures: [] });
           },
         },
       };

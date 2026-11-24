@@ -71,7 +71,7 @@ describe("p5-09 pipeline validation wiring", () => {
       let publishCalls = 0;
       fixture.publisher.publish = () => {
         publishCalls += 1;
-        return Promise.resolve({ published: 0, skipped: 0, failures: [] });
+        return Promise.resolve({ published: 0, skipped: 0, failures: [], runFailures: [] });
       };
       const summary = await runPipeline(
         { ...fixture, logger: logger() },
@@ -115,7 +115,7 @@ describe("p5-09 pipeline validation wiring", () => {
       let published: ValidatedFinding[] = [];
       fixture.publisher.publish = (items) => {
         published = items;
-        return Promise.resolve({ published: items.length, skipped: 0, failures: [] });
+        return Promise.resolve({ published: items.length, skipped: 0, failures: [], runFailures: [] });
       };
       const summary = await runPipeline(
         { ...fixture, logger: logger() },
@@ -317,7 +317,7 @@ describe("accepted-only publisher contract", () => {
       let publishCalls = 0;
       fixture.publisher.publish = () => {
         publishCalls += 1;
-        return Promise.resolve({ published: 0, skipped: 0, failures: [] });
+        return Promise.resolve({ published: 0, skipped: 0, failures: [], runFailures: [] });
       };
       const error = await runPipeline(
         { ...fixture, logger: logger() },

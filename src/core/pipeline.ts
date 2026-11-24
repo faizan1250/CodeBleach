@@ -3,7 +3,13 @@ import type { ResolvedConfig } from "../config/schema.ts";
 import { ReviewerError } from "./errors.ts";
 import type { ConfigSource, PipelineDeps, PipelineInput, RunSummary, StageName, StageResult } from "./contracts.ts";
 import { isAcceptedFinding, isConventionAdvisoryFinding } from "./contracts.ts";
-import { RUN_ARTIFACT_SCHEMA_VERSION, summarizeValidation, writeArtifact, type RunArtifact } from "./run-artifact.ts";
+import {
+  RUN_ARTIFACT_SCHEMA_VERSION,
+  normalizePublishResult,
+  summarizeValidation,
+  writeArtifact,
+  type RunArtifact,
+} from "./run-artifact.ts";
 import type { ValidationSummary } from "../types/index.ts";
 import { requireLlmPreflight } from "../llm/preflight.ts";
 import type { DiffResult, Finding, PrMeta, PublishResult, ReviewUnit, ValidatedFinding } from "../types/index.ts";
@@ -302,8 +308,11 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
       };
       publishResult = await runStage(
         "publish",
-        () => deps.publisher.publish(publishable, diffResult, meta),
-        (result) => result.published,
+        // Normalize at the persist boundary: the required runFailures
+        // contract (ADR 0045) holds even for out-of-tree publishers that
+        // predate it. No behavior change for conforming publishers.
+        async () => normalizePublishResult(await deps.publisher.publish(publishable, diffResult, meta)),
+        (result) => result?.published,
       );
     }
 

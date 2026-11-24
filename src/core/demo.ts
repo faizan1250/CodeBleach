@@ -256,5 +256,6 @@ export const demoPublisher: Publisher = {
       published: findings.filter((finding) => finding.status === "accepted").length,
       skipped: 0,
       failures: [],
+      runFailures: [],
     }),
 };

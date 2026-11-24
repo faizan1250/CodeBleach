@@ -175,7 +175,7 @@ export function createFixtureEngines(options: FixtureOptions = {}): FixtureEngin
     publisher: {
       publish: () => {
         maybeFail(order, "publish", options);
-        return Promise.resolve({ published: 1, skipped: 0, failures: [] });
+        return Promise.resolve({ published: 1, skipped: 0, failures: [], runFailures: [] });
       },
     },
   };

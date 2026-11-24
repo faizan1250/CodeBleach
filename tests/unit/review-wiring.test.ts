@@ -157,7 +157,7 @@ describe("p4-09 review wiring", () => {
           publisher: {
             publish: () => {
               publishCalls += 1;
-              return Promise.resolve({ published: 0, skipped: 0, failures: [] });
+              return Promise.resolve({ published: 0, skipped: 0, failures: [], runFailures: [] });
             },
           },
           logger: nullLogger(),
@@ -210,7 +210,7 @@ describe("p4-09 review wiring", () => {
           publisher: {
             publish: () => {
               publishCalls += 1;
-              return Promise.resolve({ published: 0, skipped: 0, failures: [] });
+              return Promise.resolve({ published: 0, skipped: 0, failures: [], runFailures: [] });
             },
           },
           logger: nullLogger(),
@@ -270,7 +270,7 @@ describe("p4-09 review wiring", () => {
           publisher: {
             publish: () => {
               publishCalls += 1;
-              return Promise.resolve({ published: 0, skipped: 0, failures: [] });
+              return Promise.resolve({ published: 0, skipped: 0, failures: [], runFailures: [] });
             },
           },
           logger: nullLogger(),
@@ -319,7 +319,7 @@ describe("p4-09 review wiring", () => {
           publisher: {
             publish: () => {
               publishCalls += 1;
-              return Promise.resolve({ published: 0, skipped: 0, failures: [] });
+              return Promise.resolve({ published: 0, skipped: 0, failures: [], runFailures: [] });
             },
           },
           logger: nullLogger(),
