@@ -32,6 +32,7 @@ import type { PrMeta, PublishResult, ValidationSummary } from "../../types/index
 import { createGitHubClient, resolveGitHubToken } from "../../github/client.ts";
 import { createGitHubPublisher } from "../../github/publish.ts";
 import { assertPrMetaMatchesDiff, resolvePrMetaFromEnv } from "../../github/pr-meta.ts";
+import { normalizePublishResult, type LegacyPublishResult } from "../../core/run-artifact.ts";
 
 export interface ReviewOptions {
   base?: string | undefined;
@@ -190,7 +191,10 @@ export async function runReview(options: ReviewOptions, logger: Logger): Promise
   const secrets = options.secrets ?? [];
 
   // Demo is fully canned and never touches the network, with or without --no-llm.
+  // The synthetic PR identity satisfies the live-publish gate; the canned
+  // publisher never leaves the process (no GitHub client, no token).
   if (options.demo) {
+    const demoPr: PrMeta = { owner: "demo", repo: "demo", number: 1, baseSha: base, headSha: head };
     return runEngines(
       {
         diff: demoDiffEngine,
@@ -202,6 +206,7 @@ export async function runReview(options: ReviewOptions, logger: Logger): Promise
       undefined,
       { ...options, base, head },
       logger,
+      demoPr,
     );
   }
 
@@ -361,9 +366,9 @@ export async function printPublishSummary(outDir: string): Promise<void> {
   try {
     const raw = await readFile(join(outDir, "run.json"), "utf8");
     const artifact = JSON.parse(raw) as {
-      publishResult?: PublishResult | null | undefined;
+      publishResult?: LegacyPublishResult | null | undefined;
     };
-    const result = artifact.publishResult ?? null;
+    const result = normalizePublishResult(artifact.publishResult ?? null);
     if (result === null) return;
     console.log(formatPublishLine(result));
   } catch {

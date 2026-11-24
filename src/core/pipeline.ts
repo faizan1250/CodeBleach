@@ -300,8 +300,8 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
         deps.logger.warn("advisory publish withheld", { withheld });
       }
       // No placeholder fallback: a live publish needs explicit PR identity.
-      // Demo and --no-llm never reach here (early return above); --dry-run
-      // skips publish entirely.
+      // Demo supplies a canned synthetic PrMeta from the CLI; --no-llm
+      // never reaches here (early return above); --dry-run skips publish.
       if (input.pr === undefined) {
         throw new ReviewerError({
           code: "CONFIG_INVALID",
