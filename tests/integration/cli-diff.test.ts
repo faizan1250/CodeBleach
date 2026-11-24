@@ -123,9 +123,17 @@ describe("cli diff", () => {
       const head = await writeAndCommit(dir, { "src/a.ts": "const a = 2;\n" }, "head");
       const out = join(dir, "out");
       // Scrub ambient live credentials: normal tests never touch the network.
+      // Gate-passing PR identity: the P7-04 PR preflight runs before the
+      // pipeline, so without it the run exits 2 with no artifact instead of
+      // reaching the LLM preflight (which writes the failed artifact).
       const result = await runCli(["review", "--base", base, "--head", head, "--repo", dir, "--out", out], dir, {
         OPENCODE_API_KEY: "",
         CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING: "",
+        GITHUB_REPOSITORY: "o/r",
+        CODEBLEACH_PR_NUMBER: "1",
+        CODEBLEACH_BASE_SHA: base,
+        CODEBLEACH_HEAD_SHA: head,
+        GITHUB_TOKEN: "dummy-token",
       });
       expect(result.code).toBe(2);
       expect(result.stderr).toContain("CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING");

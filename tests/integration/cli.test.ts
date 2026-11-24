@@ -92,13 +92,23 @@ describe("cli", () => {
   test("normal review with invalid SHAs fails at diff with failed artifact", async () => {
     const { dir, cleanup } = await makeRepo();
     try {
-      // Gate-passing dummy creds: the pipeline preflight runs before diff,
-      // so without these the run exits 2 (CONFIG_INVALID) instead of
-      // reaching the diff GIT_FAILED path. No network: the temp dir is not
-      // a git repo, so the diff stage fails before any provider call.
-      const result = await runCli(["review", "--base", "b", "--head", "h"], dir, {
+      // Gate-passing creds and PR identity: the pipeline preflight and the
+      // P7-04 PR preflight run before diff, so without these the run exits 2
+      // (CONFIG_INVALID) instead of reaching the diff GIT_FAILED path. No
+      // network: the SHAs are well-formed but the temp dir is not a git
+      // repo, so the diff stage fails before any provider call. PR metadata
+      // requires full SHAs, so abbreviated/malformed revs cannot reach diff
+      // on a live run; well-formed-but-unresolvable SHAs fail GIT_FAILED.
+      const base = "a".repeat(40);
+      const head = "b".repeat(40);
+      const result = await runCli(["review", "--base", base, "--head", head], dir, {
         OPENCODE_API_KEY: "dummy-key",
         CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING: "true",
+        GITHUB_REPOSITORY: "o/r",
+        CODEBLEACH_PR_NUMBER: "1",
+        CODEBLEACH_BASE_SHA: base,
+        CODEBLEACH_HEAD_SHA: head,
+        GITHUB_TOKEN: "dummy-token",
       });
       expect(result.code).toBe(1);
       expect(result.stderr).toContain("GIT_FAILED");
