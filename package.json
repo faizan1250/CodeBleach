@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "@octokit/rest": "22.0.1",
     "@vscode/tree-sitter-wasm": "0.3.1",
     "web-tree-sitter": "0.25.10",
     "zod": "4.6.7"
