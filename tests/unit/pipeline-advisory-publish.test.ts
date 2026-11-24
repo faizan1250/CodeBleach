@@ -198,7 +198,15 @@ describe("advisory publish boundary", () => {
       };
       await runPipeline(
         { ...fixture, logger: logger() },
-        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: false, outDir: dir, runId: "adv-pub-default" },
+        {
+          repoDir: ".",
+          baseSha: "base",
+          headSha: "head",
+          dryRun: false,
+          outDir: dir,
+          runId: "adv-pub-default",
+          pr: { owner: "o", repo: "r", number: 1, baseSha: "base", headSha: "head" },
+        },
       );
       expect(published.map((item) => item.finding.id)).toEqual(["p1"]);
       const artifact = JSON.parse(await readFile(join(dir, "run.json"), "utf8")) as {
@@ -237,6 +245,7 @@ describe("advisory publish boundary", () => {
           outDir: dir,
           runId: "adv-pub-optin",
           options: { conventionAdvisoryPublishEnabled: true },
+          pr: { owner: "o", repo: "r", number: 1, baseSha: "base", headSha: "head" },
         },
       );
       expect(published.map((item) => item.finding.id).sort()).toEqual(["a1", "p1"]);
@@ -280,6 +289,7 @@ describe("advisory publish boundary", () => {
         runId: "adv-pub-phase6",
         options: { conventionAdvisoryEnabled: true },
         env: liveEnv(),
+        pr: { owner: "o", repo: "r", number: 1, baseSha: "base", headSha: "head" },
       });
       expect(published.map((item) => item.finding.id)).toEqual(["finding-1"]);
       const artifact = JSON.parse(await readFile(join(dir, "run.json"), "utf8")) as {
@@ -322,6 +332,7 @@ describe("advisory publish boundary", () => {
         runId: "adv-pub-phase6-optin",
         options: { conventionAdvisoryEnabled: true, conventionAdvisoryPublishEnabled: true },
         env: liveEnv(),
+        pr: { owner: "o", repo: "r", number: 1, baseSha: "base", headSha: "head" },
       });
       expect(published.map((item) => item.finding.id).sort()).toEqual(["a1", "finding-1"]);
     } finally {

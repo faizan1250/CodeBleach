@@ -119,7 +119,15 @@ describe("p5-09 pipeline validation wiring", () => {
       };
       const summary = await runPipeline(
         { ...fixture, logger: logger() },
-        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: false, outDir: dir, runId: "p5-09-live" },
+        {
+          repoDir: ".",
+          baseSha: "base",
+          headSha: "head",
+          dryRun: false,
+          outDir: dir,
+          runId: "p5-09-live",
+          pr: { owner: "o", repo: "r", number: 1, baseSha: "base", headSha: "head" },
+        },
       );
       expect(summary.status).toBe("completed");
       expect(published.map((item) => item.finding.id)).toEqual(["a"]);
@@ -138,7 +146,15 @@ describe("p5-09 pipeline validation wiring", () => {
       fixture.publisher = stubPublisher;
       const error = await runPipeline(
         { ...fixture, logger: logger() },
-        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: false, outDir: dir, runId: "p5-09-stub" },
+        {
+          repoDir: ".",
+          baseSha: "base",
+          headSha: "head",
+          dryRun: false,
+          outDir: dir,
+          runId: "p5-09-stub",
+          pr: { owner: "o", repo: "r", number: 1, baseSha: "base", headSha: "head" },
+        },
       ).then(
         () => null,
         (failure: unknown) => failure as ReviewerError,
@@ -321,7 +337,15 @@ describe("accepted-only publisher contract", () => {
       };
       const error = await runPipeline(
         { ...fixture, logger: logger() },
-        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: false, outDir: dir, runId: "p5-09-incomplete" },
+        {
+          repoDir: ".",
+          baseSha: "base",
+          headSha: "head",
+          dryRun: false,
+          outDir: dir,
+          runId: "p5-09-incomplete",
+          pr: { owner: "o", repo: "r", number: 1, baseSha: "base", headSha: "head" },
+        },
       ).then(
         () => null,
         (failure: unknown) => failure as ReviewerError,

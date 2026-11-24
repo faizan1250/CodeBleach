@@ -11,7 +11,7 @@ import { ReviewerError } from "../../core/errors.ts";
 import { GitDiffEngine } from "../../diff/git.ts";
 import { ContextEngineImpl } from "../../context/engine.ts";
 import { loadConfig } from "../../config/load.ts";
-import type { LoadConfigFn, Phase6PipelineDeps, ValidationEngine } from "../../core/contracts.ts";
+import type { LoadConfigFn, Phase6PipelineDeps, Publisher, ValidationEngine } from "../../core/contracts.ts";
 import { ConventionEngineImpl } from "../../conventions/engine.ts";
 import { createPinnedAdvisoryProjector } from "../../conventions/projection.ts";
 import { FIXED_MODEL_ID, FIXED_PROVIDER, TRAINING_OPT_IN_ENV } from "../../llm/constants.ts";
@@ -28,7 +28,11 @@ import { readVersion } from "./version.ts";
 import { exitCodeForError } from "../exit-codes.ts";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { ValidationSummary } from "../../types/index.ts";
+import type { PrMeta, PublishResult, ValidationSummary } from "../../types/index.ts";
+import { createGitHubClient, resolveGitHubToken } from "../../github/client.ts";
+import { createGitHubPublisher } from "../../github/publish.ts";
+import { assertPrMetaMatchesDiff, resolvePrMetaFromEnv } from "../../github/pr-meta.ts";
+import { normalizePublishResult, type LegacyPublishResult } from "../../core/run-artifact.ts";
 
 export interface ReviewOptions {
   base?: string | undefined;
@@ -147,6 +151,28 @@ export function formatValidationLine(args: {
   );
 }
 
+/**
+ * One-line CLI publish counts; null when publish did not run (null result).
+ * Only counts and stable run-level codes — never finding text, raw API
+ * messages, or PR-controlled strings.
+ */
+export function formatPublishLine(result: PublishResult): string {
+  const runCodes = result.runFailures.map((failure) => failure.code).join(",");
+  const suffix = runCodes.length === 0 ? "none" : runCodes;
+  return (
+    `publish: ${result.published} published, ${result.skipped} skipped, ` +
+    `${result.failures.length} failure(s); run failures: ${suffix}`
+  );
+}
+
+/** Stderr warning when publish ran but its summary cannot be rendered. */
+export function publishSummaryUnavailableWarning(outDir: string): string {
+  return (
+    `review completed but publish summary unavailable: ${join(outDir, "run.json")} unreadable or unparseable; ` +
+    `see the artifact for details`
+  );
+}
+
 function usageError(message: string): ReviewerError {
   return new ReviewerError({ code: "CONFIG_INVALID", message });
 }
@@ -165,7 +191,10 @@ export async function runReview(options: ReviewOptions, logger: Logger): Promise
   const secrets = options.secrets ?? [];
 
   // Demo is fully canned and never touches the network, with or without --no-llm.
+  // The synthetic PR identity satisfies the live-publish gate; the canned
+  // publisher never leaves the process (no GitHub client, no token).
   if (options.demo) {
+    const demoPr: PrMeta = { owner: "demo", repo: "demo", number: 1, baseSha: base, headSha: head };
     return runEngines(
       {
         diff: demoDiffEngine,
@@ -177,6 +206,7 @@ export async function runReview(options: ReviewOptions, logger: Logger): Promise
       undefined,
       { ...options, base, head },
       logger,
+      demoPr,
     );
   }
 
@@ -202,6 +232,31 @@ export async function runReview(options: ReviewOptions, logger: Logger): Promise
   // loaded value inside the pipeline so CLI and stages cannot disagree.
   const loaded = await loadConfig(options.repo);
   if (!loaded.ok) throw loaded.error;
+  // P7-04: PR identity preflight before expensive model work. Dry-run stays
+  // offline (no token required, no GitHub calls); a requested live publish
+  // fails here on missing token/meta instead of after the review.
+  const prMeta = resolvePrMetaFromEnv(env);
+  let publisher: Publisher;
+  let pr: PrMeta | undefined;
+  if (options.dryRun) {
+    if (prMeta !== null) assertPrMetaMatchesDiff(prMeta, base, head);
+    publisher = stubPublisher;
+    pr = prMeta ?? undefined;
+  } else {
+    if (prMeta === null) {
+      throw usageError(
+        "live publish requires pull-request metadata: set GITHUB_REPOSITORY, CODEBLEACH_PR_NUMBER, CODEBLEACH_BASE_SHA, and CODEBLEACH_HEAD_SHA",
+      );
+    }
+    assertPrMetaMatchesDiff(prMeta, base, head);
+    const token = resolveGitHubToken(env);
+    if (token === undefined) {
+      throw usageError("live publish requires GITHUB_TOKEN: set it to a write-capable token for live publish");
+    }
+    // One Octokit instance per run; GitHub calls never consume the LLM limiter.
+    publisher = createGitHubPublisher({ api: createGitHubClient({ token }) });
+    pr = prMeta;
+  }
   // Phase 6 (P6-05, ADR 0043): the flag composes the optional advisory
   // bundle. Demo and --no-llm bypass it above; the pipeline preflight
   // rejects a flagged run whose bundle is missing, so a live flagged run
@@ -255,12 +310,16 @@ export async function runReview(options: ReviewOptions, logger: Logger): Promise
       // released after. --no-llm keeps the stub (review skipped, so the
       // validator never runs); demo keeps its canned engine.
       validation: createValidationEngine({ repoDir: options.repo }),
-      publisher: stubPublisher,
+      // P7-04: live non-dry-run publishes through the GitHub publisher (one
+      // Octokit per run, constructed above); dry-run keeps the stub and the
+      // pipeline skips publish, so no GitHub calls occur.
+      publisher,
       ...(phase6 === undefined ? {} : { phase6 }),
     },
     loadAgain,
     { ...options, base, head },
     logger,
+    pr,
   );
 }
 
@@ -299,6 +358,25 @@ export async function printValidationSummary(outDir: string): Promise<void> {
 }
 
 /**
+ * Prints the one-line publish summary from the run artifact. No output when
+ * publish did not run (null result: dry-run/--no-llm/skipped). Warns on
+ * stderr (exit stays 0) when the artifact is missing or unparseable.
+ */
+export async function printPublishSummary(outDir: string): Promise<void> {
+  try {
+    const raw = await readFile(join(outDir, "run.json"), "utf8");
+    const artifact = JSON.parse(raw) as {
+      publishResult?: LegacyPublishResult | null | undefined;
+    };
+    const result = normalizePublishResult(artifact.publishResult ?? null);
+    if (result === null) return;
+    console.log(formatPublishLine(result));
+  } catch {
+    console.error(publishSummaryUnavailableWarning(outDir));
+  }
+}
+
+/**
  * Phase 6 opt-in for the pipeline (P6-00, ADR 0043): live path only. Demo
  * and --no-llm ignore the flag and run without a Phase 6 bundle, so
  * forwarding it there would trip the pipeline preflight.
@@ -320,12 +398,13 @@ async function runEngines(
       | typeof demoReviewEngine
       | { review: () => Promise<ReturnType<typeof skippedReviewResult>>; requiresLlm?: boolean | undefined };
     validation: ValidationEngine;
-    publisher: typeof demoPublisher | typeof stubPublisher;
+    publisher: Publisher;
     phase6?: Phase6PipelineDeps | undefined;
   },
   loadConfig: LoadConfigFn | undefined,
   options: ResolvedReviewOptions,
   logger: Logger,
+  prMeta?: PrMeta | undefined,
 ): Promise<number> {
   try {
     const summary = await runPipeline(
@@ -334,6 +413,7 @@ async function runEngines(
         repoDir: options.repo,
         baseSha: options.base,
         headSha: options.head,
+        ...(prMeta === undefined ? {} : { pr: prMeta }),
         dryRun: options.dryRun,
         outDir: options.out,
         runId: options.runId,
@@ -344,6 +424,7 @@ async function runEngines(
     );
     console.log(`review ${summary.status}: ${summary.stages.length} stages, ${summary.configSource} config`);
     await printValidationSummary(options.out);
+    await printPublishSummary(options.out);
     if (options.noLlm && !options.demo) {
       console.log("offline preview: no model review or validation occurred (--no-llm)");
     }

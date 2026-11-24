@@ -67,7 +67,15 @@ describe("runPipeline", () => {
       const fixture = createFixtureEngines();
       const summary = await runPipeline(
         { ...fixture, logger: testLogger() },
-        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: false, outDir: dir, runId: "run-test" },
+        {
+          repoDir: ".",
+          baseSha: "base",
+          headSha: "head",
+          dryRun: false,
+          outDir: dir,
+          runId: "run-test",
+          pr: { owner: "o", repo: "r", number: 1, baseSha: "base", headSha: "head" },
+        },
       );
       expect(fixture.order).toEqual(["diff", "context", "review", "validation", "publish"]);
       const artifact = await readArtifact(dir);
