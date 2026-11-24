@@ -54,7 +54,7 @@ describe("p7-05 review workflow", () => {
     expect(text).toContain("bun-version-file: .bun-version");
   });
 
-  test("passes explicit PR metadata and live secrets only to the review step", async () => {
+  test("passes explicit PR metadata and live secrets only to gated steps", async () => {
     const text = await workflow();
     for (const name of [
       `GITHUB_TOKEN: ${expr("secrets.GITHUB_TOKEN")}`,
@@ -68,7 +68,8 @@ describe("p7-05 review workflow", () => {
       expect(text).toContain(name);
     }
     expect(text.match(/secrets\.GITHUB_TOKEN/g)?.length).toBe(1);
-    expect(text.match(/secrets\.OPENCODE_API_KEY/g)?.length).toBe(1);
+    // Key gate step reads the secret to decide skip vs run; the review step consumes it.
+    expect(text.match(/secrets\.OPENCODE_API_KEY/g)?.length).toBe(2);
   });
 
   test("runs live publish with bounded runtime, concurrency, and artifact", async () => {
@@ -81,5 +82,24 @@ describe("p7-05 review workflow", () => {
     expect(text).toContain("path: .reviewer-out/");
     expect(text).toContain("retention-days: 7");
     expect(text).toContain("if: always()");
+  });
+
+  test("skips gracefully with a notice when the API key is missing or empty", async () => {
+    const text = await workflow();
+    expect(text).toContain("Check API key availability");
+    expect(text).toContain('if [ -z "$OPENCODE_API_KEY" ]');
+    expect(text).toContain("live review skipped: no API key configured");
+    expect(text).toContain("has_key=false");
+    expect(text).toContain("has_key=true");
+    // Every post-gate step (including artifact upload) is skipped, never failed.
+    const gated = text.match(/steps\.check-key\.outputs\.has_key == 'true'/g);
+    expect(gated?.length).toBeGreaterThanOrEqual(6);
+    expect(text).toContain("always() && steps.check-key.outputs.has_key == 'true'");
+  });
+
+  test("real review errors still fail the job", async () => {
+    const text = await workflow();
+    expect(text).not.toContain("continue-on-error");
+    expect(text).toContain("Run CodeBleach review and publish");
   });
 });
