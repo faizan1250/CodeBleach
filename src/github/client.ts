@@ -93,7 +93,8 @@ export function resolveGitHubToken(env: Record<string, string | undefined> = pro
 }
 
 export function createGitHubClient(options: CreateGitHubClientOptions): GitHubApi {
-  if (options.token.trim().length === 0) {
+  const token = options.token.trim();
+  if (token.length === 0) {
     throw new ReviewerError({
       code: "CONFIG_INVALID",
       message: "GITHUB_TOKEN is missing or empty; set it to a write-capable token for live publish",
@@ -112,7 +113,7 @@ export function createGitHubClient(options: CreateGitHubClientOptions): GitHubAp
     options.transport ??
     createOctokitTransport(
       new Octokit({
-        auth: options.token,
+        auth: token,
         baseUrl: GITHUB_API_BASE_URL,
         userAgent: USER_AGENT,
         // Silent: the bundled request-log plugin would otherwise emit request
