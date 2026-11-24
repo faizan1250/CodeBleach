@@ -56,7 +56,15 @@ describe("p7-00 publish contract", () => {
       const fixture = createFixtureEngines();
       await runPipeline(
         { ...fixture, logger: createLogger({ level: "error", runId: "p700-contract" }) },
-        { repoDir: ".", baseSha: "base", headSha: "head", dryRun: false, outDir: dir, runId: "p700-contract" },
+        {
+          repoDir: ".",
+          baseSha: "base",
+          headSha: "head",
+          dryRun: false,
+          outDir: dir,
+          runId: "p700-contract",
+          pr: { owner: "o", repo: "r", number: 1, baseSha: "base", headSha: "head" },
+        },
       );
       const artifact = JSON.parse(await readFile(join(dir, "run.json"), "utf8"));
       expect(artifact.publishResult).toEqual({ published: 1, skipped: 0, failures: [], runFailures: [] });

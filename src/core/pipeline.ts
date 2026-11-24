@@ -299,19 +299,32 @@ export async function runPipeline(deps: PipelineDeps, input: PipelineInput): Pro
       if (withheld > 0) {
         deps.logger.warn("advisory publish withheld", { withheld });
       }
-      const meta: PrMeta = input.pr ?? {
-        owner: "unknown",
-        repo: "unknown",
-        number: 0,
-        baseSha: input.baseSha,
-        headSha: input.headSha,
-      };
+      // No placeholder fallback: a live publish needs explicit PR identity.
+      // Demo and --no-llm never reach here (early return above); --dry-run
+      // skips publish entirely.
+      if (input.pr === undefined) {
+        throw new ReviewerError({
+          code: "CONFIG_INVALID",
+          message:
+            "live publish requires explicit pull-request metadata; set GITHUB_REPOSITORY, CODEBLEACH_PR_NUMBER, CODEBLEACH_BASE_SHA, and CODEBLEACH_HEAD_SHA",
+        });
+      }
+      const meta: PrMeta = input.pr;
+      // Destructive reconciliation runs only after a fully successful pass:
+      // complete context, complete review, zero failed units, and zero
+      // inconclusive validations (run-wide, fail-closed per ADR 0045 D10).
+      const reconcileStale =
+        contextStatus === "complete" &&
+        reviewResult?.status === "complete" &&
+        (reviewResult?.unitsFailed ?? 1) === 0 &&
+        (validationSummary?.inconclusive ?? 1) === 0;
       publishResult = await runStage(
         "publish",
         // Normalize at the persist boundary: the required runFailures
         // contract (ADR 0045) holds even for out-of-tree publishers that
         // predate it. No behavior change for conforming publishers.
-        async () => normalizePublishResult(await deps.publisher.publish(publishable, diffResult, meta)),
+        async () =>
+          normalizePublishResult(await deps.publisher.publish(publishable, diffResult, meta, { reconcileStale })),
         (result) => result?.published,
       );
     }
