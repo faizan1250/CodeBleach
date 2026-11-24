@@ -146,6 +146,9 @@ Ordered; cheap/deterministic first. Any hard failure → reject. Deterministic-o
 **Accepted invariant (ADR 0035):** publish eligibility needs the complete invariant — status `accepted` plus a valid head-side `derivedTarget` plus `derivedAttribution.introducedByPr: true` with a defined valid `AttributionBasis`. `isAcceptedFinding` enforces all of it (status alone never passes); the pipeline fails closed (`INTERNAL`, nothing published or counted) on any status-`accepted` item that fails the guard. The guard is shape-only by design (no semantic validation): it never re-derives target/basis against the `DiffResult` — semantic re-proof stays the validator's job. Size diagnostics keep their typed kind: `per-file-limit` names the per-file byte cap, `cumulative-limit` names the total run cap, both preserving typed byte counts/limits; untyped cap wording and transport output-limit still propagate as stage failures, never content-size statuses.
 
 ### 4.5 GitHub Publisher (`src/github`)
+
+> P7-00 (ADR 0045) supersedes this sketch: per-finding `pulls.createReviewComment` POSTs (`line` + `side: "RIGHT"`, pinned `commit_id`), marker lifecycle, 10-create/10-delete budgets, reply-safe reconciliation gated on `PublishContext.reconcileStale`, required `PublishResult.runFailures`, and fork/Dependabot skips are normative. Full rewrite of this section lands in P7-06.
+
 - One `pulls.createReview` call (`event: "COMMENT"`) with `comments[]` + summary body; `commit_id` = head SHA.
 - If a comment 422s (bad position), drop it and list it in the summary instead of failing the review.
 - **Dedupe:** each comment body ends with hidden marker `<!-- reviewer:fp=<fingerprint> -->`. On `synchronize`, list existing review comments, skip fingerprints already posted. Never edit/delete human comments. Outdated comments are left to GitHub's outdated handling; optionally resolve own stale threads later.

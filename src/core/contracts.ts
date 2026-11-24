@@ -65,7 +65,22 @@ export interface ValidationOptions {
 }
 
 export interface Publisher {
-  publish(findings: AcceptedValidatedFinding[], diff: DiffResult, meta: PrMeta): Promise<PublishResult>;
+  publish(
+    findings: AcceptedValidatedFinding[],
+    diff: DiffResult,
+    meta: PrMeta,
+    context?: PublishContext | undefined,
+  ): Promise<PublishResult>;
+}
+
+/**
+ * Pipeline-owned gate for destructive stale-comment reconciliation (ADR
+ * 0045). Absent or false must never delete stale comments; the pipeline sets
+ * it true only for a complete run (complete context/review, zero failed
+ * units, zero inconclusive validations). P7-00 locks the type; P7-04 wires it.
+ */
+export interface PublishContext {
+  reconcileStale?: boolean | undefined;
 }
 
 /**

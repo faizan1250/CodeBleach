@@ -228,7 +228,7 @@ describe("p3-f03 git query timeouts", () => {
           context,
           review: { review: () => Promise.resolve(emptyReviewResult()), requiresLlm: false },
           validation: { validate: () => Promise.resolve([]) },
-          publisher: { publish: () => Promise.resolve({ published: 0, skipped: 0, failures: [] }) },
+          publisher: { publish: () => Promise.resolve({ published: 0, skipped: 0, failures: [], runFailures: [] }) },
           logger: logger(),
         },
         { repoDir: dir, baseSha, headSha, dryRun: true, outDir, runId: "p3-f03-run" },

@@ -7,6 +7,7 @@ import type {
   DiffResult,
   Finding,
   PublishResult,
+  PublishRunFailure,
   ReviewUnit,
   ValidatedFinding,
   ValidationSummary,
@@ -15,6 +16,20 @@ import type { ReviewDiagnostic, ReviewStatus, ReviewUsage } from "../types/revie
 import type { ConfigSource, StageResult } from "./contracts.ts";
 
 export const RUN_ARTIFACT_SCHEMA_VERSION = 2;
+
+/** Legacy schema-v2 shape: runFailures absent on artifacts written before P7-00 (ADR 0045). */
+export type LegacyPublishResult = Omit<PublishResult, "runFailures"> & {
+  runFailures?: PublishRunFailure[] | undefined;
+};
+
+/**
+ * Read/persist-boundary normalization: legacy artifacts without runFailures
+ * read as []. Schema stays v2; the JSON change is additive.
+ */
+export function normalizePublishResult(result: LegacyPublishResult | null | undefined): PublishResult | null {
+  if (result === null || result === undefined) return null;
+  return { ...result, runFailures: result.runFailures ?? [] };
+}
 
 export interface SerializedError {
   code: string;
