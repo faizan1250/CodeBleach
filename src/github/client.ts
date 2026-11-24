@@ -3,8 +3,9 @@ import { ReviewerError } from "../core/errors.ts";
 import type { PublishRunFailure } from "../types/publish.ts";
 
 // Narrow GitHub transport seam for Phase 7 (ADR 0045). Only this module may
-// import Octokit. The publisher (P7-03) consumes GitHubApi; policy (freshness,
-// dedupe, budgets, pacing) lives there, never here.
+// import Octokit. Reads use bounded GET retries; writes (P7-03) are sent
+// exactly once — no automatic retries — and classify outcomes as success,
+// definitive per-comment rejection, or ambiguous application.
 
 const GITHUB_API_BASE_URL = "https://api.github.com";
 const USER_AGENT = "codebleach";
@@ -47,11 +48,28 @@ export interface ReviewCommentRecord {
   readonly inReplyToId: number | null;
 }
 
-/** Read-only transport surface the publisher builds on (writes arrive in P7-03). */
+/** Read/write transport surface the publisher builds on. Writes are sent
+ * exactly once; policy (freshness, dedupe, budgets, pacing) lives in the
+ * publisher, never here. */
 export interface GitHubApi {
   getPullRequest(input: { owner: string; repo: string; number: number }): Promise<PullRequestSnapshot>;
   listReviewComments(input: { owner: string; repo: string; number: number }): Promise<ReviewCommentRecord[]>;
   getAuthenticatedLogin(): Promise<string>;
+  createReviewComment(input: {
+    owner: string;
+    repo: string;
+    number: number;
+    commitId: string;
+    path: string;
+    line: number;
+    body: string;
+  }): Promise<CreatedReviewComment>;
+  deleteReviewComment(input: { owner: string; repo: string; commentId: number }): Promise<void>;
+}
+
+/** Identifier of a newly created review comment; the publisher pins deletes by id. */
+export interface CreatedReviewComment {
+  readonly id: number;
 }
 
 export interface CreateGitHubClientOptions {
@@ -81,6 +99,40 @@ export class GitHubApiError extends ReviewerError {
     this.name = "GitHubApiError";
     this.status = input.status;
     this.runFailure = input.runFailure;
+  }
+}
+
+/** Write outcome where the server may have applied the comment: timeout,
+ * connection reset, or 5xx response. Never retried; the publisher resolves it
+ * with one bounded inventory refresh. Carries no raw bodies. */
+export class AmbiguousGitHubWriteError extends ReviewerError {
+  readonly status: number | undefined;
+
+  constructor(input: { operation: string; resource?: string | undefined; status: number | undefined }) {
+    const target = input.resource === undefined ? "" : ` ${input.resource}`;
+    super({
+      code: "GITHUB_FAILED",
+      message: `github ${input.operation}${target} outcome is ambiguous and must be reconciled from inventory`,
+    });
+    this.name = "AmbiguousGitHubWriteError";
+    this.status = input.status;
+  }
+}
+
+/** Definitive per-comment write rejection (422/409 and other 4xx): the
+ * comment was not created. The publisher re-checks freshness once, then
+ * records a bounded per-finding failure or stops. */
+export class RejectedGitHubWriteError extends ReviewerError {
+  readonly status: number;
+
+  constructor(input: { operation: string; resource?: string | undefined; status: number }) {
+    const target = input.resource === undefined ? "" : ` ${input.resource}`;
+    super({
+      code: "GITHUB_FAILED",
+      message: `github ${input.operation}${target} was rejected (status ${input.status})`,
+    });
+    this.name = "RejectedGitHubWriteError";
+    this.status = input.status;
   }
 }
 
@@ -127,6 +179,8 @@ export function createGitHubClient(options: CreateGitHubClientOptions): GitHubAp
     getPullRequest: (input) => getPullRequest(transport, sleep, now, input),
     listReviewComments: (input) => listReviewComments(transport, sleep, now, input),
     getAuthenticatedLogin: () => getAuthenticatedLogin(transport, sleep, now),
+    createReviewComment: (input) => createReviewComment(transport, input),
+    deleteReviewComment: (input) => deleteReviewComment(transport, input),
   };
 }
 
@@ -201,6 +255,124 @@ async function getAuthenticatedLogin(
     throw new ReviewerError({ code: "INTERNAL", message: "github user response had an unexpected shape" });
   }
   return response.data.login;
+}
+
+async function createReviewComment(
+  transport: GitHubTransport,
+  input: { owner: string; repo: string; number: number; commitId: string; path: string; line: number; body: string },
+): Promise<CreatedReviewComment> {
+  const resource = repoResource(input);
+  requireRepoIdentity(input);
+  const response = await sendWrite(transport, {
+    operation: "create review comment",
+    resource,
+    route: "POST /repos/{owner}/{repo}/pulls/{pull_number}/comments",
+    parameters: {
+      owner: input.owner,
+      repo: input.repo,
+      pull_number: input.number,
+      commit_id: input.commitId,
+      path: input.path,
+      line: input.line,
+      side: "RIGHT",
+      body: input.body,
+    },
+  });
+  if (!isRecord(response.data) || typeof response.data.id !== "number" || !Number.isSafeInteger(response.data.id)) {
+    // A 2xx without a usable id: the server may have applied the comment, so
+    // resolve through the ambiguous path rather than claiming success or failure.
+    throw new AmbiguousGitHubWriteError({ operation: "create review comment", resource, status: response.status });
+  }
+  return { id: response.data.id };
+}
+
+async function deleteReviewComment(
+  transport: GitHubTransport,
+  input: { owner: string; repo: string; commentId: number },
+): Promise<void> {
+  if (input.owner.length === 0 || input.repo.length === 0 || !Number.isSafeInteger(input.commentId)) {
+    throw new ReviewerError({
+      code: "CONFIG_INVALID",
+      message: "github client requires a non-empty owner/repo and an integer comment id for deletion",
+    });
+  }
+  const resource = `${input.owner}/${input.repo}#comment-${input.commentId}`;
+  try {
+    await sendWrite(transport, {
+      operation: "delete review comment",
+      resource,
+      route: "DELETE /repos/{owner}/{repo}/pulls/comments/{comment_id}",
+      parameters: { owner: input.owner, repo: input.repo, comment_id: input.commentId },
+    });
+  } catch (error) {
+    // Deleting an already-absent comment is the desired end state.
+    if (error instanceof GitHubApiError && error.status === 404) return;
+    throw error;
+  }
+}
+
+interface WriteOperation {
+  operation: string;
+  resource?: string | undefined;
+  route: string;
+  parameters: Record<string, unknown>;
+}
+
+/** Single-shot write send: exactly one transport call, never retried. Maps
+ * transport failures to ambiguous (may have applied), definitive rejection,
+ * or stable run-level errors. */
+async function sendWrite(transport: GitHubTransport, op: WriteOperation): Promise<GitHubTransportResponse> {
+  try {
+    return await transport.send(op.route, op.parameters);
+  } catch (error) {
+    const status = readStatus(error);
+    const headers = readHeaders(error);
+    if (isAbortError(error) || status === undefined || status >= 500) {
+      throw new AmbiguousGitHubWriteError({ operation: op.operation, resource: op.resource, status });
+    }
+    if (status === 401) {
+      throw new GitHubApiError({
+        operation: op.operation,
+        resource: op.resource,
+        status,
+        runFailure: {
+          code: "permission_denied",
+          message: "github token is invalid or lacks pull-request write permission",
+        },
+      });
+    }
+    if (status === 403 && !isRateLimitResponse(headers)) {
+      throw new GitHubApiError({
+        operation: op.operation,
+        resource: op.resource,
+        status,
+        runFailure: {
+          code: "permission_denied",
+          message: "github token is invalid or lacks pull-request write permission",
+        },
+      });
+    }
+    if (status === 404) {
+      throw new GitHubApiError({
+        operation: op.operation,
+        resource: op.resource,
+        status,
+        runFailure: {
+          code: "pr_identity_mismatch",
+          message: "pull request or review comment was not found for the given owner, repository, and number",
+        },
+      });
+    }
+    if (status === 429 || (status === 403 && isRateLimitResponse(headers))) {
+      throw new GitHubApiError({
+        operation: op.operation,
+        resource: op.resource,
+        status,
+        runFailure: { code: "rate_limited", message: "github rate limit reached; no write was retried" },
+      });
+    }
+    throw new RejectedGitHubWriteError({ operation: op.operation, resource: op.resource, status });
+  }
 }
 
 interface GetOperation {

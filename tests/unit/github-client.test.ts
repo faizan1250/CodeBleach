@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { GitHubApiError, createGitHubClient, resolveGitHubToken } from "../../src/github/client.ts";
+import {
+  AmbiguousGitHubWriteError,
+  GitHubApiError,
+  RejectedGitHubWriteError,
+  createGitHubClient,
+  resolveGitHubToken,
+} from "../../src/github/client.ts";
 import type { GitHubTransport, GitHubTransportResponse } from "../../src/github/client.ts";
 
 interface SentCall {
@@ -286,5 +292,99 @@ describe("github client authenticated user", () => {
   test("rejects malformed user payload", async () => {
     const { api } = clientWith(() => Promise.resolve(ok({ login: "" })));
     await expect(api.getAuthenticatedLogin()).rejects.toMatchObject({ code: "INTERNAL" });
+  });
+});
+
+describe("github client review comment writes", () => {
+  const writeInput = { owner: "o", repo: "r", number: 1, commitId: HEAD, path: "src/a.ts", line: 10, body: "note" };
+
+  test("posts one review comment pinned to head sha", async () => {
+    const { api, transport } = clientWith(() => Promise.resolve(ok({ id: 101 })));
+    await expect(api.createReviewComment(writeInput)).resolves.toEqual({ id: 101 });
+    expect(transport.calls).toEqual([
+      {
+        route: "POST /repos/{owner}/{repo}/pulls/{pull_number}/comments",
+        parameters: {
+          owner: "o",
+          repo: "r",
+          pull_number: 1,
+          commit_id: HEAD,
+          path: "src/a.ts",
+          line: 10,
+          side: "RIGHT",
+          body: "note",
+        },
+      },
+    ]);
+  });
+
+  test("maps write auth failure without retry", async () => {
+    const { api, transport, slept } = clientWith(() => Promise.reject(httpError(401)));
+    const error = await api.createReviewComment(writeInput).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(GitHubApiError);
+    expect(error).toMatchObject({ runFailure: { code: "permission_denied" } });
+    expect(transport.calls).toHaveLength(1);
+    expect(slept).toEqual([]);
+  });
+
+  test("maps write rate limit without retry", async () => {
+    const { api, transport, slept } = clientWith(() => Promise.reject(httpError(429, { "retry-after": "1" })));
+    const error = await api.createReviewComment(writeInput).catch((e: unknown) => e);
+    expect(error).toMatchObject({ runFailure: { code: "rate_limited" } });
+    expect(transport.calls).toHaveLength(1);
+    expect(slept).toEqual([]);
+  });
+
+  test("maps validation rejection as definitive", async () => {
+    const { api, transport, slept } = clientWith(() => Promise.reject(httpError(422)));
+    const error = await api.createReviewComment(writeInput).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RejectedGitHubWriteError);
+    expect(transport.calls).toHaveLength(1);
+    expect(slept).toEqual([]);
+  });
+
+  test("maps server error as ambiguous without retry", async () => {
+    const { api, transport, slept } = clientWith(() => Promise.reject(httpError(500)));
+    const error = await api.createReviewComment(writeInput).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AmbiguousGitHubWriteError);
+    expect(transport.calls).toHaveLength(1);
+    expect(slept).toEqual([]);
+  });
+
+  test("maps write timeout as ambiguous without retry", async () => {
+    const { api, transport } = clientWith(() => Promise.reject({ name: "AbortError" }));
+    const error = await api.createReviewComment(writeInput).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AmbiguousGitHubWriteError);
+    expect(transport.calls).toHaveLength(1);
+  });
+
+  test("maps malformed create response as ambiguous", async () => {
+    const { api } = clientWith(() => Promise.resolve(ok({ id: "not-an-int" })));
+    const error = await api.createReviewComment(writeInput).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AmbiguousGitHubWriteError);
+  });
+
+  test("deletes by comment id", async () => {
+    const { api, transport } = clientWith(() => Promise.resolve(ok({})));
+    await expect(api.deleteReviewComment({ owner: "o", repo: "r", commentId: 42 })).resolves.toBeUndefined();
+    expect(transport.calls).toEqual([
+      {
+        route: "DELETE /repos/{owner}/{repo}/pulls/comments/{comment_id}",
+        parameters: { owner: "o", repo: "r", comment_id: 42 },
+      },
+    ]);
+  });
+
+  test("treats delete of absent comment as success", async () => {
+    const { api, transport } = clientWith(() => Promise.reject(httpError(404)));
+    await expect(api.deleteReviewComment({ owner: "o", repo: "r", commentId: 42 })).resolves.toBeUndefined();
+    expect(transport.calls).toHaveLength(1);
+  });
+
+  test("maps delete server error as ambiguous", async () => {
+    const { api, transport } = clientWith(() => Promise.reject(httpError(500)));
+    const error = await api.deleteReviewComment({ owner: "o", repo: "r", commentId: 42 }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AmbiguousGitHubWriteError);
+    expect(transport.calls).toHaveLength(1);
   });
 });
