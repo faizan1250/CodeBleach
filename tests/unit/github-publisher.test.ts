@@ -394,6 +394,20 @@ describe("github publisher creates", () => {
     expect(kinds(calls)).not.toContain("delete");
   });
 
+  test("run-level create failure suppresses reconciliation-skipped noise", async () => {
+    const denied = new GitHubApiError({
+      operation: "create review comment",
+      status: 403,
+      runFailure: { code: "permission_denied", message: "nope" },
+    });
+    const stale = ownedRecord(7, "old-fp", { commitId: OLD });
+    const { result, calls } = await runPublish({ listResults: [[stale]], createResults: [denied] }, [finding()], {
+      context: { reconcileStale: true },
+    });
+    expect(result.runFailures).toEqual([{ code: "permission_denied", message: "nope" }]);
+    expect(kinds(calls)).not.toContain("delete");
+  });
+
   test("rate limit stops the run", async () => {
     const limited = new GitHubApiError({
       operation: "create review comment",
@@ -453,6 +467,18 @@ describe("github publisher creates", () => {
     expect(result.published).toBe(0);
     expect(calls.filter((call) => call.kind === "create")).toHaveLength(1);
     expect(kinds(calls)).not.toContain("delete");
+  });
+
+  test("ambiguous write with failed refresh keeps the refresh cause", async () => {
+    const timeout = new AmbiguousGitHubWriteError({ operation: "create review comment", status: undefined });
+    const { result, calls } = await runPublish(
+      { listResults: [[], apiError("rate_limited")], createResults: [timeout] },
+      [finding()],
+    );
+    expect(result.runFailures).toEqual([
+      { code: "ambiguous_post_outcome", message: expect.stringContaining("rate_limited") },
+    ]);
+    expect(calls.filter((call) => call.kind === "create")).toHaveLength(1);
   });
 });
 
@@ -560,6 +586,24 @@ describe("github publisher reconciliation", () => {
     );
     expect(calls.filter((call) => call.kind === "delete")).toHaveLength(1);
     expect(result.runFailures).toEqual([{ code: "reconciliation_incomplete", message: expect.any(String) }]);
+  });
+
+  test("ambiguous delete with failed refresh keeps the refresh cause", async () => {
+    const first = ownedRecord(1, "old-a", { commitId: OLD });
+    const second = ownedRecord(2, "old-b", { commitId: OLD });
+    const failedRefresh = new AmbiguousGitHubWriteError({ operation: "delete review comment", status: 500 });
+    const { result, calls } = await runPublish(
+      {
+        listResults: [[first, second], apiError("rate_limited")],
+        deleteResults: [failedRefresh],
+      },
+      [],
+      { context: { reconcileStale: true } },
+    );
+    expect(calls.filter((call) => call.kind === "delete")).toHaveLength(1);
+    expect(result.runFailures).toEqual([
+      { code: "reconciliation_incomplete", message: expect.stringContaining("rate_limited") },
+    ]);
   });
 
   test("delete failure stops cleanup", async () => {

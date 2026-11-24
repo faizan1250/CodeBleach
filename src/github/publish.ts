@@ -208,7 +208,9 @@ async function publishAccepted(
       if (error instanceof AmbiguousGitHubWriteError) {
         // The POST may have applied: exactly one inventory refresh decides.
         // A verified same-identity comment counts as confirmed; anything
-        // else stops all further writes and reconciliation.
+        // else stops all further writes and reconciliation. A failed refresh
+        // keeps the stop but carries the refresh cause (closed code only).
+        let refreshFailure: PublishRunFailure | undefined;
         const confirmed = await refreshInventory(api, meta).then(
           (refresh) =>
             refresh.find(
@@ -217,12 +219,18 @@ async function publishAccepted(
                 isCurrentLocation(record, candidate, meta) &&
                 parseMarkerKeys(record.body).includes(candidate.markerKey),
             ),
-          () => undefined,
+          (error) => {
+            if (error instanceof GitHubApiError) refreshFailure = error.runFailure;
+            return undefined;
+          },
         );
         if (confirmed === undefined) {
           runFailures.push({
             code: "ambiguous_post_outcome",
-            message: "a comment create outcome is ambiguous; stopped to prefer a missing comment over a duplicate",
+            message:
+              refreshFailure === undefined
+                ? "a comment create outcome is ambiguous; stopped to prefer a missing comment over a duplicate"
+                : `a comment create outcome is ambiguous; inventory refresh failed (${refreshFailure.code}); stopped to prefer a missing comment over a duplicate`,
           });
           stopped = true;
           skipped += 1;
@@ -259,10 +267,14 @@ async function publishAccepted(
   const deletable = collectDeletableRoots(inventory, currentKeys, confirmedKeys, canonicalIds, isOwned);
   if (deletable.length === 0) return { published, skipped, failures, runFailures };
   if (context?.reconcileStale !== true || !publishClean) {
-    runFailures.push({
-      code: "reconciliation_skipped_incomplete_run",
-      message: "stale comment reconciliation skipped: cleanup gate closed or publish pass incomplete",
-    });
+    // A create-pass run failure already explains the skip; adding a second
+    // diagnostic here is noise, so record the skip only when unexplained.
+    if (runFailures.length === 0) {
+      runFailures.push({
+        code: "reconciliation_skipped_incomplete_run",
+        message: "stale comment reconciliation skipped: cleanup gate closed or publish pass incomplete",
+      });
+    }
     return { published, skipped, failures, runFailures };
   }
   // Separate freshness recheck immediately before the first DELETE: pacing
@@ -275,12 +287,15 @@ async function publishAccepted(
   const childrenById = indexReplies(inventory);
   let deletes = 0;
   let incompleteRecorded = false;
-  const recordIncomplete = (): void => {
+  const recordIncomplete = (cause?: PublishRunFailure): void => {
     if (!incompleteRecorded) {
       incompleteRecorded = true;
       runFailures.push({
         code: "reconciliation_incomplete",
-        message: "stale comment reconciliation incomplete; some owned comments remain",
+        message:
+          cause === undefined
+            ? "stale comment reconciliation incomplete; some owned comments remain"
+            : `stale comment reconciliation incomplete; some owned comments remain (inventory refresh failed: ${cause.code})`,
       });
     }
   };
@@ -304,12 +319,18 @@ async function publishAccepted(
     } catch (error) {
       writesSoFar += 1;
       if (error instanceof AmbiguousGitHubWriteError) {
+        // Fail closed on refresh failure (assume still there), but keep the
+        // refresh cause (closed code only) instead of swallowing it.
+        let refreshFailure: PublishRunFailure | undefined;
         const stillThere = await refreshInventory(api, meta).then(
           (refresh) => refresh.some((record) => record.id === root.id),
-          () => true,
+          (refreshError) => {
+            if (refreshError instanceof GitHubApiError) refreshFailure = refreshError.runFailure;
+            return true;
+          },
         );
         if (stillThere) {
-          recordIncomplete();
+          recordIncomplete(refreshFailure);
           break;
         }
         deletes += 1;
