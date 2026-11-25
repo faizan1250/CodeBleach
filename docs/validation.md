@@ -173,11 +173,16 @@ cancellation is programmatic-only in v1.
 
 ## Modes
 
-Live `--dry-run`: review → deterministic validation → publish skipped.
-Live without `--dry-run`: validation runs, then the Phase 7 publisher stub
-still fails `NOT_IMPLEMENTED` (no GitHub calls). `--no-llm`: review,
-validation, and publish are skipped with explicit reasons (offline preview).
-Demo uses its own canned engine and never touches git or the network.
+Live `--dry-run`: review → deterministic validation → publish skipped (no
+GitHub calls, no token required). Live without `--dry-run`: validation
+runs, then the GitHub publisher posts accepted findings as per-finding
+inline review comments pinned to the current head SHA (ADR 0045); a stale
+head posts zero comments and records the matching run-level failure.
+`--no-llm`: review, validation, and publish are skipped with explicit
+reasons (offline preview). Demo uses its own canned engine and never
+touches git or the network. Publication is accepted-only and anchored to
+`derivedTarget` in every mode; rejected/inconclusive findings and
+withheld advisories never reach a write call.
 
 ## Inferred conventions (Phase 6, implemented behind `--convention-advisory`, default off; eval gate not passed)
 

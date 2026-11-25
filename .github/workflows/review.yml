@@ -47,9 +47,11 @@ jobs:
         if: steps.check-key.outputs.has_key == 'true'
         run: |
           HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
           if ! git cat-file -e "$HEAD_SHA" 2>/dev/null; then
-            git fetch --no-tags --depth=1 origin "$HEAD_SHA"
+            git fetch --no-tags --depth=1 origin "$HEAD_SHA" || git fetch --no-tags --depth=1 origin "pull/${PR_NUMBER}/head"
           fi
+          git cat-file -e "$HEAD_SHA"
       - name: Set up Bun
         if: steps.check-key.outputs.has_key == 'true'
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -74,6 +76,9 @@ jobs:
             --head "${{ github.event.pull_request.head.sha }}" \
             --repo . \
             --out .reviewer-out
+      - name: Publish job summary
+        if: always() && steps.check-key.outputs.has_key == 'true'
+        run: bun run scripts/job-summary.ts --artifact .reviewer-out/run.json
       - name: Upload run artifact
         if: always() && steps.check-key.outputs.has_key == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
