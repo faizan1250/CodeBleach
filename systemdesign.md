@@ -147,15 +147,82 @@ Ordered; cheap/deterministic first. Any hard failure → reject. Deterministic-o
 
 ### 4.5 GitHub Publisher (`src/github`)
 
-> P7-00 (ADR 0045) supersedes this sketch: per-finding `pulls.createReviewComment` POSTs (`line` + `side: "RIGHT"`, pinned `commit_id`), marker lifecycle, 10-create/10-delete budgets, reply-safe reconciliation gated on `PublishContext.reconcileStale`, required `PublishResult.runFailures`, and fork/Dependabot skips are normative. Full rewrite of this section lands in P7-06.
+As-built across P7-00–P7-06 (normative: ADR 0045; plan
+`implementation-phase7.md` §§4–5, §7.5):
 
-- One `pulls.createReview` call (`event: "COMMENT"`) with `comments[]` + summary body; `commit_id` = head SHA.
-- If a comment 422s (bad position), drop it and list it in the summary instead of failing the review.
-- **Dedupe:** each comment body ends with hidden marker `<!-- reviewer:fp=<fingerprint> -->`. On `synchronize`, list existing review comments, skip fingerprints already posted. Never edit/delete human comments. Outdated comments are left to GitHub's outdated handling; optionally resolve own stale threads later.
-- Before publishing, re-fetch PR head SHA; if changed → abort (a newer run will handle it).
-- Cap comments per review (config `max_findings`, default 10). Overflow goes in summary.
-- Rate limits/5xx: Octokit retry+throttling plugins, bounded retries with jitter. Secondary rate limit → back off and fail open.
-- Summary: counts, skipped files + reasons, config warnings, run id. No noise when zero findings (short "no issues found" summary).
+- One inline review comment per finding via `pulls.createReviewComment`
+  (`path`, `line`, `side: "RIGHT"`, `commit_id` = current `headSha`). No
+  review object, no batched `createReview`, no review `event`. Up to 10
+  separate notifications per run is the accepted MVP trade-off.
+- Target is `derivedTarget` only, cross-checked against the same-run
+  `DiffResult` before any API call: exact path match, file not
+  deleted/binary/generated/ignored/too-large/skipped, `side === "RIGHT"`,
+  line a positive safe integer in `commentableLines`,
+  `diff.headSha === meta.headSha`. Anything absent, stale, or
+  non-commentable is never posted.
+- Accepted-only: `Publisher.publish()` takes `AcceptedValidatedFinding[]`;
+  `isAcceptedFinding()` stays the fail-closed guard (status alone never
+  passes). Rejected/inconclusive findings and convention advisories
+  (default off) never reach a write call.
+- Every comment ends with a hidden marker
+  `<!-- codebleach:finding:v1:<sha256> -->` over the canonical tuple
+  (owner, repo, PR number, finding fingerprint). Same marker on the same
+  head/path/line suppresses duplicates; the same fingerprint on a new head
+  posts first, then reconciles the old CodeBleach-owned comment after
+  success. The SHA-1 finding fingerprint is file/symbol/category/anchor
+  identity, not semantic identity: renames, moves, or anchor edits mint a
+  new marker and the older one is treated as obsolete.
+- Same-run candidates sharing one marker key are all withheld with
+  `marker_key_collision`; none may suppress another.
+- Budgets: at most 10 comment-create POST attempts (an ambiguous attempt
+  consumes one; an already-present duplicate consumes none) and at most 10
+  cleanup DELETEs. Excess stale comments persist with
+  `reconciliation_incomplete`.
+- Retries: idempotent GETs only, at most 3 attempts with bounded backoff
+  inside a hard 10-second wait budget. No generic retries for writes. After
+  a create-POST timeout/reset/retryable-5xx, one bounded inventory refresh
+  decides: verified same-identity comment counts as confirmed, otherwise
+  record `ambiguous_post_outcome` and stop all further writes and cleanup.
+- Inventory: paginated review-comment listing, at most 20 pages × 100
+  records. A remaining next page fails closed with
+  `comment_inventory_incomplete`: no creates, no deletes.
+- Mutating requests are serialized with ≥1,000 ms between consecutive
+  writes (injectable clock/sleeper; verified without real delays in tests).
+- Freshness: before any write, re-fetch the PR and require open state,
+  `base.sha`/`head.sha` equal to `meta`, and owner/repo/number match; any
+  mismatch posts zero comments with the matching `stale_*`/`pr_closed`/
+  `pr_identity_mismatch` failure. A separate recheck runs immediately
+  before the first DELETE of a reconciliation phase.
+- Deletion gate: `PublishContext.reconcileStale` may be true only when
+  context is complete, review status is complete, every submitted unit
+  completed (`unitsFailed === 0`), and validation completed with zero
+  inconclusive findings — run-wide and fail-closed; otherwise publish
+  confirmed findings but delete nothing and record
+  `reconciliation_skipped_incomplete_run`. Only comments verifiably authored
+  by the authenticated publisher identity are ever deleted, and never a
+  root with a non-CodeBleach/unknown-author reply (whole thread preserved,
+  `reconciliation_incomplete` recorded).
+- `PublishResult.runFailures` (required, `[]` when none) carries the closed
+  11-code union for PR-wide conditions; zero-finding runs still report
+  permission/rate-limit/stale-head/API outages there. Legacy schema-v2
+  artifacts without the field normalize to `[]`; schema stays v2.
+- `PrMeta` comes from validated Action env (`GITHUB_TOKEN`,
+  `GITHUB_REPOSITORY`, `CODEBLEACH_PR_NUMBER/BASE_SHA/HEAD_SHA`, full
+  40-hex SHAs); the `unknown` fallback is forbidden on the live path and
+  token/meta preflight runs before model work. Demo and `--no-llm` stay
+  offline; `--dry-run` makes zero GitHub calls and needs no token. Token
+  enters only via the GitHub-client construction boundary, never
+  `PrMeta`/artifacts/comments/logs.
+- Same-repository, non-Dependabot PRs only. Fork PRs (incl. null/deleted
+  head repos) and Dependabot PRs are skipped with clear diagnostics; no
+  secrets reach fork jobs; never `pull_request_target`; the reviewer runs
+  from the trusted base while the head stays Git data only.
+- The workflow appends a concise result to `$GITHUB_STEP_SUMMARY` (reviewed
+  head short SHA, accepted/published/skipped/failed counts, stable
+  run-level codes) and emits `::warning::` for publish/stale/rate-limit
+  incompleteness, `::error::` only for invalid configuration or internal
+  defects. Only redacted `run.json` fields are read; no finding text, raw
+  API messages, or PR-controlled strings are interpolated.
 
 ### 4.6 Config (`src/config`) — see §6.
 
@@ -431,13 +498,15 @@ Still open: Go allowance/billing-source surfacing beyond `raw`.
 
 ## 8. GitHub integration & security
 
-- Trigger: `pull_request` types `opened, synchronize, reopened`. **Never `pull_request_target`.** Fork PRs get no secrets under `pull_request`; skip them with a notice (personal repos: acceptable).
+As-built by Phase 7 (workflow `.github/workflows/review.yml`, ADR 0045):
+
+- Trigger: `pull_request` types `opened, synchronize, reopened`. **Never `pull_request_target`.** Same-repository, non-Dependabot PRs only: a job-level guard (`head.repo.full_name == github.repository`, both Dependabot checks) skips fork and Dependabot PRs before any secret use; fork jobs get a read-only token and no secrets.
 - Permissions: `contents: read`, `pull-requests: write`. Nothing else.
-- `concurrency: { group: reviewer-${{ github.event.pull_request.number }}, cancel-in-progress: true }`.
-- Checkout PR head SHA with `persist-credentials: false`, `fetch-depth: 0`. **Never run `bun install`, scripts, tests or builds from the reviewed repo.** The reviewer is installed from its own repo/action. Subprocesses: only `git` (and optionally `rg`), via `Bun.spawn` with an args array (no shell strings), timeouts, output size caps.
-- Secrets: `OPENCODE_API_KEY` via GitHub secrets, never logged (logger redacts known secret values + patterns).
-- Failure policy: reviewer failure must not block merging by default — log, upload artifact, exit 0 unless misconfiguration.
-- Upload `.reviewer-out/` as a workflow artifact (always, retention 7 days).
+- `concurrency: { group: codebleach-pr-<PR number>, cancel-in-progress: true }`; job `timeout-minutes: 25`.
+- Checkout the trusted **base** SHA with `persist-credentials: false`, `fetch-depth: 0`; fetch the head commit object by exact SHA (raw-SHA fetch with a `pull/<n>/head` fallback, verified via `cat-file`) as Git data only — the head is never checked out and PR-head code is never executed. **Never run `bun install`, scripts, tests or builds from the reviewed code.** Subprocesses: only `git` (and optionally `rg`), via `Bun.spawn` with an args array (no shell strings), timeouts, output size caps.
+- Secrets: `OPENCODE_API_KEY` + `CODEBLEACH_ALLOW_MUSE_SPARK_TRAINING=true` (Not-ZDR consent) and `GITHUB_TOKEN` via GitHub secrets, scoped to the review step only; a pre-step skips gracefully with a summary notice when the API key is unset. Never logged (logger redacts known secret values + patterns); token never enters `PrMeta`, artifacts, comments, or logs.
+- Failure policy: expected reviewer/provider outages must not block merging — log, upload artifact, exit 0 — but the run must not look green/empty: the always-run summary step reports the redacted counts and the stable failure codes. Invalid configuration exits non-zero; internal defects stay `INTERNAL`.
+- Upload `.reviewer-out/` as a workflow artifact (always when a live run was attempted, retention 7 days). The run artifact is diagnostic data only, never an executable input.
 
 ---
 
@@ -453,7 +522,7 @@ Still open: Go allowance/billing-source surfacing beyond `raw`.
 ## 10. Project structure
 
 ```
-.github/workflows/     ci.yml (tool tests), review.yml (later)
+.github/workflows/     ci.yml (tool tests), review.yml (PR review + publish)
 docs/adr/              decision notes
 prompts/review/ prompts/validation/
 src/
@@ -466,7 +535,7 @@ src/
   llm/                 constants.ts, training-gate.ts, preflight.ts
   validate/            engine.ts, deterministic.ts, llm.ts, dedupe.ts
   providers/           types.ts, fake.ts, json.ts, opencode.ts
-  github/              client.ts, publish.ts, fingerprint.ts
+  github/              client.ts, publish.ts, comments.ts, pr-meta.ts
   types/               diff.ts context.ts finding.ts review.ts validation.ts provider.ts index.ts
   utils/               tokens.ts, redact.ts, spawn.ts, glob.ts
 tests/{unit,integration,fixtures}/
@@ -512,7 +581,7 @@ evals/                 cases/, run.ts   (Phase 8)
 | 4 Review Engine | OpenCode spike → provider, prompts, Zod parse, repair retry, result/usage/artifact | Done (P4-10, ADR 0020): deterministic seeded-bug smoke green, garbage/incomplete handled, suite + types green, x-plat CI |
 | 5 Validation | Deterministic checks, same-run dedupe (done, deterministic-only v1, ADRs 0028–0038; no LLM check) | Hallucinated file/line/evidence rejected in tests |
 | 6 Repo awareness | Rules → prompt, path overrides, inferred conventions (P6-00..P6-05 implemented behind `--convention-advisory`, default off — ADRs 0039–0044, plan `implementation-phase6.md` §§4–13 + §22 record) | Explicit rules affect prompts; inferred advisory-only via separate pass (isolated §10.2 policy, §12 merge order + §§10–12 shared-core entry per ADR 0043, §11 verified-head-interval conflict, §4.2 handoff envelope; transient-only diagnostics, run-scoped shared limiter, no cache; closure: bounded sampler windows, default-off publish boundary, gate/metrics integrity in §22), never overrides; Phase 6 closure pending the live §16.5 eval gate (not passed yet) |
-| 7 GitHub | Octokit publisher, workflow, dedupe markers, SHA recheck (not started; no runtime exists — Phase 6 advisory publish opt-in does not change the stub) | Real PR gets correct inline comments, no dupes on re-push |
+| 7 GitHub | Octokit publisher, workflow, dedupe markers, SHA recheck (done P7-00–P7-06: per-comment `createReviewComment` POSTs, marker lifecycle + collision fail-closed, 10/10 budgets, reply-safe reconciliation on the zero-inconclusive gate, required `runFailures`, fork/Dependabot skips, job summary + annotations; disposable-PR smoke procedure in `docs/disposable-pr-smoke.md`) | Real PR gets correct inline comments, no dupes on re-push |
 | 8 Eval/optimize | Eval harness, baselines, caching, incremental review (not started) | Precision/cost tracked per change |
 
 ---

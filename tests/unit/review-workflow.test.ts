@@ -84,6 +84,22 @@ describe("p7-05 review workflow", () => {
     expect(text).toContain("if: always()");
   });
 
+  test("falls back to the pull refspec when raw SHA fetch fails", async () => {
+    const text = await workflow();
+    expect(text).toContain("PR_NUMBER=");
+    expect(text).toContain(expr("github.event.pull_request.number"));
+    expect(text).toContain(["pull/", "{PR_NUMBER}/head"].join("$"));
+    expect(text).toContain('git fetch --no-tags --depth=1 origin "$HEAD_SHA" || git fetch');
+  });
+
+  test("publishes an always-run job summary without secrets", async () => {
+    const text = await workflow();
+    expect(text).toContain("Publish job summary");
+    expect(text).toContain("always() && steps.check-key.outputs.has_key == 'true'");
+    expect(text).toContain("bun run scripts/job-summary.ts --artifact .reviewer-out/run.json");
+    expect(text).not.toContain("continue-on-error");
+  });
+
   test("skips gracefully with a notice when the API key is missing or empty", async () => {
     const text = await workflow();
     expect(text).toContain("Check API key availability");

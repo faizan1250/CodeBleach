@@ -2,7 +2,9 @@
 
 Date: 2026-11-24
 
-Status: Accepted (locks the Phase 7 publisher contract; no runtime publisher yet).
+Status: Accepted and implemented as-built across P7-01–P7-06 with no
+contract change (this note added in P7-06; the decision text below is
+unchanged).
 
 Preserves ADRs 0001–0044; rewrites none. Supersedes the stale `systemdesign.md`
 §4.5 sketch (single batched `pulls.createReview`): the per-comment design below
@@ -132,9 +134,10 @@ dependency, `PublishResult` is `{ published, skipped, failures }`.
   this ticket); additive on disk (schema v2 kept; legacy normalizes to `[]`).
 - `isAcceptedFinding`, advisory withholding, demo/`--no-llm`/`--dry-run`
   semantics, and Phase 6 acceptance claims are unchanged.
-- Deferred by ticket: Octokit pin + client seam (P7-01), renderer + target
-  gate (P7-02), publisher + reconciliation (P7-03), CLI wiring + fallback
-  removal (P7-04), workflow (P7-05), §4.5 rewrite + smoke (P7-06).
+- Deferred by ticket: Octokit pin + client seam (P7-01, done), renderer +
+  target gate (P7-02, done), publisher + reconciliation (P7-03, done), CLI
+  wiring + fallback removal (P7-04, done), workflow (P7-05, done), §4.5
+  rewrite + smoke (P7-06, this ticket).
 - Compatibility inventory (inspected; updated where it constructs or asserts
   a result): `src/types/publish.ts`, `src/core/contracts.ts`,
   `src/core/pipeline.ts`, `src/core/run-artifact.ts`, `src/core/demo.ts`,

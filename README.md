@@ -43,9 +43,16 @@ workspace training-data toggle). Findings are deterministically validated
 (diff/path/location/evidence/provenance/policy — no model calls, see
 `docs/validation.md`): a live `--dry-run` completes with
 accepted/rejected/inconclusive counts (details in `.reviewer-out/run.json`)
-and skips publishing. Without `--dry-run` a live run validates, then still
-ends at the Phase 7 publisher stub with `NOT_IMPLEMENTED` (no GitHub calls).
-`--no-llm` remains the network-free preview: `review --dry-run --no-llm`
+and skips publishing. Without `--dry-run` a live run validates, then
+publishes accepted findings as inline PR comments pinned to the current
+head SHA (see `docs/validation.md` Modes and ADR 0045). Live publish
+requires `GITHUB_TOKEN` plus `GITHUB_REPOSITORY`,
+`CODEBLEACH_PR_NUMBER`, `CODEBLEACH_BASE_SHA`, and
+`CODEBLEACH_HEAD_SHA`; a stale head posts zero comments. The GitHub
+workflow (`.github/workflows/review.yml`) runs this on same-repository,
+non-Dependabot PRs only — fork and Dependabot PRs are skipped — and
+appends a redacted result to the job summary. `--no-llm` remains the
+network-free preview: `review --dry-run --no-llm`
 records review/validation as skipped and exits 0. Validation verifies
 provenance and support; it does not prove a finding is semantically correct.
 
@@ -56,7 +63,7 @@ Demo and `--no-llm` runs ignore the flag. The labeled usefulness gate has
 not passed yet, so routine use is not recommended. Advisory generation
 never implies publication: advisories are withheld from the publisher by
 default (count-only diagnostic); publication needs a separate explicit
-pipeline opt-in, and the Phase 7 publisher is still a stub.
+pipeline opt-in that the workflow never sets.
 
 ## Demo (offline, no network or secrets)
 
@@ -100,8 +107,10 @@ manual-only, Not-ZDR) runs the same shape against the live model; see
 - Phase 4 plan: `implementation-phase4.md`
 - Phase 5 plan: `implementation-phase5.md`
 - Phase 6 plan + as-built record: `implementation-phase6.md`
+- Phase 7 plan: `implementation-phase7.md`
 - Validation (deterministic checks, codes, `run.json` v2): `docs/validation.md`
-- Decisions: `docs/adr/` (Phase 4 freeze: `0020-phase4-freeze.md`; Phase 5 deterministic-only: `0028-phase5-deterministic-validation.md`, `0029-phase5-result-contract.md`, `0030-phase5-cli-docs-hardening.md`)
+- Disposable-PR live smoke procedure (manual-only): `docs/disposable-pr-smoke.md`
+- Decisions: `docs/adr/` (Phase 4 freeze: `0020-phase4-freeze.md`; Phase 5 deterministic-only: `0028-phase5-deterministic-validation.md`, `0029-phase5-result-contract.md`, `0030-phase5-cli-docs-hardening.md`; Phase 7 publisher: `0045-phase7-github-publisher.md`)
 
 ## License
 
